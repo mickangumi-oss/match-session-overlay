@@ -1,0 +1,1095 @@
+:root {
+  color-scheme: dark;
+  --stats-font-family: Impact, "Arial Black", "Bahnschrift Condensed", sans-serif;
+  --stats-font-style: normal;
+  font-family: var(--stats-font-family);
+  --font-scale: 1;
+  --panel-opacity: 0.94;
+  --text: #f7f8ff;
+  --muted: color-mix(in srgb, var(--text) 67%, transparent);
+  --accent: var(--text);
+  --pink: #ff3d8d;
+  --blue: #43a8ff;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: transparent;
+  color: var(--text);
+}
+
+/* OBS loads this same document over the local overlay server. Keep its
+   viewport at the overlay preset size so the Browser Source has the same
+   frame as the compact Electron overlay, even when OBS defaults to 800x600. */
+body.remote-overlay {
+  width: 320px;
+  height: 92px;
+}
+
+.stats-window {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  clip-path: polygon(0 8px, 8px 0, calc(100% - 16px) 0, 100% 14px, 100% 100%, 12px 100%, 0 calc(100% - 12px));
+  background:
+    radial-gradient(circle at 6% 87%, rgba(255, 61, 141, 0.17) 0 1px, transparent 2px),
+    radial-gradient(circle at 10% 82%, rgba(255, 61, 141, 0.09) 0 3px, transparent 4px),
+    repeating-linear-gradient(165deg, transparent 0 25px, rgba(255, 255, 255, 0.018) 26px 27px),
+    rgba(8, 11, 18, var(--panel-opacity));
+  background-size: 41px 43px, 83px 79px, auto, auto;
+  box-shadow: 0 16px 44px rgba(0, 0, 0, 0.38);
+}
+
+.stats-window::before {
+  position: absolute;
+  z-index: 1;
+  top: 0;
+  left: -6px;
+  width: 86px;
+  height: 5px;
+  content: "";
+  background: linear-gradient(90deg, var(--pink) 0 54%, var(--accent) 54% 76%, #43d8ff 76%);
+  transform: skewX(-28deg);
+  pointer-events: none;
+}
+
+.stats-window::after {
+  position: absolute;
+  right: -5px;
+  bottom: 7px;
+  width: 48px;
+  height: 5px;
+  content: "";
+  background: repeating-linear-gradient(90deg, var(--accent) 0 6px, transparent 6px 10px);
+  opacity: 0.55;
+  transform: rotate(-7deg);
+  pointer-events: none;
+}
+
+.stats-window.overlay {
+  border-color: rgba(255, 255, 255, 0.12);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+}
+
+.stats-window.overlay:not(.locked) {
+  cursor: move;
+  -webkit-app-region: no-drag;
+  user-select: none;
+  box-shadow:
+    inset 0 0 0 2px rgba(67, 168, 255, 0.72),
+    0 8px 24px rgba(0, 0, 0, 0.28);
+}
+
+.stats-window:not(.overlay) {
+  cursor: move;
+  -webkit-app-region: no-drag;
+  user-select: none;
+}
+
+.stats-window:not(.overlay) button {
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+
+.stats-window:not(.overlay) .drag-strip {
+  -webkit-app-region: no-drag;
+}
+
+.stats-window.overlay:not(.locked) .drag-strip {
+  -webkit-app-region: no-drag;
+}
+
+.stats-window.overlay:not(.locked) button {
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+
+.stats-window.transparent {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+}
+
+.stats-window.overlay.transparent:not(.locked) {
+  background: rgba(8, 11, 18, 0.08);
+  box-shadow: inset 0 0 0 2px rgba(67, 168, 255, 0.72);
+}
+
+.stats-window.transparent::before,
+.stats-window.transparent::after {
+  display: none;
+}
+
+.stats-window.locked .window-actions {
+  opacity: 0.28;
+}
+
+.drag-strip {
+  display: flex;
+  height: 30px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 8px 0 13px;
+  color: rgba(255, 255, 255, 0.5);
+  font: 800 9px/1 var(--stats-font-family);
+  font-style: normal;
+  letter-spacing: 0.17em;
+  text-shadow: 0 1px 3px #000;
+  -webkit-app-region: drag;
+}
+
+.drag-strip > span {
+  /* The header is a fixed HUD mark; the user-selected font applies only to
+     live stats values and chart labels. */
+  font-family: Impact, "Arial Black", "Bahnschrift Condensed", sans-serif;
+  font-style: normal;
+}
+
+.drag-strip button {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 2px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.58);
+  cursor: pointer;
+  font: 18px/1 system-ui, sans-serif;
+  -webkit-app-region: no-drag;
+}
+
+.window-actions {
+  display: flex;
+  gap: 2px;
+  -webkit-app-region: no-drag;
+}
+
+.drag-strip button:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.match-tabs {
+  display: flex;
+  height: 27px;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  padding-inline: 10px;
+}
+
+.match-tabs button {
+  min-width: 64px;
+  padding: 4px 10px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.48);
+  cursor: pointer;
+  font: 750 10px/1.2 inherit;
+  text-shadow: 0 1px 3px #000;
+}
+
+.match-tabs button:hover {
+  color: #fff;
+}
+
+.match-tabs button.active {
+  border-bottom-color: var(--pink);
+  background: linear-gradient(100deg, rgba(255, 61, 141, 0.2), rgba(67, 168, 255, 0.08));
+  color: #fff;
+}
+
+.summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 1px minmax(0, 1fr) 1px minmax(0, 1fr);
+  height: 42px;
+  align-items: center;
+  justify-content: center;
+  column-gap: 10px;
+  padding-inline: 16px;
+  white-space: nowrap;
+}
+
+.summary strong {
+  font-family: var(--stats-font-family);
+  font-size: min(calc(23px * var(--font-scale)), 7vw);
+  font-style: var(--stats-font-style);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  font-kerning: none;
+  letter-spacing: 0.02em;
+  text-shadow:
+    0 2px 2px #000,
+    0 0 7px rgba(0, 0, 0, 0.95);
+}
+
+.metric-group {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  justify-items: center;
+  align-content: center;
+  gap: 1px;
+}
+
+.record-group {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  align-content: center;
+}
+
+.record-labels,
+.record-values {
+  display: grid;
+  grid-template-columns: minmax(1ch, 1fr) 0.7ch minmax(1ch, 1fr);
+  align-items: center;
+  text-align: center;
+}
+
+.record-labels {
+  color: var(--muted);
+  font: 750 min(calc(10px * var(--font-scale)), 3vw)/1 inherit;
+  letter-spacing: 0.06em;
+  text-shadow: 0 1px 3px #000;
+}
+
+.record-labels span:last-child {
+  grid-column: 3;
+}
+
+.summary small {
+  color: var(--muted);
+  font: 750 min(calc(10px * var(--font-scale)), 3vw)/1 inherit;
+  letter-spacing: 0.06em;
+  text-shadow:
+    0 1px 2px #000,
+    0 0 5px #000;
+}
+
+.accent {
+  color: var(--accent);
+}
+
+.divider {
+  width: 2px;
+  height: 20px;
+  background: var(--pink);
+  opacity: 0.55;
+  transform: skewX(-15deg);
+}
+
+.chart-area {
+  position: relative;
+  height: calc(100% - 99px);
+  min-height: 48px;
+  padding: 2px 15px 12px;
+}
+
+.chart-area canvas {
+  width: 100%;
+  height: 100%;
+}
+
+.chart-empty {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  margin: 0;
+  place-items: center;
+  color: var(--muted);
+  font-size: calc(11px * var(--font-scale));
+}
+
+.overlay .drag-strip {
+  height: 18px;
+  padding: 0 4px 0 9px;
+  font-size: 7px;
+}
+
+.overlay .drag-strip button {
+  width: 16px;
+  height: 16px;
+  font-size: 12px;
+}
+
+.overlay .match-tabs {
+  height: 20px;
+  gap: 1px;
+  padding-inline: 5px;
+}
+
+.overlay .match-tabs button {
+  min-width: 49px;
+  padding: 2px 6px;
+  border-bottom-width: 1px;
+  font-size: 8px;
+}
+
+.overlay .summary {
+  height: 30px;
+  column-gap: 7px;
+  padding-inline: 7px;
+}
+
+.overlay .summary strong {
+  font-size: min(calc(18px * var(--font-scale)), 9vw);
+}
+
+.overlay .metric-group {
+  width: 100%;
+  min-width: 0;
+}
+
+.overlay .record-labels {
+  font-size: min(calc(8px * var(--font-scale)), 4vw);
+}
+
+.overlay .summary small {
+  display: block;
+  font-size: min(calc(8px * var(--font-scale)), 4vw);
+}
+
+.overlay .divider {
+  width: 1px;
+  height: 14px;
+}
+
+.overlay .chart-area {
+  height: calc(100% - 68px);
+  min-height: 20px;
+  padding: 0 7px 4px;
+}
+
+.overlay .chart-empty {
+  font-size: min(calc(8px * var(--font-scale)), 11px);
+}
+
+.no-chart .chart-area {
+  display: none;
+}
+
+.no-chart .summary {
+  height: calc(100% - 57px);
+  min-height: 25px;
+}
+
+.overlay.no-chart .summary {
+  height: calc(100% - 38px);
+  padding-bottom: 4px;
+}
+
+/* The normal window uses the same clipped-card language as the management
+   dashboard. Horizontal mode stays intentionally compact and keeps the
+   graph out of the window; the graph remains available in the management UI. */
+.stats-window.horizontal .summary {
+  height: calc(100% - 57px);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  min-height: 82px;
+  column-gap: 10px;
+  padding: 10px 14px 12px;
+}
+
+.stats-window.horizontal .summary > .record-group,
+.stats-window.horizontal .summary > .metric-group {
+  position: relative;
+  height: 100%;
+  min-height: 62px;
+  padding: 9px 14px;
+  border: 1px solid rgba(67, 168, 255, 0.22);
+  background:
+    linear-gradient(105deg, rgba(255, 61, 141, 0.12), transparent 48%),
+    repeating-linear-gradient(-35deg, transparent 0 18px, rgba(255, 255, 255, 0.015) 18px 20px),
+    rgba(7, 10, 17, 0.86);
+  clip-path: polygon(0 8px, 8px 0, calc(100% - 12px) 0, 100% 10px, 100% 100%, 10px 100%, 0 calc(100% - 10px));
+}
+
+.stats-window.horizontal .summary > .divider {
+  display: none;
+}
+
+.stats-window.horizontal .summary strong {
+  font-size: clamp(28px, 4.8vw, 46px);
+}
+
+.stats-window.vertical {
+  display: grid;
+  grid-template-rows: 34px 30px auto minmax(180px, 1fr);
+  gap: 8px;
+  padding: 6px 10px 10px;
+}
+
+.stats-window.vertical .drag-strip {
+  height: 34px;
+  padding-inline: 8px;
+  font-size: 10px;
+}
+
+.stats-window.vertical .match-tabs {
+  height: 30px;
+  justify-content: stretch;
+  padding-inline: 0;
+}
+
+.stats-window.vertical .match-tabs button {
+  flex: 1 1 0;
+  min-width: 0;
+  padding-inline: 5px;
+  font-size: 9px;
+}
+
+.stats-window.vertical .summary {
+  display: grid;
+  height: auto;
+  grid-template-columns: 1fr;
+  grid-template-rows: repeat(3, minmax(78px, auto));
+  gap: 8px;
+  padding: 0;
+  white-space: normal;
+}
+
+.stats-window.vertical .summary > .divider {
+  display: none;
+}
+
+.stats-window.vertical .summary > .record-group,
+.stats-window.vertical .summary > .metric-group {
+  position: relative;
+  min-height: 78px;
+  padding: 9px 14px;
+  border: 1px solid rgba(67, 168, 255, 0.24);
+  background:
+    linear-gradient(105deg, rgba(255, 61, 141, 0.12), transparent 48%),
+    repeating-linear-gradient(-35deg, transparent 0 18px, rgba(255, 255, 255, 0.015) 18px 20px),
+    rgba(7, 10, 17, 0.86);
+  clip-path: polygon(0 9px, 9px 0, calc(100% - 14px) 0, 100% 12px, 100% 100%, 12px 100%, 0 calc(100% - 12px));
+}
+
+.stats-window.vertical .summary strong {
+  font-size: clamp(34px, 10vw, 54px);
+}
+
+.stats-window.vertical .record-labels,
+.stats-window.vertical .summary small {
+  font-size: min(calc(10px * var(--font-scale)), 13px);
+}
+
+.stats-window.vertical .stats-chart {
+  display: grid;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid rgba(67, 168, 255, 0.28);
+  background:
+    linear-gradient(90deg, rgba(67, 168, 255, 0.08), transparent 45%),
+    repeating-linear-gradient(-35deg, transparent 0 18px, rgba(255, 255, 255, 0.014) 18px 20px),
+    rgba(4, 7, 12, 0.82);
+  grid-template-rows: 32px minmax(0, 1fr);
+  clip-path: polygon(0 8px, 8px 0, calc(100% - 13px) 0, 100% 12px, 100% 100%, 11px 100%, 0 calc(100% - 10px));
+}
+
+.stats-window.vertical .stats-chart > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.stats-window.vertical .chart-label {
+  color: var(--blue);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+}
+
+.stats-window.vertical .chart-state {
+  color: var(--blue);
+  font: 8px "Cascadia Mono", Consolas, monospace;
+  letter-spacing: 0.06em;
+}
+
+.stats-chart-body {
+  position: relative;
+  min-height: 0;
+  padding: 4px 8px 7px;
+}
+
+.stats-chart-body canvas {
+  width: 100%;
+  height: 100%;
+}
+
+.stats-chart-empty {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  margin: 0;
+  padding: 12px;
+  place-items: center;
+  color: var(--muted);
+  font-size: min(calc(10px * var(--font-scale)), 13px);
+  text-align: center;
+}
+
+.stats-window.horizontal .stats-chart,
+.stats-window.overlay .stats-chart,
+.stats-window.vertical.no-chart .stats-chart {
+  display: none;
+}
+
+.stats-window.vertical.no-chart {
+  grid-template-rows: 34px 30px 1fr;
+}
+
+.stats-window.vertical.no-chart .summary {
+  align-content: start;
+}
+
+.hidden {
+  display: none !important;
+}
+
+@media (max-width: 420px) {
+  .summary {
+    gap: 8px;
+    padding-inline: 8px;
+  }
+
+  .summary strong {
+    font-size: calc(19px * var(--font-scale));
+  }
+
+  .overlay .summary strong {
+    font-size: min(calc(16px * var(--font-scale)), 23px);
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .stats-window {
+    background: #080b12;
+  }
+}
+
+@media (prefers-contrast: more) {
+  .stats-window {
+    border-color: rgba(255, 255, 255, 0.36);
+  }
+}
+
+/* Generated HUD concept alignment
+   --------------------------------
+   Keep the same shared document for Electron and OBS, while giving the
+   normal window the stronger framed-card composition from the concept art.
+   The compact overlay keeps its existing dimensions and remains readable at
+   320px, so these larger treatments only apply to the normal window. */
+@media (min-width: 560px) {
+  .stats-window.horizontal:not(.overlay) {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: 42px minmax(0, 1fr);
+    gap: 0 12px;
+    padding: 7px 12px 12px;
+    background:
+      radial-gradient(circle at 4% 15%, rgba(255, 61, 141, 0.18) 0 2px, transparent 3px),
+      radial-gradient(circle at 96% 80%, rgba(67, 216, 255, 0.14) 0 2px, transparent 4px),
+      repeating-linear-gradient(145deg, transparent 0 20px, rgba(255, 255, 255, 0.022) 21px 22px),
+      rgba(5, 9, 16, var(--panel-opacity));
+    box-shadow:
+      inset 0 0 0 1px rgba(67, 216, 255, 0.28),
+      inset 0 0 32px rgba(255, 61, 141, 0.08),
+      0 12px 36px rgba(0, 0, 0, 0.45);
+  }
+
+  .stats-window.horizontal:not(.overlay) .drag-strip {
+    grid-column: 1;
+    grid-row: 1;
+    height: 42px;
+    padding: 0 8px 0 10px;
+    color: rgba(255, 255, 255, 0.9);
+    font-size: clamp(12px, 1.8vw, 18px);
+    letter-spacing: 0.11em;
+    text-shadow: 0 0 8px rgba(255, 255, 255, 0.28);
+  }
+
+  .stats-window.horizontal:not(.overlay) .match-tabs {
+    grid-column: 2;
+    grid-row: 1;
+    height: 42px;
+    justify-content: flex-end;
+    gap: 4px;
+    padding: 0;
+  }
+
+  .stats-window.horizontal:not(.overlay) .match-tabs button {
+    min-width: clamp(74px, 10vw, 112px);
+    height: 30px;
+    padding: 7px 12px;
+    border: 1px solid rgba(135, 172, 212, 0.6);
+    border-bottom: 2px solid rgba(67, 216, 255, 0.7);
+    background: rgba(4, 9, 17, 0.72);
+    clip-path: polygon(0 5px, 5px 0, calc(100% - 6px) 0, 100% 5px, 100% calc(100% - 5px), calc(100% - 6px) 100%, 5px 100%, 0 calc(100% - 5px));
+    color: rgba(255, 255, 255, 0.72);
+    font-size: clamp(9px, 1.25vw, 13px);
+    letter-spacing: 0.04em;
+  }
+
+  .stats-window.horizontal:not(.overlay) .match-tabs button.active {
+    border-color: var(--pink);
+    border-bottom-color: var(--pink);
+    background: linear-gradient(110deg, rgba(255, 61, 141, 0.88), rgba(255, 61, 141, 0.32));
+    color: #fff;
+    box-shadow: 0 0 14px rgba(255, 61, 141, 0.32);
+  }
+
+  .stats-window.horizontal:not(.overlay) .summary {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    height: 100%;
+    min-height: 0;
+    column-gap: 12px;
+    padding: 4px 0 0;
+  }
+
+  .stats-window.horizontal:not(.overlay) .summary > .record-group,
+  .stats-window.horizontal:not(.overlay) .summary > .metric-group {
+    min-height: 0;
+    height: 100%;
+    padding: 8px 14px 10px;
+    border: 1px solid rgba(135, 172, 212, 0.55);
+    background:
+      radial-gradient(circle at 5% 20%, rgba(255, 61, 141, 0.32) 0 2px, transparent 4px),
+      linear-gradient(115deg, rgba(255, 61, 141, 0.17), transparent 42%),
+      repeating-linear-gradient(-35deg, transparent 0 18px, rgba(255, 255, 255, 0.025) 18px 20px),
+      rgba(3, 8, 15, 0.9);
+    clip-path: polygon(0 10px, 10px 0, calc(100% - 16px) 0, 100% 12px, 100% calc(100% - 10px), calc(100% - 12px) 100%, 10px 100%, 0 calc(100% - 12px));
+    box-shadow:
+      inset 3px 0 0 rgba(255, 61, 141, 0.72),
+      inset -3px 0 0 rgba(67, 216, 255, 0.68),
+      0 0 16px rgba(67, 168, 255, 0.08);
+  }
+
+  .stats-window.horizontal:not(.overlay) .summary > .record-group {
+    box-shadow:
+      inset 3px 0 0 rgba(255, 61, 141, 0.9),
+      inset -3px 0 0 rgba(67, 216, 255, 0.22),
+      0 0 16px rgba(255, 61, 141, 0.08);
+  }
+
+  .stats-window.horizontal:not(.overlay) .summary small,
+  .stats-window.horizontal:not(.overlay) .record-labels {
+    color: rgba(255, 255, 255, 0.88);
+    font-size: clamp(10px, 1.3vw, 14px);
+    letter-spacing: 0.08em;
+  }
+
+  .stats-window.horizontal:not(.overlay) .summary strong {
+    font-size: clamp(36px, 5.4vw, 64px);
+    line-height: 0.92;
+    text-shadow:
+      0 2px 2px #000,
+      0 0 12px color-mix(in srgb, var(--accent) 35%, transparent);
+  }
+
+  .stats-window.horizontal:not(.overlay) .summary > .metric-group {
+    gap: 5px;
+  }
+
+  .stats-window.horizontal:not(.overlay) .divider {
+    display: none;
+  }
+}
+
+@media (min-width: 320px) {
+  .stats-window.vertical:not(.overlay) {
+    background:
+      radial-gradient(circle at 8% 13%, rgba(255, 61, 141, 0.18) 0 2px, transparent 4px),
+      radial-gradient(circle at 92% 78%, rgba(67, 216, 255, 0.15) 0 2px, transparent 4px),
+      repeating-linear-gradient(145deg, transparent 0 21px, rgba(255, 255, 255, 0.022) 22px 23px),
+      rgba(5, 9, 16, var(--panel-opacity));
+    box-shadow:
+      inset 0 0 0 1px rgba(67, 216, 255, 0.28),
+      inset 0 0 30px rgba(255, 61, 141, 0.08),
+      0 12px 36px rgba(0, 0, 0, 0.45);
+  }
+
+  .stats-window.vertical:not(.overlay) .drag-strip {
+    position: relative;
+    justify-content: center;
+    color: rgba(255, 255, 255, 0.95);
+    font-size: clamp(12px, 4vw, 18px);
+    letter-spacing: 0.12em;
+  }
+
+  .stats-window.vertical:not(.overlay) .window-actions {
+    position: absolute;
+    right: 0;
+  }
+
+  .stats-window.vertical:not(.overlay) .match-tabs button {
+    height: 28px;
+    border: 1px solid rgba(135, 172, 212, 0.58);
+    border-bottom: 2px solid rgba(67, 216, 255, 0.72);
+    background: rgba(4, 9, 17, 0.68);
+    clip-path: polygon(0 5px, 5px 0, calc(100% - 5px) 0, 100% 5px, 100% calc(100% - 5px), calc(100% - 5px) 100%, 5px 100%, 0 calc(100% - 5px));
+    color: rgba(255, 255, 255, 0.8);
+  }
+
+  .stats-window.vertical:not(.overlay) .match-tabs button.active {
+    border-color: var(--pink);
+    border-bottom-color: var(--pink);
+    background: linear-gradient(110deg, rgba(255, 61, 141, 0.82), rgba(255, 61, 141, 0.24));
+    box-shadow: 0 0 14px rgba(255, 61, 141, 0.28);
+  }
+
+  .stats-window.vertical:not(.overlay) .summary > .record-group,
+  .stats-window.vertical:not(.overlay) .summary > .metric-group {
+    border-color: rgba(135, 172, 212, 0.55);
+    background:
+      radial-gradient(circle at 5% 20%, rgba(255, 61, 141, 0.3) 0 2px, transparent 4px),
+      linear-gradient(115deg, rgba(255, 61, 141, 0.17), transparent 42%),
+      repeating-linear-gradient(-35deg, transparent 0 18px, rgba(255, 255, 255, 0.025) 18px 20px),
+      rgba(3, 8, 15, 0.9);
+    box-shadow:
+      inset 3px 0 0 rgba(255, 61, 141, 0.78),
+      inset -3px 0 0 rgba(67, 216, 255, 0.68),
+      0 0 18px rgba(67, 168, 255, 0.08);
+  }
+
+  .stats-window.vertical:not(.overlay) .record-labels,
+  .stats-window.vertical:not(.overlay) .summary small {
+    color: rgba(255, 255, 255, 0.9);
+    font-size: clamp(11px, 3.2vw, 15px);
+    letter-spacing: 0.09em;
+  }
+
+  .stats-window.vertical:not(.overlay) .summary strong {
+    font-size: clamp(42px, 12vw, 66px);
+    line-height: 0.92;
+  }
+
+  .stats-window.vertical:not(.overlay) .stats-chart {
+    border-color: rgba(135, 172, 212, 0.55);
+    background:
+      linear-gradient(90deg, rgba(67, 168, 255, 0.12), transparent 52%),
+      repeating-linear-gradient(-35deg, transparent 0 18px, rgba(255, 255, 255, 0.018) 18px 20px),
+      rgba(3, 8, 15, 0.9);
+    box-shadow:
+      inset 3px 0 0 rgba(255, 61, 141, 0.78),
+      inset -3px 0 0 rgba(67, 216, 255, 0.7),
+      0 0 18px rgba(67, 168, 255, 0.1);
+  }
+
+  .stats-window.vertical:not(.overlay) .stats-chart > header {
+    justify-content: center;
+    border-bottom-color: rgba(67, 216, 255, 0.52);
+  }
+
+  .stats-window.vertical:not(.overlay) .chart-label {
+    color: #fff;
+    font-size: clamp(11px, 3.2vw, 16px);
+    letter-spacing: 0.14em;
+    text-shadow: 0 0 8px rgba(255, 255, 255, 0.3);
+  }
+}
+
+/* The OBS/game overlay is the same HUD at a compact scale.  Keep the shared
+   artwork and hierarchy instead of falling back to the older text-only bar. */
+.stats-window.overlay:not(.transparent) {
+  background-image:
+    linear-gradient(
+      rgba(4, 8, 15, calc(1 - var(--panel-opacity))),
+      rgba(4, 8, 15, calc(1 - var(--panel-opacity)))
+    ),
+    url("./assets/stats-frame-horizontal.png");
+  background-position: center, center;
+  background-repeat: no-repeat, no-repeat;
+  background-size: 100% 100%, 100% 100%;
+}
+
+.stats-window.overlay .drag-strip {
+  position: relative;
+  justify-content: flex-start;
+  gap: 4px;
+  padding-left: 6px;
+}
+
+.stats-window.overlay .header-graffiti {
+  display: block;
+  width: 27px;
+  height: 17px;
+  object-fit: cover;
+  opacity: 0.82;
+}
+
+.stats-window.overlay .drag-strip > span {
+  color: #fff;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-shadow: 0 1px 2px #000, 0 0 6px rgba(255, 255, 255, 0.3);
+}
+
+.stats-window.overlay .window-actions {
+  margin-left: auto;
+}
+
+.stats-window.overlay .drag-strip::after {
+  position: absolute;
+  right: 4px;
+  bottom: 0;
+  left: 4px;
+  height: 1px;
+  content: "";
+  background: linear-gradient(90deg, var(--pink) 0 38%, transparent 38% 46%, var(--pink) 46% 51%, transparent 51% 54%, var(--pink) 54% 57%, transparent 57%);
+  opacity: 0.9;
+  pointer-events: none;
+}
+
+.stats-window.overlay .match-tabs {
+  height: 20px;
+  justify-content: flex-end;
+  gap: 2px;
+  padding: 0 5px;
+}
+
+.stats-window.overlay .match-tabs button {
+  min-width: 52px;
+  height: 19px;
+  padding: 2px 5px;
+  border: 1px solid rgba(135, 172, 212, 0.56);
+  border-bottom: 1px solid rgba(67, 216, 255, 0.72);
+  background: rgba(4, 9, 17, 0.72);
+  clip-path: polygon(0 3px, 3px 0, calc(100% - 4px) 0, 100% 3px, 100% calc(100% - 3px), calc(100% - 4px) 100%, 3px 100%, 0 calc(100% - 3px));
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 8px;
+  font-weight: 850;
+}
+
+.stats-window.overlay .match-tabs button.active {
+  border-color: var(--pink);
+  background: linear-gradient(110deg, rgba(255, 61, 141, 0.8), rgba(255, 61, 141, 0.22));
+  color: #fff;
+}
+
+.stats-window.overlay .summary {
+  height: calc(100% - 38px);
+  min-height: 30px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  column-gap: 4px;
+  padding: 4px 5px 3px;
+}
+
+.stats-window.overlay .summary > .record-group,
+.stats-window.overlay .summary > .metric-group {
+  height: 100%;
+  min-height: 0;
+  padding: 3px 5px;
+  border: 1px solid rgba(135, 172, 212, 0.4);
+  background:
+    linear-gradient(110deg, rgba(255, 61, 141, 0.18), transparent 46%),
+    rgba(3, 8, 15, 0.76);
+  clip-path: polygon(0 4px, 4px 0, calc(100% - 6px) 0, 100% 5px, 100% calc(100% - 4px), calc(100% - 5px) 100%, 4px 100%, 0 calc(100% - 5px));
+  box-shadow:
+    inset 2px 0 0 rgba(255, 61, 141, 0.7),
+    inset -2px 0 0 rgba(67, 216, 255, 0.62);
+}
+
+.stats-window.overlay .record-labels,
+.stats-window.overlay .summary small {
+  color: rgba(255, 255, 255, 0.86);
+  font-size: 7px;
+  letter-spacing: 0.04em;
+}
+
+.stats-window.overlay .summary strong {
+  font-size: clamp(18px, 6vw, 25px);
+  line-height: 0.9;
+}
+
+.stats-window.overlay .summary > .divider {
+  display: none;
+}
+
+/* Keep W/L close at one digit, then grow naturally for 2- and 3-digit
+   records instead of reserving a large empty fractional column. */
+.stats-window .record-labels,
+.stats-window .record-values {
+  grid-template-columns: max-content max-content max-content;
+  justify-content: center;
+  column-gap: 0.32ch;
+}
+
+.stats-window .record-labels span:last-child {
+  grid-column: auto;
+}
+
+/* Project-bound generated artwork.  The image contains only the reusable
+   frame/texture; all labels and values remain live HTML so locale, text color,
+   opacity, and match data continue to work. */
+.stats-window.horizontal:not(.transparent) {
+  background-image:
+    linear-gradient(
+      rgba(4, 8, 15, calc(1 - var(--panel-opacity))),
+      rgba(4, 8, 15, calc(1 - var(--panel-opacity)))
+    ),
+    url("./assets/stats-frame-horizontal.png");
+  background-position: center, center;
+  background-repeat: no-repeat, no-repeat;
+  background-size: 100% 100%, 100% 100%;
+}
+
+.stats-window.vertical:not(.transparent) {
+  background-image:
+    linear-gradient(
+      rgba(4, 8, 15, calc(1 - var(--panel-opacity))),
+      rgba(4, 8, 15, calc(1 - var(--panel-opacity)))
+    ),
+    url("./assets/stats-frame-vertical.png");
+  background-position: center, center;
+  background-repeat: no-repeat, no-repeat;
+  background-size: 100% 100%, 100% 100%;
+}
+
+/* Header artwork and title treatment from the reference HUD. */
+.header-graffiti {
+  display: none;
+  flex: 0 0 auto;
+  width: 42px;
+  height: 34px;
+  object-fit: cover;
+  object-position: center;
+  mix-blend-mode: screen;
+  filter: drop-shadow(0 0 6px rgba(255, 61, 141, 0.6));
+  pointer-events: none;
+}
+
+@media (min-width: 560px) {
+  .stats-window.horizontal:not(.overlay) .header-graffiti {
+    display: block;
+    width: 74px;
+    height: 42px;
+    margin-right: 4px;
+  }
+
+  .stats-window.horizontal:not(.overlay) .drag-strip {
+    position: relative;
+    justify-content: flex-start;
+    gap: 8px;
+  }
+
+  .stats-window.horizontal:not(.overlay) .drag-strip > span {
+    color: #fff;
+    font-size: clamp(24px, 4.5vw, 38px);
+    font-weight: 900;
+    letter-spacing: 0.025em;
+    line-height: 0.9;
+    text-transform: uppercase;
+    text-shadow:
+      0 2px 0 #080a10,
+      0 0 10px rgba(255, 255, 255, 0.32);
+    transform: skewX(-5deg);
+  }
+
+  .stats-window.horizontal:not(.overlay) .drag-strip::after {
+    position: absolute;
+    right: 8px;
+    bottom: 3px;
+    left: 7px;
+    height: 2px;
+    content: "";
+    background: linear-gradient(90deg, var(--pink) 0 38%, transparent 38% 46%, var(--pink) 46% 49%, transparent 49% 52%, var(--pink) 52% 55%, transparent 55%);
+    opacity: 0.88;
+    pointer-events: none;
+  }
+
+  .stats-window.horizontal:not(.overlay) .match-tabs button {
+    height: 34px;
+    min-width: clamp(84px, 11vw, 126px);
+    font-size: clamp(10px, 1.45vw, 14px);
+    font-weight: 900;
+  }
+}
+
+@media (min-width: 320px) {
+  .stats-window.vertical:not(.overlay) {
+    grid-template-rows: 46px 36px auto minmax(180px, 1fr);
+  }
+
+  .stats-window.vertical:not(.overlay).no-chart {
+    grid-template-rows: 46px 36px 1fr;
+  }
+
+  .stats-window.vertical:not(.overlay) .drag-strip {
+    height: 46px;
+  }
+
+  .stats-window.vertical:not(.overlay) .match-tabs {
+    height: 36px;
+  }
+
+  .stats-window.vertical:not(.overlay) .match-tabs button {
+    height: 32px;
+  }
+
+  .stats-window.vertical:not(.overlay) .header-graffiti {
+    position: absolute;
+    left: 2px;
+    display: block;
+    width: 38px;
+    height: 30px;
+    opacity: 0.72;
+  }
+
+  .stats-window.vertical:not(.overlay) .drag-strip > span {
+    color: #fff;
+    font-size: clamp(13px, 4vw, 20px);
+    font-weight: 900;
+    letter-spacing: 0.08em;
+    text-shadow: 0 2px 0 #080a10, 0 0 8px rgba(255, 255, 255, 0.28);
+    transform: skewX(-4deg);
+  }
+
+  .stats-window.vertical:not(.overlay) .stats-chart > header {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .stats-window.vertical:not(.overlay) .stats-chart > header::before,
+  .stats-window.vertical:not(.overlay) .stats-chart > header::after {
+    position: absolute;
+    top: 50%;
+    width: 24%;
+    height: 4px;
+    content: "";
+    background: repeating-linear-gradient(105deg, rgba(255, 61, 141, 0.72) 0 10px, transparent 10px 15px);
+    opacity: 0.85;
+    transform: translateY(-50%);
+  }
+
+  .stats-window.vertical:not(.overlay) .stats-chart > header::before {
+    left: 6%;
+  }
+
+  .stats-window.vertical:not(.overlay) .stats-chart > header::after {
+    right: 6%;
+    background: repeating-linear-gradient(105deg, rgba(67, 216, 255, 0.72) 0 10px, transparent 10px 15px);
+  }
+
+  .stats-window.vertical:not(.overlay) .chart-label {
+    position: relative;
+    z-index: 1;
+    padding-inline: 10px;
+    background: rgba(3, 8, 15, 0.72);
+  }
+}

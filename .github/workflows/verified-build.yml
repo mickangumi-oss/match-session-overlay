@@ -1,0 +1,63 @@
+name: Verified Windows build
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 10
+
+      - name: Install Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check source
+        run: pnpm check
+
+      - name: Build Windows installer
+        run: pnpm build
+
+      - name: Create SHA-256 manifest
+        id: installer
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem dist -Filter '*-Setup.exe' -File
+          if ($installer.Count -ne 1) {
+            throw "Expected exactly one installer, found $($installer.Count)"
+          }
+          $hash = (Get-FileHash -LiteralPath $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $($installer.Name)" | Set-Content -LiteralPath dist\SHA256SUMS.txt -Encoding ascii
+          "path=$($installer.FullName)" >> $env:GITHUB_OUTPUT
+
+      - name: Create GitHub build attestation
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v3
+        with:
+          subject-path: ${{ steps.installer.outputs.path }}
+
+      - name: Upload verified build
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-installer
+          if-no-files-found: error
+          path: |
+            dist/*-Setup.exe
+            dist/SHA256SUMS.txt

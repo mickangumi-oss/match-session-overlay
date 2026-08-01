@@ -1,0 +1,422 @@
+"use strict";
+
+const remoteOverlay = !window.matchOverlay;
+const remoteStateListeners = [];
+const remoteDisplaySettingsListeners = [];
+
+async function fetchRemoteOverlayState() {
+  const response = await fetch("/state", { cache: "no-store" });
+  if (!response.ok) throw new Error(`REMOTE_STATE_${response.status}`);
+  const payload = await response.json();
+  const settings = {
+    ...(payload.displaySettings ?? {}),
+    overlaySize: payload.overlaySize,
+    // The browser source is always the compact overlay presentation. The
+    // markup and CSS are still the same document used by the Electron window.
+    mode: "overlay",
+    overlayInteractionLocked: true,
+  };
+  return { payload, settings };
+}
+
+const api = window.matchOverlay || {
+  onState(callback) {
+    remoteStateListeners.push(callback);
+    return () => {
+      const index = remoteStateListeners.indexOf(callback);
+      if (index >= 0) remoteStateListeners.splice(index, 1);
+    };
+  },
+  onDisplaySettings(callback) {
+    remoteDisplaySettingsListeners.push(callback);
+    return () => {
+      const index = remoteDisplaySettingsListeners.indexOf(callback);
+      if (index >= 0) remoteDisplaySettingsListeners.splice(index, 1);
+    };
+  },
+  async getState() {
+    const { payload } = await fetchRemoteOverlayState();
+    return { ok: true, data: payload };
+  },
+  async getDisplaySettings() {
+    const { settings } = await fetchRemoteOverlayState();
+    return { ok: true, data: settings };
+  },
+  hideStatsWindow() {},
+  resetTracking() {},
+  beginStatsWindowDrag() {},
+  moveStatsWindowDrag() {},
+  endStatsWindowDrag() {},
+  updateDisplaySettings() {},
+};
+const localeApi = window.matchOverlayI18n;
+const t = (key, fallback = key) =>
+  localeApi?.t ? localeApi.t(key) : fallback;
+const FONT_STACKS = {
+  street: 'Impact, "Arial Black", "Bahnschrift Condensed", sans-serif',
+  condensed: '"Bahnschrift Condensed", "Arial Narrow", sans-serif',
+  system: '"Segoe UI Variable", "Segoe UI", sans-serif',
+  japanese: '"Yu Gothic UI", Meiryo, sans-serif',
+  mono: '"Cascadia Mono", Consolas, monospace',
+};
+const FONT_STYLES = new Set(["normal", "italic"]);
+
+function fontStackFor(value) {
+  if (FONT_STACKS[value]) return FONT_STACKS[value];
+  const family = String(value ?? "")
+    .replace(/["\\]/g, "")
+    .trim();
+  return family ? `"${family}", sans-serif` : FONT_STACKS.street;
+}
+const elements = {
+  root: document.getElementById("statsWindow"),
+  winRate: document.getElementById("winRate"),
+  recordWins: document.getElementById("recordWins"),
+  recordLosses: document.getElementById("recordLosses"),
+  ratingTypeLabel: document.getElementById("ratingTypeLabel"),
+  ratingDelta: document.getElementById("ratingDelta"),
+  statsChartPanel: document.getElementById("statsChartPanel"),
+  statsRatingChart: document.getElementById("statsRatingChart"),
+  statsChartEmpty: document.getElementById("statsChartEmpty"),
+  statsChartState: document.getElementById("statsChartState"),
+  statsChartLabel: document.getElementById("statsChartLabel"),
+  hideButton: document.getElementById("hideButton"),
+  resetButton: document.getElementById("resetButton"),
+  matchTabs: [...document.querySelectorAll("[data-match-type]")],
+};
+
+let trackerState = null;
+let displaySettings = null;
+let dragPointerId = null;
+
+function unwrap(result) {
+  if (!result?.ok) throw new Error(result?.error || "処理に失敗しました");
+  return result.data;
+}
+
+function drawStatsChart(history) {
+  const canvas = elements.statsRatingChart;
+  const rect = canvas.getBoundingClientRect();
+  if (!rect.width || !rect.height) return;
+  const ratio = window.devicePixelRatio || 1;
+  canvas.width = Math.max(1, Math.round(rect.width * ratio));
+  canvas.height = Math.max(1, Math.round(rect.height * ratio));
+  const context = canvas.getContext("2d");
+  context.scale(ratio, ratio);
+  const values = history.filter(Number.isFinite);
+  if (!values.length) return;
+  const labelScale = Math.min(
+    2,
+    Math.max(0.75, Number(displaySettings?.graphLabelScale ?? 1.3)),
+  );
+  const labelFontSize = 10 * labelScale;
+  const dataMinimum = Math.min(...values);
+  const dataMaximum = Math.max(...values);
+  const dataSpread = Math.max(10, dataMaximum - dataMinimum);
+  const roughStep = dataSpread / 4;
+  const magnitude = 10 ** Math.floor(Math.log10(roughStep));
+  const normalizedStep = roughStep / magnitude;
+  const step =
+    (normalizedStep <= 1
+      ? 1
+      : normalizedStep <= 2
+        ? 2
+        : normalizedStep <= 5
+          ? 5
+          : 10) * magnitude;
+  let minimum = Math.floor((dataMinimum - step * 0.5) / step) * step;
+  let maximum = Math.ceil((dataMaximum + step * 0.5) / step) * step;
+  if (minimum === maximum) maximum += step;
+  const fontStyle = FONT_STYLES.has(displaySettings?.fontStyle)
+    ? `${displaySettings.fontStyle} `
+    : "";
+  context.font = `${fontStyle}${labelFontSize}px ${fontStackFor(
+    displaySettings?.fontFamily,
+  )}`;
+  const labels = [];
+  for (let tick = minimum; tick <= maximum + step * 0.01; tick += step) {
+    labels.push(Math.round(tick).toLocaleString("ja-JP"));
+  }
+  const widestLabel = Math.max(
+    0,
+    ...labels.map((label) => context.measureText(label).width),
+  );
+  const left = Math.max(46, Math.ceil(widestLabel + 12));
+  const right = 10;
+  const top = Math.max(9, labelFontSize / 2 + 2);
+  const bottom = Math.max(24, labelFontSize + 8);
+  const yFor = (value) =>
+    top + ((maximum - value) / (maximum - minimum)) * (rect.height - top - bottom);
+  const xFor = (index) =>
+    left +
+    (index / Math.max(1, values.length - 1)) * (rect.width - left - right);
+  const plotBottom = rect.height - bottom;
+  context.textAlign = "right";
+  context.textBaseline = "middle";
+  context.fillStyle = `${displaySettings?.textColor ?? "#f7f8ff"}99`;
+  context.lineWidth = 1;
+  for (let tick = minimum; tick <= maximum + step * 0.01; tick += step) {
+    const y = yFor(tick);
+    context.fillText(Math.round(tick).toLocaleString("ja-JP"), left - 8, y);
+    context.strokeStyle = "rgba(255,255,255,.12)";
+    context.beginPath();
+    context.moveTo(left, y);
+    context.lineTo(rect.width - right, y);
+    context.stroke();
+  }
+  values.forEach((value, index) => {
+    const x = xFor(index);
+    context.strokeStyle = "rgba(255,255,255,.07)";
+    context.beginPath();
+    context.moveTo(x, top);
+    context.lineTo(x, rect.height - bottom);
+    context.stroke();
+  });
+
+  context.strokeStyle = "rgba(67, 216, 255, 0.9)";
+  context.lineWidth = 1.2;
+  context.beginPath();
+  context.moveTo(left, plotBottom);
+  context.lineTo(rect.width - right, plotBottom);
+  context.stroke();
+  context.beginPath();
+  context.moveTo(left, top);
+  context.lineTo(left, plotBottom);
+  context.stroke();
+
+  const xLabelIndices = [...new Set([
+    0,
+    Math.round((values.length - 1) * 0.33),
+    Math.round((values.length - 1) * 0.66),
+    values.length - 1,
+  ])];
+  context.textAlign = "center";
+  context.textBaseline = "top";
+  context.font = `${fontStyle}${labelFontSize}px ${fontStackFor(
+    displaySettings?.fontFamily,
+  )}`;
+  context.fillStyle = `${displaySettings?.textColor ?? "#f7f8ff"}cc`;
+  for (const index of xLabelIndices) {
+    const x = xFor(index);
+    const label = index === values.length - 1
+      ? t("now", "NOW")
+      : `-${values.length - 1 - index}`;
+    const labelWidth = context.measureText(label).width;
+    const labelX = Math.min(
+      rect.width - right - labelWidth / 2,
+      Math.max(left + labelWidth / 2, x),
+    );
+    context.fillText(label, labelX, plotBottom + 6);
+  }
+
+  const linePath = new Path2D();
+  values.forEach((value, index) => {
+    const x = xFor(index);
+    const y = yFor(value);
+    if (index === 0) linePath.moveTo(x, y);
+    else linePath.lineTo(x, y);
+  });
+  const areaPath = new Path2D(linePath);
+  areaPath.lineTo(xFor(values.length - 1), plotBottom);
+  areaPath.lineTo(xFor(0), plotBottom);
+  areaPath.closePath();
+  const areaGradient = context.createLinearGradient(0, top, 0, plotBottom);
+  areaGradient.addColorStop(0, "rgba(67,216,255,.32)");
+  areaGradient.addColorStop(1, "rgba(67,216,255,.025)");
+  context.fillStyle = areaGradient;
+  context.fill(areaPath);
+  context.strokeStyle = "#43d8ff";
+  context.lineWidth = 2.6;
+  context.lineJoin = "round";
+  context.lineCap = "round";
+  context.shadowBlur = 9;
+  context.shadowColor = "rgba(67,216,255,.82)";
+  context.stroke(linePath);
+  context.shadowBlur = 0;
+  context.fillStyle = "#43d8ff";
+  values.forEach((value, index) => {
+    context.beginPath();
+    context.arc(xFor(index), yFor(value), 2.8, 0, Math.PI * 2);
+    context.fill();
+  });
+  const lastX = xFor(values.length - 1);
+  const lastY = yFor(values[values.length - 1]);
+  context.strokeStyle = "#bdf8ff";
+  context.lineWidth = 1.5;
+  context.beginPath();
+  context.arc(lastX, lastY, 5.5, 0, Math.PI * 2);
+  context.stroke();
+}
+
+function renderStatsChart(state) {
+  const isVertical =
+    !remoteOverlay &&
+    displaySettings?.mode === "window" &&
+    displaySettings?.windowOrientation === "vertical" &&
+    displaySettings?.graphVisible !== false;
+  elements.statsChartPanel.classList.toggle("hidden", !isVertical);
+  if (!isVertical) return;
+  const matchType = displaySettings?.matchType ?? "ranked";
+  const selected = state.stats?.[matchType] ?? {};
+  const total = Number(selected.wins ?? 0) + Number(selected.losses ?? 0);
+  const history = Array.isArray(selected.ratingHistory)
+    ? selected.ratingHistory
+    : [];
+  const hasGraphData = matchType === "ranked" && total > 0 && history.length >= 2;
+  elements.statsRatingChart.classList.toggle("hidden", !hasGraphData);
+  elements.statsChartEmpty.classList.toggle("hidden", hasGraphData);
+  elements.statsChartState.textContent = hasGraphData
+    ? `${history.length} POINTS`
+    : matchType === "ranked"
+      ? t("dataWaiting", "データ待機中")
+      : t("rankedOnly", "ランクのみ");
+  const ratingType = state.ratingType === "LP" ? "LP" : "MR";
+  elements.statsChartLabel.textContent = `${ratingType} ${t("trend", "TREND")}`;
+  elements.statsChartEmpty.textContent =
+    matchType === "ranked"
+      ? t("graphEmptyRanked", "ランクマッチを計測するとグラフが表示されます")
+      : t("graphEmptyOther", "グラフはランクマッチで表示されます");
+  if (hasGraphData) requestAnimationFrame(() => drawStatsChart(history));
+}
+
+function renderTracker(state) {
+  trackerState = state;
+  const matchType = displaySettings?.matchType ?? "ranked";
+  const selected = state.stats?.[matchType] ?? {};
+  const wins = Number(selected.wins ?? 0);
+  const losses = Number(selected.losses ?? 0);
+  const total = wins + losses;
+  const isRanked = matchType === "ranked";
+  const delta = isRanked ? Number(selected.ratingDelta ?? 0) : null;
+
+  elements.winRate.textContent = `${(total ? (wins / total) * 100 : 0).toFixed(1)}%`;
+  elements.recordWins.textContent = String(wins);
+  elements.recordLosses.textContent = String(losses);
+  const ratingType = state.ratingType === "LP" ? "LP" : "MR";
+  elements.ratingTypeLabel.textContent = `${ratingType} ${t("delta", "DELTA")}`;
+  elements.ratingDelta.textContent =
+    delta == null ? "—" : `${delta > 0 ? "+" : delta < 0 ? "" : "±"}${delta}`;
+  renderStatsChart(state);
+}
+
+function renderSettings(settings) {
+  displaySettings = settings;
+  localeApi?.applyTranslations?.(document, settings.locale || "ja-jp");
+  document.documentElement.style.setProperty(
+    "--font-scale",
+    String(settings.fontScale),
+  );
+  document.documentElement.style.setProperty(
+    "--panel-opacity",
+    String(settings.backgroundOpacity),
+  );
+  document.documentElement.style.setProperty(
+    "--text",
+    settings.textColor,
+  );
+  document.documentElement.style.setProperty(
+    "--stats-font-family",
+    fontStackFor(settings.fontFamily),
+  );
+  document.documentElement.style.setProperty(
+    "--stats-font-style",
+    FONT_STYLES.has(settings.fontStyle) ? settings.fontStyle : "normal",
+  );
+  elements.root.classList.toggle("overlay", settings.mode === "overlay");
+  elements.root.classList.toggle(
+    "vertical",
+    settings.mode === "window" && settings.windowOrientation === "vertical",
+  );
+  elements.root.classList.toggle(
+    "horizontal",
+    settings.mode === "window" && settings.windowOrientation !== "vertical",
+  );
+  elements.root.classList.toggle(
+    "no-chart",
+    settings.mode !== "window" ||
+      settings.windowOrientation !== "vertical" ||
+      settings.graphVisible === false,
+  );
+  elements.root.classList.toggle(
+    "transparent",
+    settings.backgroundOpacity === 0,
+  );
+  elements.root.classList.toggle(
+    "locked",
+    settings.overlayInteractionLocked === true,
+  );
+  for (const tab of elements.matchTabs) {
+    tab.classList.toggle("active", tab.dataset.matchType === settings.matchType);
+  }
+  if (trackerState) renderTracker(trackerState);
+}
+
+elements.hideButton.addEventListener("click", () => api.hideStatsWindow());
+elements.resetButton.addEventListener("click", () => api.resetTracking());
+elements.root.addEventListener("pointerdown", (event) => {
+  const canMoveWindow = displaySettings?.mode === "window";
+  const canMoveOverlay =
+    displaySettings?.mode === "overlay" &&
+    displaySettings?.overlayInteractionLocked !== true;
+  if (
+    event.button !== 0 ||
+    (!canMoveWindow && !canMoveOverlay) ||
+    event.target.closest("button")
+  ) {
+    return;
+  }
+  dragPointerId = event.pointerId;
+  elements.root.setPointerCapture(event.pointerId);
+  api.beginStatsWindowDrag(event.screenX, event.screenY);
+  event.preventDefault();
+});
+elements.root.addEventListener("pointermove", (event) => {
+  if (event.pointerId !== dragPointerId) return;
+  api.moveStatsWindowDrag(event.screenX, event.screenY);
+});
+function finishWindowDrag(event) {
+  if (event.pointerId !== dragPointerId) return;
+  if (elements.root.hasPointerCapture(event.pointerId)) {
+    elements.root.releasePointerCapture(event.pointerId);
+  }
+  dragPointerId = null;
+  api.endStatsWindowDrag();
+}
+elements.root.addEventListener("pointerup", finishWindowDrag);
+elements.root.addEventListener("pointercancel", finishWindowDrag);
+for (const tab of elements.matchTabs) {
+  tab.addEventListener("click", () =>
+    api.updateDisplaySettings({ matchType: tab.dataset.matchType }),
+  );
+}
+api.onState(renderTracker);
+api.onDisplaySettings(renderSettings);
+
+if (remoteOverlay) {
+  document.body.classList.add("remote-overlay");
+  const refreshRemoteOverlay = async () => {
+    try {
+      const { payload, settings } = await fetchRemoteOverlayState();
+      const width = Number(settings.overlaySize?.width);
+      const height = Number(settings.overlaySize?.height);
+      if (Number.isFinite(width) && Number.isFinite(height)) {
+        document.body.style.width = `${width}px`;
+        document.body.style.height = `${height}px`;
+      }
+      for (const callback of remoteStateListeners) callback(payload);
+      for (const callback of remoteDisplaySettingsListeners) callback(settings);
+    } catch {
+      // Keep the last rendered frame while the local app is starting or
+      // temporarily unavailable. The next low-frequency poll will retry.
+    }
+  };
+  refreshRemoteOverlay();
+  window.setInterval(refreshRemoteOverlay, 2000);
+}
+
+Promise.all([api.getState(), api.getDisplaySettings()])
+  .then(([stateResult, settingsResult]) => {
+    renderSettings(unwrap(settingsResult));
+    renderTracker(unwrap(stateResult));
+  })
+  .catch(() => {});

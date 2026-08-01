@@ -1,0 +1,725 @@
+"use strict";
+
+// The source site exposes these locale routes. Keep the list local so the
+// renderer never needs an extra translation request or remote dependency.
+const LOCALES = {
+  "ja-jp": "日本語",
+  en: "English",
+  de: "Deutsch",
+  "es-es": "Español (ES)",
+  "es-us": "Español (US)",
+  fr: "Français",
+  it: "Italiano",
+  "ko-kr": "한국어",
+  "zh-hans": "简体中文",
+  "zh-hant": "繁體中文",
+  "pt-br": "Português (BR)",
+  pl: "Polski",
+  ru: "Русский",
+  ar: "العربية",
+};
+
+const EN = {
+  appTagline: "ROUND BY ROUND / LOCAL TRACKER",
+  privacyNoSave: "Passwords are not saved. Login session is stored on this PC.",
+  accountStep: "STEP 01 / ACCOUNT LINK",
+  playerConnection: "Player Connection",
+  unverified: "Not checked",
+  player: "PLAYER",
+  userCode: "USER CODE",
+  loginNote: "The official login page is used. The app never reads your ID or password.",
+  openOfficial: "Open official site",
+  refresh: "Refresh",
+  privacy: "PRIVACY",
+  localData: "Local data",
+  deleteLogin: "Delete login data",
+  clear: "Clear",
+  appUpdate: "APP UPDATE",
+  updateAvailable: "UPDATE",
+  localUpdateNote: "Local updates can be checked here",
+  location: "Location",
+  check: "Check",
+  startup: "STARTUP",
+  startupHeading: "Run the app when the computer starts",
+  startupNote: "Shows the management window when Windows sign-in starts. Game detection can wait in the background even when this is OFF.",
+  gameDetection: "GAME DETECTION",
+  gameDetectionHeading: "Show the overlay when the game starts",
+  gameDetectionNote: "Select the target game's .exe. When enabled, the watcher waits in the background and shows the overlay within about 10 seconds of launch.",
+  gameNotSelected: "No game selected",
+  chooseExecutable: "Choose executable",
+  liveStep: "STEP 02 / LIVE SESSION",
+  statsMonitor: "Stats Monitor",
+  stopped: "Stopped",
+  monitoring: "Monitoring",
+  currentCharacter: "CURRENT CHARACTER",
+  winRate: "WIN RATE",
+  currentRating: "CURRENT",
+  delta: "DELTA",
+  trend: "TREND",
+  trendDescription: "Change since the app started",
+  graphAriaLabel: "Rating change graph since the app started",
+  dataWaiting: "Waiting for data",
+  graphEmptyRanked: "The graph appears after measuring ranked matches",
+  graphEmptyOther: "The graph is available for ranked matches only",
+  startMeasure: "Start measuring",
+  resumeMeasure: "Resume measuring",
+  nextUpdate: "Next update",
+  reset: "Reset",
+  end: "End",
+  displayStep: "STEP 03 / DISPLAY CONTROL",
+  displayLayout: "Display Layout",
+  options: "Options",
+  closeOptions: "Close options",
+  overlayMove: "Overlay move",
+  overlayLock: "Overlay lock",
+  showStats: "Show stats window",
+  hideStats: "Hide stats window",
+  matchType: "MATCH TYPE",
+  ranked: "Ranked",
+  battleHub: "Battle Hub",
+  casual: "Casual",
+  windowMode: "WINDOW MODE",
+  windowOrientation: "WINDOW ORIENTATION",
+  horizontal: "Horizontal",
+  vertical: "Vertical",
+  orientationWindowOnly: "Available in WINDOW MODE",
+  normal: "Window",
+  overlay: "Overlay",
+  displayOptions: "Display options",
+  graph: "GRAPH",
+  on: "ON",
+  off: "OFF",
+  fontSize: "FONT SIZE",
+  axisSize: "AXIS SIZE",
+  background: "BACKGROUND",
+  font: "FONT",
+  fontStyle: "STYLE",
+  fontNormal: "Normal",
+  fontItalic: "Italic",
+  color: "COLOR",
+  updateInterval: "UPDATE INTERVAL",
+  updateIntervalNote: "After 30 minutes without a match: 5-minute interval; auto-stop after 60 minutes",
+  obsBrowser: "OPTION  OBS browser source",
+  copyUrl: "Copy URL",
+  disclaimer: "Unofficial tool.",
+  matchSession: "MATCH SESSION",
+  resetStats: "Reset stats",
+  closeStats: "Close stats window",
+  winsLosses: "Wins and losses",
+  unknown: "—",
+  loginOpened: "The official login page was opened",
+  fetchingPlayer: "Fetching the logged-in player's information…",
+  playerConfigured: "The logged-in player was selected",
+  loginRequired: "Login required",
+  startingSession: "Starting a session using the current record as the baseline…",
+  monitoringStarted: "Ranked-match monitoring started",
+  sessionEnded: "The streaming session ended",
+  statsReset: "Counting the session record from zero",
+  statsShown: "Stats window shown",
+  statsHidden: "Stats window closed",
+  overlayLockedNotice: "Overlay locked; clicks pass through to the game",
+  overlayUnlockedNotice: "Drag the overlay to adjust its position",
+  pollChanged: "The match fetch interval was changed",
+  gameConfigured: "The game executable was configured",
+  launchEnabled: "Run at computer startup enabled",
+  launchDisabled: "Run at computer startup disabled",
+  chooseGameFirst: "Choose the game executable first",
+  gameDetectionEnabled: "Background game-start detection enabled",
+  gameDetectionDisabled: "Game-start detection disabled",
+  obsCopied: "The OBS URL was copied",
+  privateDataDeleted: "Login data was deleted from this PC",
+  autoPlayerConfigured: "The logged-in player was selected automatically",
+  updateForce: "Force update",
+  update: "Update",
+  updateDirectory: "Update folder: {name}",
+  updateChecking: "Checking for local updates…",
+  updateNoFiles: "No update file found ({name})",
+  updateReadError: "Could not read update information",
+  updateCurrent: "You are up to date",
+  updateInstallerMissing: "Update installer not found",
+  updateHashMismatch: "Could not verify update file integrity",
+  updateReady: "Ready to update to version {version}",
+  updateSecurityRequired: "Security update required (version {version})",
+  updateChanged: "The update file changed; installation was stopped",
+  language: "LANGUAGE",
+  languageHeading: "Language",
+  fontStreet: "Street",
+  fontCondensed: "Condensed",
+  fontSystem: "System",
+  fontJapanese: "Japanese",
+  fontMono: "Monospace",
+  interval2: "2 min (recommended)",
+  interval3: "3 min",
+  interval5: "5 min",
+  autoStopped: "Auto-stopped",
+  rankedOnly: "Ranked only",
+  axisSize: "AXIS SIZE",
+  loggedIn: "Logged in",
+  languageChanged: "Display language changed",
+};
+
+const JA = {
+  ...EN,
+  fontStyle: "スタイル",
+  fontNormal: "通常",
+  fontItalic: "斜体",
+  language: "LANGUAGE",
+  languageHeading: "表示言語",
+  fontStreet: "ストリート",
+  fontCondensed: "コンデンス",
+  fontSystem: "標準",
+  fontJapanese: "日本語",
+  fontMono: "モノスペース",
+  interval2: "2分（推奨）",
+  interval3: "3分",
+  interval5: "5分",
+  autoStopped: "自動停止",
+  rankedOnly: "ランクのみ",
+  axisSize: "AXIS SIZE",
+  loggedIn: "ログイン済み",
+  languageChanged: "表示言語を変更しました",
+  appTagline: "ROUND BY ROUND / LOCAL TRACKER",
+  privacyNoSave: "ID・パスワードは保存しません。ログイン状態はこのPCに保存されます。",
+  accountStep: "STEP 01 / ACCOUNT LINK",
+  playerConnection: "プレイヤー接続",
+  unverified: "未確認",
+  loginNote: "公式ログイン画面を使用します。ID・パスワードをアプリから読み取ることはありません。",
+  openOfficial: "公式サイトを開く",
+  refresh: "再取得",
+  privacy: "PRIVACY",
+  localData: "ローカルデータ",
+  deleteLogin: "ログイン情報を削除",
+  clear: "消去",
+  appUpdate: "APP UPDATE",
+  updateAvailable: "更新",
+  localUpdateNote: "ローカル更新を確認できます",
+  location: "場所",
+  check: "確認",
+  startup: "STARTUP",
+  startupHeading: "コンピューターの起動時にアプリを実行する",
+  startupNote: "Windowsへのサインイン時に管理画面を表示して起動します。ゲーム検知がONの場合は、この設定がOFFでも監視部分だけバックグラウンドで待機します。",
+  gameDetection: "GAME DETECTION",
+  gameDetectionHeading: "ゲーム起動を検知してオーバーレイを表示する",
+  gameDetectionNote: "対象ゲームの.exeを指定します。有効にすると監視部分がバックグラウンドで待機し、ゲーム起動から最大10秒ほどでオーバーレイを表示します。",
+  gameNotSelected: "ゲーム未選択",
+  chooseExecutable: "実行ファイルを選択",
+  liveStep: "STEP 02 / LIVE SESSION",
+  statsMonitor: "戦績モニター",
+  stopped: "停止中",
+  monitoring: "監視中",
+  currentCharacter: "CURRENT CHARACTER",
+  graphAriaLabel: "起動後のMR増減グラフ",
+  currentRating: "CURRENT",
+  trend: "TREND",
+  trendDescription: "アプリ起動後の変動",
+  dataWaiting: "データ待機中",
+  graphEmptyRanked: "ランクマッチを計測するとグラフが表示されます",
+  graphEmptyOther: "グラフはランクマッチでのみ表示されます",
+  startMeasure: "計測を開始",
+  resumeMeasure: "計測を再開",
+  nextUpdate: "次回更新",
+  reset: "リセット",
+  end: "終了",
+  displayStep: "STEP 03 / DISPLAY CONTROL",
+  displayLayout: "表示レイアウト",
+  options: "オプション",
+  closeOptions: "オプションを閉じる",
+  overlayMove: "オーバーレイ移動",
+  overlayLock: "オーバーレイ固定",
+  showStats: "戦績ウィンドウを表示",
+  hideStats: "戦績ウィンドウを閉じる",
+  matchType: "MATCH TYPE",
+  ranked: "ランク",
+  battleHub: "バトルハブ",
+  casual: "カジュアル",
+  windowMode: "WINDOW MODE",
+  windowOrientation: "WINDOW ORIENTATION",
+  horizontal: "横",
+  vertical: "縦",
+  orientationWindowOnly: "WINDOW MODEでのみ使用できます",
+  normal: "通常",
+  overlay: "オーバーレイ",
+  displayOptions: "表示オプション",
+  graph: "GRAPH",
+  fontSize: "FONT SIZE",
+  axisSize: "AXIS SIZE",
+  background: "BACKGROUND",
+  font: "FONT",
+  color: "COLOR",
+  updateInterval: "UPDATE INTERVAL",
+  updateIntervalNote: "30分間対戦がなければ5分間隔、60分で自動停止します",
+  obsBrowser: "OPTION  OBS ブラウザソース",
+  copyUrl: "URLコピー",
+  disclaimer: "非公式のツールです。",
+  matchSession: "MATCH SESSION",
+  resetStats: "戦績をリセット",
+  closeStats: "戦績ウィンドウを閉じる",
+  winsLosses: "勝数と敗数",
+  unknown: "—",
+  loginOpened: "公式ログイン画面を開きました",
+  fetchingPlayer: "ログイン中のプレイヤー情報を取得しています…",
+  playerConfigured: "ログイン中のプレイヤーを設定しました",
+  loginRequired: "要ログイン",
+  startingSession: "現在の戦績を基準としてセッションを開始しています…",
+  monitoringStarted: "ランクマッチの監視を開始しました",
+  sessionEnded: "配信セッションを終了しました",
+  statsReset: "起動後の戦績を0から数え直します",
+  statsShown: "戦績ウィンドウを表示しました",
+  statsHidden: "戦績ウィンドウを閉じました",
+  overlayLockedNotice: "オーバーレイを固定し、クリックをゲームへ透過します",
+  overlayUnlockedNotice: "オーバーレイをドラッグして配置を調整できます",
+  pollChanged: "戦績の取得間隔を変更しました",
+  gameConfigured: "ゲーム実行ファイルを設定しました",
+  launchEnabled: "コンピューター起動時のアプリ実行を有効にしました",
+  launchDisabled: "コンピューター起動時のアプリ実行を無効にしました",
+  chooseGameFirst: "先にゲーム実行ファイルを選択してください",
+  gameDetectionEnabled: "ゲーム起動のバックグラウンド監視を有効にしました",
+  gameDetectionDisabled: "ゲーム起動の検知を無効にしました",
+  obsCopied: "OBS用URLをコピーしました",
+  privateDataDeleted: "このPCのログイン情報を削除しました",
+  autoPlayerConfigured: "ログイン中のプレイヤーを自動設定しました",
+  updateForce: "強制更新",
+  update: "更新",
+  updateDirectory: "更新フォルダ: {name}",
+  updateChecking: "ローカル更新を確認しています…",
+  updateNoFiles: "更新ファイルがありません（{name}）",
+  updateReadError: "更新情報を読み取れませんでした",
+  updateCurrent: "最新版です",
+  updateInstallerMissing: "更新用インストーラーが見つかりません",
+  updateHashMismatch: "更新ファイルの安全性を確認できませんでした",
+  updateReady: "バージョン {version} に更新できます",
+  updateSecurityRequired: "セキュリティ更新が必要です（バージョン {version}）",
+  updateChanged: "更新ファイルが変更されたため中止しました",
+};
+
+const DE = {
+  ...EN,
+  privacyNoSave: "Personenbezogene Daten werden nicht in der App gespeichert",
+  playerConnection: "Spieler verbinden",
+  unverified: "Nicht geprüft",
+  loginNote: "Die offizielle Anmeldeseite wird verwendet. Die App liest ID oder Passwort nie aus.",
+  openOfficial: "Offizielle Seite öffnen",
+  refresh: "Aktualisieren",
+  localData: "Lokale Daten",
+  deleteLogin: "Anmeldedaten löschen",
+  clear: "Löschen",
+  localUpdateNote: "Lokale Updates können hier geprüft werden",
+  location: "Ort",
+  check: "Prüfen",
+  startupHeading: "App beim Computerstart ausführen",
+  startupNote: "Das Verwaltungsfenster wird bei der Windows-Anmeldung angezeigt. Die Spielerkennung kann auch bei AUS im Hintergrund warten.",
+  gameDetectionHeading: "Overlay beim Spielstart anzeigen",
+  gameDetectionNote: "Wähle die .exe des Spiels. Bei Aktivierung wartet der Wächter im Hintergrund und zeigt das Overlay etwa 10 Sekunden nach dem Start.",
+  gameNotSelected: "Kein Spiel ausgewählt",
+  chooseExecutable: "Programm auswählen",
+  playerConnection: "Spielerverbindung",
+  statsMonitor: "Statistikmonitor",
+  stopped: "Angehalten",
+  monitoring: "Überwachung",
+  currentCharacter: "AKTUELLER CHARAKTER",
+  trendDescription: "Änderung seit App-Start",
+  dataWaiting: "Warte auf Daten",
+  graphEmptyRanked: "Das Diagramm erscheint nach der Messung von Ranglistenspielen",
+  graphEmptyOther: "Das Diagramm ist nur für Ranglistenspiele verfügbar",
+  startMeasure: "Messung starten",
+  resumeMeasure: "Messung fortsetzen",
+  nextUpdate: "Nächste Aktualisierung",
+  reset: "Zurücksetzen",
+  end: "Beenden",
+  displayLayout: "Anzeige-Layout",
+  options: "Optionen",
+  closeOptions: "Optionen schließen",
+  overlayMove: "Overlay bewegen",
+  overlayLock: "Overlay fixieren",
+  showStats: "Statistikfenster anzeigen",
+  hideStats: "Statistikfenster schließen",
+  ranked: "Rangliste",
+  battleHub: "Battle Hub",
+  casual: "Gelegenheitsmatch",
+  normal: "Fenster",
+  overlay: "Overlay",
+  displayOptions: "Anzeigeoptionen",
+  updateIntervalNote: "Nach 30 Minuten ohne Match: 5-Minuten-Intervall; automatische Beendigung nach 60 Minuten",
+  copyUrl: "URL kopieren",
+  disclaimer: "Inoffizielles Tool.",
+  loginRequired: "Anmeldung erforderlich",
+  updateForce: "Zwangsupdate",
+};
+
+const FR = {
+  ...EN,
+  privacyNoSave: "Les données personnelles ne sont pas enregistrées dans l'application",
+  playerConnection: "Connexion du joueur",
+  unverified: "Non vérifié",
+  loginNote: "La page de connexion officielle est utilisée. L'application ne lit jamais votre identifiant ni votre mot de passe.",
+  openOfficial: "Ouvrir le site officiel",
+  refresh: "Actualiser",
+  localData: "Données locales",
+  deleteLogin: "Supprimer les données de connexion",
+  clear: "Effacer",
+  localUpdateNote: "Les mises à jour locales peuvent être vérifiées ici",
+  location: "Emplacement",
+  check: "Vérifier",
+  startupHeading: "Exécuter l'application au démarrage de l'ordinateur",
+  startupNote: "Affiche la fenêtre de gestion à la connexion Windows. La détection du jeu peut attendre en arrière-plan même si cette option est désactivée.",
+  gameDetectionHeading: "Afficher l'overlay au lancement du jeu",
+  gameDetectionNote: "Sélectionnez le fichier .exe du jeu. Le suivi attend en arrière-plan et affiche l'overlay environ 10 secondes après le lancement.",
+  gameNotSelected: "Aucun jeu sélectionné",
+  chooseExecutable: "Choisir le programme",
+  statsMonitor: "Moniteur des statistiques",
+  stopped: "Arrêté",
+  monitoring: "Surveillance",
+  currentCharacter: "PERSONNAGE ACTUEL",
+  trendDescription: "Variation depuis le lancement",
+  dataWaiting: "En attente de données",
+  graphEmptyRanked: "Le graphique apparaît après la mesure des matchs classés",
+  graphEmptyOther: "Le graphique est disponible uniquement pour les matchs classés",
+  startMeasure: "Démarrer la mesure",
+  resumeMeasure: "Reprendre la mesure",
+  nextUpdate: "Prochaine mise à jour",
+  reset: "Réinitialiser",
+  end: "Terminer",
+  displayLayout: "Mise en page",
+  options: "Options",
+  closeOptions: "Fermer les options",
+  overlayMove: "Déplacer l'overlay",
+  overlayLock: "Verrouiller l'overlay",
+  showStats: "Afficher la fenêtre de statistiques",
+  hideStats: "Fermer la fenêtre de statistiques",
+  ranked: "Classé",
+  battleHub: "Battle Hub",
+  casual: "Match occasionnel",
+  normal: "Fenêtre",
+  overlay: "Overlay",
+  displayOptions: "Options d'affichage",
+  updateIntervalNote: "Après 30 minutes sans match : intervalle de 5 minutes ; arrêt automatique après 60 minutes",
+  copyUrl: "Copier l'URL",
+  disclaimer: "Outil non officiel.",
+  loginRequired: "Connexion requise",
+  updateForce: "Mise à jour forcée",
+};
+
+const ES = {
+  ...EN,
+  privacyNoSave: "Los datos personales no se guardan en la aplicación",
+  playerConnection: "Conexión del jugador",
+  unverified: "Sin comprobar",
+  loginNote: "Se usa la página oficial de inicio de sesión. La aplicación nunca lee tu ID ni contraseña.",
+  openOfficial: "Abrir sitio oficial",
+  refresh: "Actualizar",
+  localData: "Datos locales",
+  deleteLogin: "Borrar datos de inicio de sesión",
+  clear: "Borrar",
+  localUpdateNote: "Puedes comprobar las actualizaciones locales aquí",
+  location: "Ubicación",
+  check: "Comprobar",
+  startupHeading: "Ejecutar la aplicación al iniciar el equipo",
+  startupNote: "Muestra la ventana de gestión al iniciar sesión en Windows. La detección del juego puede esperar en segundo plano aunque esté desactivada.",
+  gameDetectionHeading: "Mostrar el overlay al iniciar el juego",
+  gameDetectionNote: "Selecciona el .exe del juego. El monitor espera en segundo plano y muestra el overlay unos 10 segundos después del inicio.",
+  gameNotSelected: "Ningún juego seleccionado",
+  chooseExecutable: "Elegir ejecutable",
+  statsMonitor: "Monitor de estadísticas",
+  stopped: "Detenido",
+  monitoring: "Supervisando",
+  currentCharacter: "PERSONAJE ACTUAL",
+  trendDescription: "Cambio desde el inicio de la aplicación",
+  dataWaiting: "Esperando datos",
+  graphEmptyRanked: "El gráfico aparece al medir partidas clasificatorias",
+  graphEmptyOther: "El gráfico solo está disponible para partidas clasificatorias",
+  startMeasure: "Iniciar medición",
+  resumeMeasure: "Reanudar medición",
+  nextUpdate: "Próxima actualización",
+  reset: "Restablecer",
+  end: "Finalizar",
+  displayLayout: "Diseño de pantalla",
+  options: "Opciones",
+  closeOptions: "Cerrar opciones",
+  overlayMove: "Mover overlay",
+  overlayLock: "Fijar overlay",
+  showStats: "Mostrar ventana de estadísticas",
+  hideStats: "Cerrar ventana de estadísticas",
+  ranked: "Clasificatoria",
+  battleHub: "Battle Hub",
+  casual: "Casual",
+  normal: "Ventana",
+  overlay: "Overlay",
+  displayOptions: "Opciones de pantalla",
+  updateIntervalNote: "Tras 30 minutos sin partidas: intervalo de 5 minutos; parada automática tras 60 minutos",
+  copyUrl: "Copiar URL",
+  disclaimer: "Herramienta no oficial.",
+  loginRequired: "Inicio de sesión requerido",
+  updateForce: "Actualización forzada",
+};
+
+const IT = { ...EN, privacyNoSave: "I dati personali non vengono salvati nell'app", playerConnection: "Connessione giocatore", unverified: "Non verificato", openOfficial: "Apri sito ufficiale", refresh: "Aggiorna", localData: "Dati locali", deleteLogin: "Elimina dati di accesso", clear: "Cancella", localUpdateNote: "Controlla qui gli aggiornamenti locali", location: "Posizione", check: "Controlla", startupHeading: "Esegui l'app all'avvio del computer", gameDetectionHeading: "Mostra l'overlay all'avvio del gioco", gameNotSelected: "Nessun gioco selezionato", chooseExecutable: "Scegli eseguibile", statsMonitor: "Monitor statistiche", stopped: "Fermato", monitoring: "Monitoraggio", currentCharacter: "PERSONAGGIO ATTUALE", trendDescription: "Variazione dall'avvio", dataWaiting: "In attesa dei dati", graphEmptyRanked: "Il grafico appare dopo aver misurato le partite classificate", graphEmptyOther: "Il grafico è disponibile solo per le partite classificate", startMeasure: "Avvia misurazione", resumeMeasure: "Riprendi misurazione", nextUpdate: "Prossimo aggiornamento", reset: "Azzera", end: "Fine", displayLayout: "Layout di visualizzazione", options: "Opzioni", closeOptions: "Chiudi opzioni", overlayMove: "Sposta overlay", overlayLock: "Blocca overlay", showStats: "Mostra finestra statistiche", hideStats: "Chiudi finestra statistiche", ranked: "Classificata", battleHub: "Battle Hub", casual: "Casuale", normal: "Finestra", overlay: "Overlay", displayOptions: "Opzioni di visualizzazione", updateIntervalNote: "Dopo 30 minuti senza partite: intervallo di 5 minuti; arresto automatico dopo 60 minuti", copyUrl: "Copia URL", disclaimer: "Strumento non ufficiale.", loginRequired: "Accesso richiesto", updateForce: "Aggiornamento forzato" };
+const KO = { ...EN, privacyNoSave: "개인 정보는 앱에 저장되지 않습니다", playerConnection: "플레이어 연결", unverified: "확인 안 됨", openOfficial: "공식 사이트 열기", refresh: "새로 고침", localData: "로컬 데이터", deleteLogin: "로그인 정보 삭제", clear: "삭제", localUpdateNote: "로컬 업데이트를 여기서 확인할 수 있습니다", location: "위치", check: "확인", startupHeading: "컴퓨터 시작 시 앱 실행", gameDetectionHeading: "게임 시작 시 오버레이 표시", gameNotSelected: "게임이 선택되지 않음", chooseExecutable: "실행 파일 선택", statsMonitor: "전적 모니터", stopped: "중지됨", monitoring: "감시 중", currentCharacter: "현재 캐릭터", trendDescription: "앱 시작 후 변화", dataWaiting: "데이터 대기 중", graphEmptyRanked: "랭크 매치를 측정하면 그래프가 표시됩니다", graphEmptyOther: "그래프는 랭크 매치에서만 사용할 수 있습니다", startMeasure: "측정 시작", resumeMeasure: "측정 재개", nextUpdate: "다음 업데이트", reset: "초기화", end: "종료", displayLayout: "표시 레이아웃", options: "옵션", closeOptions: "옵션 닫기", overlayMove: "오버레이 이동", overlayLock: "오버레이 고정", showStats: "전적 창 표시", hideStats: "전적 창 닫기", ranked: "랭크", battleHub: "배틀 허브", casual: "캐주얼", normal: "일반 창", overlay: "오버레이", displayOptions: "표시 옵션", updateIntervalNote: "30분 동안 대전이 없으면 5분 간격, 60분 후 자동 중지", copyUrl: "URL 복사", disclaimer: "비공식 도구입니다.", loginRequired: "로그인 필요", updateForce: "강제 업데이트" };
+const ZH_HANS = { ...EN, privacyNoSave: "个人信息不会保存在应用中", playerConnection: "玩家连接", unverified: "未确认", openOfficial: "打开官方网站", refresh: "重新获取", localData: "本地数据", deleteLogin: "删除登录信息", clear: "清除", localUpdateNote: "可在此检查本地更新", location: "位置", check: "检查", startupHeading: "计算机启动时运行应用", gameDetectionHeading: "游戏启动时显示覆盖层", gameNotSelected: "未选择游戏", chooseExecutable: "选择可执行文件", statsMonitor: "战绩监视器", stopped: "已停止", monitoring: "监视中", currentCharacter: "当前角色", trendDescription: "应用启动后的变化", dataWaiting: "等待数据", graphEmptyRanked: "测量排位赛后将显示图表", graphEmptyOther: "图表仅适用于排位赛", startMeasure: "开始测量", resumeMeasure: "继续测量", nextUpdate: "下次更新", reset: "重置", end: "结束", displayLayout: "显示布局", options: "选项", closeOptions: "关闭选项", overlayMove: "移动覆盖层", overlayLock: "固定覆盖层", showStats: "显示战绩窗口", hideStats: "关闭战绩窗口", ranked: "排位赛", battleHub: "战斗中心", casual: "休闲赛", normal: "窗口", overlay: "覆盖层", displayOptions: "显示选项", updateIntervalNote: "30分钟无对战后改为5分钟间隔，60分钟后自动停止", copyUrl: "复制URL", disclaimer: "非官方工具。", loginRequired: "需要登录", updateForce: "强制更新" };
+const ZH_HANT = { ...EN, privacyNoSave: "個人資料不會儲存在應用程式中", playerConnection: "玩家連線", unverified: "未確認", openOfficial: "開啟官方網站", refresh: "重新取得", localData: "本機資料", deleteLogin: "刪除登入資訊", clear: "清除", localUpdateNote: "可在此檢查本機更新", location: "位置", check: "檢查", startupHeading: "電腦啟動時執行應用程式", gameDetectionHeading: "遊戲啟動時顯示覆蓋層", gameNotSelected: "尚未選擇遊戲", chooseExecutable: "選擇執行檔", statsMonitor: "戰績監視器", stopped: "已停止", monitoring: "監視中", currentCharacter: "目前角色", trendDescription: "應用程式啟動後的變化", dataWaiting: "等待資料", graphEmptyRanked: "測量排位賽後會顯示圖表", graphEmptyOther: "圖表僅適用於排位賽", startMeasure: "開始測量", resumeMeasure: "繼續測量", nextUpdate: "下次更新", reset: "重設", end: "結束", displayLayout: "顯示版面", options: "選項", closeOptions: "關閉選項", overlayMove: "移動覆蓋層", overlayLock: "固定覆蓋層", showStats: "顯示戰績視窗", hideStats: "關閉戰績視窗", ranked: "排位賽", battleHub: "戰鬥中心", casual: "休閒賽", normal: "視窗", overlay: "覆蓋層", displayOptions: "顯示選項", updateIntervalNote: "30分鐘沒有對戰後改為5分鐘間隔，60分鐘後自動停止", copyUrl: "複製URL", disclaimer: "非官方工具。", loginRequired: "需要登入", updateForce: "強制更新" };
+const PT = { ...EN, privacyNoSave: "Os dados pessoais não são guardados na aplicação", playerConnection: "Ligação do jogador", unverified: "Não verificado", openOfficial: "Abrir site oficial", refresh: "Atualizar", localData: "Dados locais", deleteLogin: "Eliminar dados de acesso", clear: "Limpar", localUpdateNote: "Pode verificar aqui as atualizações locais", location: "Localização", check: "Verificar", startupHeading: "Executar a aplicação ao iniciar o computador", gameDetectionHeading: "Mostrar o overlay ao iniciar o jogo", gameNotSelected: "Nenhum jogo selecionado", chooseExecutable: "Escolher executável", statsMonitor: "Monitor de estatísticas", stopped: "Parado", monitoring: "A monitorizar", currentCharacter: "PERSONAGEM ATUAL", trendDescription: "Alteração desde o arranque", dataWaiting: "A aguardar dados", graphEmptyRanked: "O gráfico aparece depois de medir partidas classificadas", graphEmptyOther: "O gráfico só está disponível para partidas classificadas", startMeasure: "Iniciar medição", resumeMeasure: "Retomar medição", nextUpdate: "Próxima atualização", reset: "Repor", end: "Terminar", displayLayout: "Esquema de apresentação", options: "Opções", closeOptions: "Fechar opções", overlayMove: "Mover overlay", overlayLock: "Fixar overlay", showStats: "Mostrar janela de estatísticas", hideStats: "Fechar janela de estatísticas", ranked: "Classificada", battleHub: "Battle Hub", casual: "Casual", normal: "Janela", overlay: "Overlay", displayOptions: "Opções de apresentação", updateIntervalNote: "Após 30 minutos sem partida: intervalo de 5 minutos; paragem automática após 60 minutos", copyUrl: "Copiar URL", disclaimer: "Ferramenta não oficial.", loginRequired: "Login necessário", updateForce: "Atualização forçada" };
+const PL = { ...EN, privacyNoSave: "Dane osobowe nie są zapisywane w aplikacji", playerConnection: "Połączenie gracza", unverified: "Nie sprawdzono", openOfficial: "Otwórz oficjalną stronę", refresh: "Odśwież", localData: "Dane lokalne", deleteLogin: "Usuń dane logowania", clear: "Wyczyść", localUpdateNote: "Tutaj można sprawdzić lokalne aktualizacje", location: "Lokalizacja", check: "Sprawdź", startupHeading: "Uruchamiaj aplikację przy starcie komputera", gameDetectionHeading: "Pokaż nakładkę po uruchomieniu gry", gameNotSelected: "Nie wybrano gry", chooseExecutable: "Wybierz plik wykonywalny", statsMonitor: "Monitor statystyk", stopped: "Zatrzymano", monitoring: "Monitorowanie", currentCharacter: "AKTUALNA POSTAĆ", trendDescription: "Zmiana od uruchomienia aplikacji", dataWaiting: "Oczekiwanie na dane", graphEmptyRanked: "Wykres pojawi się po pomiarze meczów rankingowych", graphEmptyOther: "Wykres jest dostępny tylko dla meczów rankingowych", startMeasure: "Rozpocznij pomiar", resumeMeasure: "Wznów pomiar", nextUpdate: "Następna aktualizacja", reset: "Resetuj", end: "Zakończ", displayLayout: "Układ wyświetlania", options: "Opcje", closeOptions: "Zamknij opcje", overlayMove: "Przenieś nakładkę", overlayLock: "Zablokuj nakładkę", showStats: "Pokaż okno statystyk", hideStats: "Zamknij okno statystyk", ranked: "Rankingowe", battleHub: "Battle Hub", casual: "Swobodne", normal: "Okno", overlay: "Nakładka", displayOptions: "Opcje wyświetlania", updateIntervalNote: "Po 30 minutach bez meczu: interwał 5 minut; automatyczne zatrzymanie po 60 minutach", copyUrl: "Kopiuj URL", disclaimer: "Nieoficjalne narzędzie.", loginRequired: "Wymagane logowanie", updateForce: "Wymuszona aktualizacja" };
+const RU = { ...EN, privacyNoSave: "Персональные данные не сохраняются в приложении", playerConnection: "Подключение игрока", unverified: "Не проверено", openOfficial: "Открыть официальный сайт", refresh: "Обновить", localData: "Локальные данные", deleteLogin: "Удалить данные входа", clear: "Очистить", localUpdateNote: "Здесь можно проверить локальные обновления", location: "Расположение", check: "Проверить", startupHeading: "Запускать приложение при включении компьютера", gameDetectionHeading: "Показывать оверлей при запуске игры", gameNotSelected: "Игра не выбрана", chooseExecutable: "Выбрать исполняемый файл", statsMonitor: "Монитор статистики", stopped: "Остановлено", monitoring: "Мониторинг", currentCharacter: "ТЕКУЩИЙ ПЕРСОНАЖ", trendDescription: "Изменение с запуска приложения", dataWaiting: "Ожидание данных", graphEmptyRanked: "График появится после измерения рейтинговых матчей", graphEmptyOther: "График доступен только для рейтинговых матчей", startMeasure: "Начать измерение", resumeMeasure: "Продолжить измерение", nextUpdate: "Следующее обновление", reset: "Сбросить", end: "Завершить", displayLayout: "Макет отображения", options: "Параметры", closeOptions: "Закрыть параметры", overlayMove: "Переместить оверлей", overlayLock: "Закрепить оверлей", showStats: "Показать окно статистики", hideStats: "Закрыть окно статистики", ranked: "Рейтинговый", battleHub: "Battle Hub", casual: "Обычный", normal: "Окно", overlay: "Оверлей", displayOptions: "Параметры отображения", updateIntervalNote: "После 30 минут без матча: интервал 5 минут; автоостановка через 60 минут", copyUrl: "Копировать URL", disclaimer: "Неофициальный инструмент.", loginRequired: "Требуется вход", updateForce: "Принудительное обновление" };
+const AR = { ...EN, privacyNoSave: "لا يتم حفظ البيانات الشخصية في التطبيق", playerConnection: "اتصال اللاعب", unverified: "غير متحقق", openOfficial: "فتح الموقع الرسمي", refresh: "تحديث", localData: "البيانات المحلية", deleteLogin: "حذف بيانات تسجيل الدخول", clear: "مسح", localUpdateNote: "يمكن التحقق من التحديثات المحلية هنا", location: "الموقع", check: "تحقق", startupHeading: "تشغيل التطبيق عند بدء تشغيل الكمبيوتر", gameDetectionHeading: "إظهار التراكب عند بدء اللعبة", gameNotSelected: "لم يتم اختيار لعبة", chooseExecutable: "اختيار الملف التنفيذي", statsMonitor: "مراقب الإحصاءات", stopped: "متوقف", monitoring: "تحت المراقبة", currentCharacter: "الشخصية الحالية", trendDescription: "التغيير منذ تشغيل التطبيق", dataWaiting: "في انتظار البيانات", graphEmptyRanked: "يظهر الرسم بعد قياس مباريات التصنيف", graphEmptyOther: "الرسم متاح لمباريات التصنيف فقط", startMeasure: "بدء القياس", resumeMeasure: "استئناف القياس", nextUpdate: "التحديث التالي", reset: "إعادة ضبط", end: "إنهاء", displayLayout: "تخطيط العرض", options: "الخيارات", closeOptions: "إغلاق الخيارات", overlayMove: "تحريك التراكب", overlayLock: "تثبيت التراكب", showStats: "إظهار نافذة الإحصاءات", hideStats: "إغلاق نافذة الإحصاءات", ranked: "تصنيف", battleHub: "Battle Hub", casual: "عادي", normal: "نافذة", overlay: "تراكب", displayOptions: "خيارات العرض", updateIntervalNote: "بعد 30 دقيقة دون مباراة: الفاصل 5 دقائق؛ إيقاف تلقائي بعد 60 دقيقة", copyUrl: "نسخ الرابط", disclaimer: "أداة غير رسمية.", loginRequired: "يلزم تسجيل الدخول", updateForce: "تحديث إجباري" };
+
+const FONT_STYLE_LABELS = {
+  de: { fontStyle: "STIL", fontNormal: "Normal", fontItalic: "Kursiv" },
+  es: { fontStyle: "ESTILO", fontNormal: "Normal", fontItalic: "Cursiva" },
+  fr: { fontStyle: "STYLE", fontNormal: "Normal", fontItalic: "Italique" },
+  it: { fontStyle: "STILE", fontNormal: "Normale", fontItalic: "Corsivo" },
+  ko: { fontStyle: "스타일", fontNormal: "일반", fontItalic: "기울임" },
+  "zh-hans": { fontStyle: "样式", fontNormal: "常规", fontItalic: "斜体" },
+  "zh-hant": { fontStyle: "樣式", fontNormal: "一般", fontItalic: "斜體" },
+  pt: { fontStyle: "ESTILO", fontNormal: "Normal", fontItalic: "Itálico" },
+  pl: { fontStyle: "STYL", fontNormal: "Normalny", fontItalic: "Kursywa" },
+  ru: { fontStyle: "СТИЛЬ", fontNormal: "Обычный", fontItalic: "Курсив" },
+  ar: { fontStyle: "النمط", fontNormal: "عادي", fontItalic: "مائل" },
+};
+
+const PRODUCTION_DISCLAIMERS = {
+  en: "Unofficial tool.",
+  "ja-jp": "非公式のツールです。",
+  de: "Inoffizielles Tool.",
+  es: "Herramienta no oficial.",
+  fr: "Outil non officiel.",
+  it: "Strumento non ufficiale.",
+  ko: "비공식 도구입니다.",
+  "zh-hans": "非官方工具。",
+  "zh-hant": "非官方工具。",
+  pt: "Ferramenta não oficial.",
+  pl: "Nieoficjalne narzędzie.",
+  ru: "Неофициальный инструмент.",
+  ar: "أداة غير رسمية.",
+};
+
+const PRIVACY_BADGES = {
+  en: "Passwords are not saved. Login session is stored on this PC.",
+  "ja-jp": "ID・パスワードは保存しません。ログイン状態はこのPCに保存されます。",
+  de: "ID und Passwort werden nicht gespeichert. Die Anmeldesitzung wird auf diesem PC gespeichert.",
+  es: "El ID y la contraseña no se guardan. La sesión de inicio se guarda en este PC.",
+  fr: "L’identifiant et le mot de passe ne sont pas enregistrés. La session de connexion est conservée sur ce PC.",
+  it: "ID e password non vengono salvati. La sessione di accesso viene conservata su questo PC.",
+  ko: "ID와 비밀번호는 저장되지 않습니다. 로그인 세션은 이 PC에 저장됩니다.",
+  "zh-hans": "不会保存ID和密码。登录会话会保存在此电脑上。",
+  "zh-hant": "不會儲存ID和密碼。登入工作階段會保存在此電腦上。",
+  pt: "O ID e a palavra-passe não são guardados. A sessão de início de sessão é guardada neste PC.",
+  pl: "Identyfikator i hasło nie są zapisywane. Sesja logowania jest przechowywana na tym komputerze.",
+  ru: "Идентификатор и пароль не сохраняются. Сеанс входа хранится на этом компьютере.",
+  ar: "لا يتم حفظ المعرّف وكلمة المرور. يتم حفظ جلسة تسجيل الدخول على هذا الكمبيوتر.",
+};
+
+Object.assign(DE, FONT_STYLE_LABELS.de);
+Object.assign(ES, FONT_STYLE_LABELS.es);
+Object.assign(FR, FONT_STYLE_LABELS.fr);
+Object.assign(IT, FONT_STYLE_LABELS.it);
+Object.assign(KO, FONT_STYLE_LABELS.ko);
+Object.assign(ZH_HANS, FONT_STYLE_LABELS["zh-hans"]);
+Object.assign(ZH_HANT, FONT_STYLE_LABELS["zh-hant"]);
+Object.assign(PT, FONT_STYLE_LABELS.pt);
+Object.assign(PL, FONT_STYLE_LABELS.pl);
+Object.assign(RU, FONT_STYLE_LABELS.ru);
+Object.assign(AR, FONT_STYLE_LABELS.ar);
+Object.assign(EN, { disclaimer: PRODUCTION_DISCLAIMERS.en });
+Object.assign(JA, { disclaimer: PRODUCTION_DISCLAIMERS["ja-jp"] });
+Object.assign(DE, { disclaimer: PRODUCTION_DISCLAIMERS.de });
+Object.assign(ES, { disclaimer: PRODUCTION_DISCLAIMERS.es });
+Object.assign(FR, { disclaimer: PRODUCTION_DISCLAIMERS.fr });
+Object.assign(IT, { disclaimer: PRODUCTION_DISCLAIMERS.it });
+Object.assign(KO, { disclaimer: PRODUCTION_DISCLAIMERS.ko });
+Object.assign(ZH_HANS, { disclaimer: PRODUCTION_DISCLAIMERS["zh-hans"] });
+Object.assign(ZH_HANT, { disclaimer: PRODUCTION_DISCLAIMERS["zh-hant"] });
+Object.assign(PT, { disclaimer: PRODUCTION_DISCLAIMERS.pt });
+Object.assign(PL, { disclaimer: PRODUCTION_DISCLAIMERS.pl });
+Object.assign(RU, { disclaimer: PRODUCTION_DISCLAIMERS.ru });
+Object.assign(AR, { disclaimer: PRODUCTION_DISCLAIMERS.ar });
+Object.assign(EN, { privacyNoSave: PRIVACY_BADGES.en });
+Object.assign(JA, { privacyNoSave: PRIVACY_BADGES["ja-jp"] });
+Object.assign(DE, { privacyNoSave: PRIVACY_BADGES.de });
+Object.assign(ES, { privacyNoSave: PRIVACY_BADGES.es });
+Object.assign(FR, { privacyNoSave: PRIVACY_BADGES.fr });
+Object.assign(IT, { privacyNoSave: PRIVACY_BADGES.it });
+Object.assign(KO, { privacyNoSave: PRIVACY_BADGES.ko });
+Object.assign(ZH_HANS, { privacyNoSave: PRIVACY_BADGES["zh-hans"] });
+Object.assign(ZH_HANT, { privacyNoSave: PRIVACY_BADGES["zh-hant"] });
+Object.assign(PT, { privacyNoSave: PRIVACY_BADGES.pt });
+Object.assign(PL, { privacyNoSave: PRIVACY_BADGES.pl });
+Object.assign(RU, { privacyNoSave: PRIVACY_BADGES.ru });
+Object.assign(AR, { privacyNoSave: PRIVACY_BADGES.ar });
+
+const PACKS = {
+  "ja-jp": JA,
+  en: EN,
+  de: DE,
+  "es-es": ES,
+  "es-us": ES,
+  fr: FR,
+  it: IT,
+  "ko-kr": KO,
+  "zh-hans": ZH_HANS,
+  "zh-hant": ZH_HANT,
+  "pt-br": PT,
+  pl: PL,
+  ru: RU,
+  ar: AR,
+};
+
+// These controls are shared by every supported locale. Keep the labels in
+// the local dictionary so the settings screen remains usable offline.
+const ORIENTATION_LABELS = {
+  "ja-jp": {
+    windowOrientation: "WINDOW ORIENTATION",
+    horizontal: "横",
+    vertical: "縦",
+    orientationWindowOnly: "WINDOW MODEでのみ使用できます",
+  },
+  en: {
+    windowOrientation: "WINDOW ORIENTATION",
+    horizontal: "Horizontal",
+    vertical: "Vertical",
+    orientationWindowOnly: "Available in WINDOW MODE",
+  },
+  de: {
+    windowOrientation: "FENSTERAUSRICHTUNG",
+    horizontal: "Horizontal",
+    vertical: "Vertikal",
+    orientationWindowOnly: "Nur im WINDOW MODE verfügbar",
+  },
+  "es-es": {
+    windowOrientation: "ORIENTACIÓN DE VENTANA",
+    horizontal: "Horizontal",
+    vertical: "Vertical",
+    orientationWindowOnly: "Disponible en WINDOW MODE",
+  },
+  "es-us": {
+    windowOrientation: "ORIENTACIÓN DE VENTANA",
+    horizontal: "Horizontal",
+    vertical: "Vertical",
+    orientationWindowOnly: "Disponible en WINDOW MODE",
+  },
+  fr: {
+    windowOrientation: "ORIENTATION DE LA FENÊTRE",
+    horizontal: "Horizontal",
+    vertical: "Vertical",
+    orientationWindowOnly: "Disponible en WINDOW MODE",
+  },
+  it: {
+    windowOrientation: "ORIENTAMENTO FINESTRA",
+    horizontal: "Orizzontale",
+    vertical: "Verticale",
+    orientationWindowOnly: "Disponibile in WINDOW MODE",
+  },
+  "ko-kr": {
+    windowOrientation: "창 방향",
+    horizontal: "가로",
+    vertical: "세로",
+    orientationWindowOnly: "WINDOW MODE에서만 사용 가능",
+  },
+  "zh-hans": {
+    windowOrientation: "窗口方向",
+    horizontal: "横向",
+    vertical: "纵向",
+    orientationWindowOnly: "仅适用于 WINDOW MODE",
+  },
+  "zh-hant": {
+    windowOrientation: "視窗方向",
+    horizontal: "橫向",
+    vertical: "縱向",
+    orientationWindowOnly: "僅適用於 WINDOW MODE",
+  },
+  "pt-br": {
+    windowOrientation: "ORIENTAÇÃO DA JANELA",
+    horizontal: "Horizontal",
+    vertical: "Vertical",
+    orientationWindowOnly: "Disponível no WINDOW MODE",
+  },
+  pl: {
+    windowOrientation: "ORIENTACJA OKNA",
+    horizontal: "Poziomo",
+    vertical: "Pionowo",
+    orientationWindowOnly: "Dostępne w WINDOW MODE",
+  },
+  ru: {
+    windowOrientation: "ОРИЕНТАЦИЯ ОКНА",
+    horizontal: "Горизонтально",
+    vertical: "Вертикально",
+    orientationWindowOnly: "Доступно только в WINDOW MODE",
+  },
+  ar: {
+    windowOrientation: "اتجاه النافذة",
+    horizontal: "أفقي",
+    vertical: "عمودي",
+    orientationWindowOnly: "متاح في WINDOW MODE فقط",
+  },
+};
+
+for (const [locale, labels] of Object.entries(ORIENTATION_LABELS)) {
+  Object.assign(PACKS[locale], labels);
+}
+
+// The service exposes tool names, while the official character names differ
+// between the Japanese release and the other supported regions. Keep this
+// small alias table local so no character metadata is sent anywhere.
+const CHARACTER_NAME_ALIASES = {
+  GOUKI: { ja: "GOUKI", intl: "AKUMA" },
+  AKUMA: { ja: "GOUKI", intl: "AKUMA" },
+  豪鬼: { ja: "GOUKI", intl: "AKUMA" },
+  VEGA: { ja: "VEGA", intl: "M. BISON" },
+  BALROG: { ja: "BALROG", intl: "VEGA" },
+  MBISON: { ja: "M. BISON", intl: "BALROG" },
+};
+
+let activeLocale = "ja-jp";
+
+function packFor(locale = activeLocale) {
+  return PACKS[locale] ?? EN;
+}
+
+function translate(key, locale = activeLocale) {
+  const pack = packFor(locale);
+  return pack[key] ?? EN[key] ?? key;
+}
+
+function characterName(value, locale = activeLocale) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+  const normalized = raw.toLocaleUpperCase("en-US").replace(/[.\s_-]+/g, "");
+  const alias = CHARACTER_NAME_ALIASES[normalized];
+  if (alias) return alias[locale === "ja-jp" ? "ja" : "intl"];
+  return raw.toLocaleUpperCase("en-US");
+}
+
+function applyTranslations(root = document, locale = activeLocale) {
+  activeLocale = LOCALES[locale] ? locale : "ja-jp";
+  const pack = packFor(activeLocale);
+  root.documentElement.lang = activeLocale;
+  root.documentElement.dir = activeLocale === "ar" ? "rtl" : "ltr";
+  for (const element of root.querySelectorAll("[data-i18n]")) {
+    const value = pack[element.dataset.i18n] ?? EN[element.dataset.i18n];
+    if (value != null) element.textContent = value;
+  }
+  for (const element of root.querySelectorAll("[data-i18n-title]")) {
+    const value = pack[element.dataset.i18nTitle] ?? EN[element.dataset.i18nTitle];
+    if (value != null) element.title = value;
+  }
+  for (const element of root.querySelectorAll("[data-i18n-aria-label]")) {
+    const value = pack[element.dataset.i18nAriaLabel] ?? EN[element.dataset.i18nAriaLabel];
+    if (value != null) element.setAttribute("aria-label", value);
+  }
+}
+
+function ratingLabel(ratingType, locale = activeLocale) {
+  return `${translate("currentRating", locale)} ${ratingType || "MR"}`;
+}
+
+function statusLabel(status, locale = activeLocale) {
+  const statusKey = status === "監視中" ? "monitoring" : status === "停止中" ? "stopped" : null;
+  return statusKey ? translate(statusKey, locale) : status;
+}
+
+window.matchOverlayI18n = {
+  LOCALES,
+  applyTranslations,
+  ratingLabel,
+  statusLabel,
+  characterName,
+  t: translate,
+};

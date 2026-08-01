@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="ja-jp">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Session Stats</title>
+    <link rel="stylesheet" href="./stats.css" />
+  </head>
+  <body>
+    <main class="stats-window no-chart" id="statsWindow">
+      <div class="drag-strip">
+        <img
+          class="header-graffiti"
+          src="./assets/header-graffiti-m.png"
+          alt=""
+          aria-hidden="true"
+        />
+        <span data-i18n="matchSession">MATCH SESSION</span>
+        <div class="window-actions">
+          <button id="resetButton" data-i18n-aria-label="resetStats" data-i18n-title="resetStats" aria-label="戦績をリセット" title="戦績をリセット">↻</button>
+          <button id="hideButton" data-i18n-aria-label="closeStats" data-i18n-title="closeStats" aria-label="戦績ウィンドウを閉じる" title="戦績ウィンドウを閉じる">×</button>
+        </div>
+      </div>
+      <nav class="match-tabs" data-i18n-aria-label="matchType" aria-label="対戦種別">
+        <button class="active" data-match-type="ranked" data-i18n="ranked">ランク</button>
+        <button data-match-type="battleHub" data-i18n="battleHub">バトルハブ</button>
+        <button data-match-type="casual" data-i18n="casual">カジュアル</button>
+      </nav>
+      <section class="summary">
+        <div class="record-group" data-i18n-aria-label="winsLosses" aria-label="勝数と敗数">
+          <span class="record-labels"><span>W</span><span>L</span></span>
+          <strong class="record-values"><span id="recordWins">0</span><span>-</span><span id="recordLosses">0</span></strong>
+        </div>
+        <span class="divider"></span>
+        <div class="metric-group">
+          <small data-i18n="winRate">勝率</small>
+          <strong class="accent" id="winRate">0.0%</strong>
+        </div>
+        <span class="divider"></span>
+        <div class="metric-group">
+          <small id="ratingTypeLabel">MR</small>
+          <strong id="ratingDelta">±0</strong>
+        </div>
+      </section>
+      <section class="stats-chart" id="statsChartPanel">
+        <header>
+          <span class="chart-label" id="statsChartLabel">MR TREND</span>
+          <span class="chart-state" id="statsChartState" data-i18n="dataWaiting">データ待機中</span>
+        </header>
+        <div class="stats-chart-body">
+          <canvas id="statsRatingChart" data-i18n-aria-label="graphAriaLabel" aria-label="起動後のMR推移グラフ"></canvas>
+          <p class="stats-chart-empty" id="statsChartEmpty"><span data-i18n="graphEmptyRanked">ランクマッチを計測するとグラフが表示されます</span></p>
+        </div>
+      </section>
+    </main>
+    <script src="./i18n.js"></script>
+    <script src="./stats.js"></script>
+  </body>
+</html>
