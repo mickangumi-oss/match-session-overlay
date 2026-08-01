@@ -10,7 +10,9 @@ electronFuses:
   enableEmbeddedAsarIntegrityValidation: true
   onlyLoadAppFromAsar: true
   loadBrowserProcessSpecificV8Snapshot: false
-  grantFileProtocolExtraPrivileges: false
+  # The renderer UI is loaded from file:// inside app.asar. Electron 43
+  # requires these standard file-protocol privileges for that page to load.
+  grantFileProtocolExtraPrivileges: true
 files:
   - package.json
   - src/**/*

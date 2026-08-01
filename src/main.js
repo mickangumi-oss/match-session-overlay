@@ -3,6 +3,7 @@
 const fs = require("node:fs");
 const http = require("node:http");
 const path = require("node:path");
+const { pathToFileURL } = require("node:url");
 const { execFile } = require("node:child_process");
 const { promisify } = require("node:util");
 const {
@@ -999,6 +1000,12 @@ function configureRemoteSession(ses) {
   });
 }
 
+function loadRendererFile(targetWindow, filePath) {
+  // Use an explicit file URL so packaged Windows builds resolve files inside
+  // app.asar consistently, including paths containing spaces.
+  return targetWindow.loadURL(pathToFileURL(filePath).toString());
+}
+
 function createMainWindow() {
   const workAreaHeight = screen.getPrimaryDisplay().workAreaSize.height;
   const initialHeight = Math.min(800, Math.max(720, workAreaHeight - 40));
@@ -1019,7 +1026,7 @@ function createMainWindow() {
   });
   mainWindow.removeMenu();
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
-  mainWindow.loadFile(path.join(__dirname, "renderer", "index.html"));
+  loadRendererFile(mainWindow, path.join(__dirname, "renderer", "index.html"));
   mainWindow.webContents.once("did-finish-load", () => {
     checkAuthentication()
       .then(({ player }) => {
@@ -1075,7 +1082,7 @@ function openStatsWindow() {
     },
   });
   statsWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
-  statsWindow.loadFile(path.join(__dirname, "renderer", "stats.html"));
+  loadRendererFile(statsWindow, path.join(__dirname, "renderer", "stats.html"));
   statsWindow.once("ready-to-show", () => {
     applyDisplayMode();
     sendTrackerState();
