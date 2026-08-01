@@ -4,6 +4,7 @@
   --stats-font-style: normal;
   font-family: var(--stats-font-family);
   --font-scale: 1;
+  --stats-value-scale: 1;
   --panel-opacity: 0.94;
   --text: #f7f8ff;
   --muted: color-mix(in srgb, var(--text) 67%, transparent);
@@ -223,7 +224,7 @@ body.remote-overlay {
 
 .summary strong {
   font-family: var(--stats-font-family);
-  font-size: min(calc(23px * var(--font-scale)), 7vw);
+  font-size: min(calc(23px * var(--stats-value-scale)), 7vw);
   font-style: var(--stats-font-style);
   font-weight: 700;
   font-variant-numeric: tabular-nums;
@@ -344,7 +345,7 @@ body.remote-overlay {
 }
 
 .overlay .summary strong {
-  font-size: min(calc(18px * var(--font-scale)), 9vw);
+  font-size: min(calc(18px * var(--stats-value-scale)), 9vw);
 }
 
 .overlay .metric-group {
@@ -420,7 +421,11 @@ body.remote-overlay {
 }
 
 .stats-window.horizontal .summary strong {
-  font-size: clamp(28px, 4.8vw, 46px);
+  font-size: clamp(
+    calc(28px * var(--stats-value-scale)),
+    calc(4.8vw * var(--stats-value-scale)),
+    calc(46px * var(--stats-value-scale))
+  );
 }
 
 .stats-window.vertical {
@@ -477,7 +482,11 @@ body.remote-overlay {
 }
 
 .stats-window.vertical .summary strong {
-  font-size: clamp(34px, 10vw, 54px);
+  font-size: clamp(
+    calc(34px * var(--stats-value-scale)),
+    calc(10vw * var(--stats-value-scale)),
+    calc(54px * var(--stats-value-scale))
+  );
 }
 
 .stats-window.vertical .record-labels,
@@ -566,11 +575,11 @@ body.remote-overlay {
   }
 
   .summary strong {
-    font-size: calc(19px * var(--font-scale));
+    font-size: calc(19px * var(--stats-value-scale));
   }
 
   .overlay .summary strong {
-    font-size: min(calc(16px * var(--font-scale)), 23px);
+    font-size: min(calc(16px * var(--stats-value-scale)), 23px);
   }
 }
 
@@ -693,7 +702,11 @@ body.remote-overlay {
   }
 
   .stats-window.horizontal:not(.overlay) .summary strong {
-    font-size: clamp(36px, 5.4vw, 64px);
+    font-size: clamp(
+      calc(36px * var(--stats-value-scale)),
+      calc(5.4vw * var(--stats-value-scale)),
+      calc(64px * var(--stats-value-scale))
+    );
     line-height: 0.92;
     text-shadow:
       0 2px 2px #000,
@@ -773,7 +786,11 @@ body.remote-overlay {
   }
 
   .stats-window.vertical:not(.overlay) .summary strong {
-    font-size: clamp(42px, 12vw, 66px);
+    font-size: clamp(
+      calc(42px * var(--stats-value-scale)),
+      calc(12vw * var(--stats-value-scale)),
+      calc(66px * var(--stats-value-scale))
+    );
     line-height: 0.92;
   }
 
@@ -912,7 +929,11 @@ body.remote-overlay {
 }
 
 .stats-window.overlay .summary strong {
-  font-size: clamp(18px, 6vw, 25px);
+  font-size: clamp(
+    calc(18px * var(--stats-value-scale)),
+    calc(6vw * var(--stats-value-scale)),
+    calc(25px * var(--stats-value-scale))
+  );
   line-height: 0.9;
 }
 
@@ -954,7 +975,11 @@ body.remote-overlay {
 }
 
 .stats-window.vertical.overlay .summary strong {
-  font-size: clamp(34px, 10vw, 54px);
+  font-size: clamp(
+    calc(34px * var(--stats-value-scale)),
+    calc(10vw * var(--stats-value-scale)),
+    calc(54px * var(--stats-value-scale))
+  );
 }
 
 /* Keep W/L close at one digit, then grow naturally for 2- and 3-digit
