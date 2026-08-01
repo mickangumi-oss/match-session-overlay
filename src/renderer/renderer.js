@@ -366,9 +366,10 @@ function resolveRatingType(state = trackerState) {
 }
 
 function renderManagementChart(state) {
-  const graphEnabled = displaySettings.graphVisible !== false;
-  elements.managementChartPanel.classList.toggle("hidden", !graphEnabled);
-  if (!graphEnabled) return;
+  // The graph option controls the compact stats window/overlay only. The
+  // management screen is the dedicated graph workspace and always keeps it
+  // visible for inspection.
+  elements.managementChartPanel.classList.remove("hidden");
 
   const matchType = displaySettings.matchType ?? "ranked";
   const ratingType = resolveRatingType(state);
@@ -524,22 +525,13 @@ function renderDisplaySettings(settings) {
   for (const button of document.querySelectorAll("[data-window-orientation]")) {
     const active = button.dataset.windowOrientation === windowOrientation;
     button.classList.toggle("active", active);
-    button.disabled = settings.mode !== "window";
+    button.disabled = false;
     button.setAttribute("aria-pressed", String(active));
   }
-  elements.windowOrientationControl?.classList.toggle(
-    "disabled-control",
-    settings.mode !== "window",
-  );
   elements.windowOrientationControl?.setAttribute(
     "aria-disabled",
-    String(settings.mode !== "window"),
+    "false",
   );
-  if (settings.mode !== "window") {
-    elements.windowOrientationControl?.setAttribute("title", t("orientationWindowOnly", "WINDOW MODE only"));
-  } else {
-    elements.windowOrientationControl?.removeAttribute("title");
-  }
   for (const button of document.querySelectorAll("[data-match-type]")) {
     button.classList.toggle("active", button.dataset.matchType === settings.matchType);
   }
@@ -905,7 +897,7 @@ elements.gameDetectionInput.addEventListener("change", async () => {
 });
 
 window.addEventListener("resize", () => {
-  if (trackerState && displaySettings.graphVisible !== false) {
+  if (trackerState) {
     renderManagementChart(trackerState);
   }
 });

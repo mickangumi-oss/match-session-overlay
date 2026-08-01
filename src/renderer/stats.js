@@ -250,8 +250,6 @@ function drawStatsChart(history) {
 
 function renderStatsChart(state) {
   const isVertical =
-    !remoteOverlay &&
-    displaySettings?.mode === "window" &&
     displaySettings?.windowOrientation === "vertical" &&
     displaySettings?.graphVisible !== false;
   elements.statsChartPanel.classList.toggle("hidden", !isVertical);
@@ -325,7 +323,7 @@ function renderSettings(settings) {
   elements.root.classList.toggle("overlay", settings.mode === "overlay");
   elements.root.classList.toggle(
     "vertical",
-    settings.mode === "window" && settings.windowOrientation === "vertical",
+    settings.windowOrientation === "vertical",
   );
   elements.root.classList.toggle(
     "horizontal",
@@ -333,9 +331,7 @@ function renderSettings(settings) {
   );
   elements.root.classList.toggle(
     "no-chart",
-    settings.mode !== "window" ||
-      settings.windowOrientation !== "vertical" ||
-      settings.graphVisible === false,
+    settings.windowOrientation !== "vertical" || settings.graphVisible === false,
   );
   elements.root.classList.toggle(
     "transparent",
