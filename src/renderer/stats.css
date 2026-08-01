@@ -920,6 +920,43 @@ body.remote-overlay {
   display: none;
 }
 
+/* The compact overlay rules above intentionally use a three-column summary
+   for horizontal HUDs.  A vertical overlay must opt back into the stacked
+   layout; otherwise the tall window only stretches the horizontal cards. */
+.stats-window.vertical.overlay:not(.transparent) {
+  background-image:
+    linear-gradient(
+      rgba(4, 8, 15, calc(1 - var(--panel-opacity))),
+      rgba(4, 8, 15, calc(1 - var(--panel-opacity)))
+    ),
+    url("./assets/stats-frame-vertical.png");
+}
+
+.stats-window.vertical.overlay .summary {
+  height: auto;
+  grid-template-columns: 1fr;
+  grid-template-rows: repeat(3, minmax(78px, auto));
+  gap: 8px;
+  padding: 0;
+  white-space: normal;
+}
+
+.stats-window.vertical.overlay .summary > .record-group,
+.stats-window.vertical.overlay .summary > .metric-group {
+  height: auto;
+  min-height: 78px;
+  padding: 9px 14px;
+}
+
+.stats-window.vertical.overlay .record-labels,
+.stats-window.vertical.overlay .summary small {
+  font-size: min(calc(10px * var(--font-scale)), 13px);
+}
+
+.stats-window.vertical.overlay .summary strong {
+  font-size: clamp(34px, 10vw, 54px);
+}
+
 /* Keep W/L close at one digit, then grow naturally for 2- and 3-digit
    records instead of reserving a large empty fractional column. */
 .stats-window .record-labels,
