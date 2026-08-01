@@ -302,6 +302,10 @@ function renderSettings(settings) {
   localeApi?.applyTranslations?.(document, settings.locale || "ja-jp");
   document.documentElement.style.setProperty(
     "--font-scale",
+    "1",
+  );
+  document.documentElement.style.setProperty(
+    "--stats-value-scale",
     String(settings.fontScale),
   );
   document.documentElement.style.setProperty(
