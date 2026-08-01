@@ -1,6 +1,8 @@
 :root {
   color-scheme: dark;
   --stats-font-family: Impact, "Arial Black", "Bahnschrift Condensed", sans-serif;
+  --stats-value-font-family: var(--stats-font-family);
+  --stats-label-font-family: var(--stats-font-family);
   --stats-font-style: normal;
   font-family: var(--stats-font-family);
   --font-scale: 1;
@@ -197,7 +199,7 @@ body.remote-overlay {
   background: transparent;
   color: rgba(255, 255, 255, 0.48);
   cursor: pointer;
-  font: 750 10px/1.2 inherit;
+  font: 750 10px/1.2 var(--stats-label-font-family);
   text-shadow: 0 1px 3px #000;
 }
 
@@ -223,7 +225,7 @@ body.remote-overlay {
 }
 
 .summary strong {
-  font-family: var(--stats-font-family);
+  font-family: var(--stats-value-font-family);
   font-size: min(calc(23px * var(--stats-value-scale)), 7vw);
   font-style: var(--stats-font-style);
   font-weight: 700;
@@ -261,7 +263,8 @@ body.remote-overlay {
 
 .record-labels {
   color: var(--muted);
-  font: 750 min(calc(10px * var(--font-scale)), 3vw)/1 inherit;
+  font: 750 min(calc(10px * var(--font-scale)), 3vw)/1
+    var(--stats-label-font-family);
   letter-spacing: 0.06em;
   text-shadow: 0 1px 3px #000;
 }
@@ -272,7 +275,8 @@ body.remote-overlay {
 
 .summary small {
   color: var(--muted);
-  font: 750 min(calc(10px * var(--font-scale)), 3vw)/1 inherit;
+  font: 750 min(calc(10px * var(--font-scale)), 3vw)/1
+    var(--stats-label-font-family);
   letter-spacing: 0.06em;
   text-shadow:
     0 1px 2px #000,
