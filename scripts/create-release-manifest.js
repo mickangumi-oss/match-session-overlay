@@ -3,6 +3,7 @@
 const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
+const { MANIFEST_NAME } = require("../src/updater");
 
 const root = path.resolve(__dirname, "..");
 const packageJson = JSON.parse(
@@ -10,7 +11,7 @@ const packageJson = JSON.parse(
 );
 const file = `Match-Session-Overlay-${packageJson.version}-Setup.exe`;
 const installerPath = path.join(root, "dist", file);
-const manifestPath = path.join(root, "dist", "local-update.json");
+const manifestPath = path.join(root, "dist", MANIFEST_NAME);
 
 if (!fs.existsSync(installerPath)) {
   throw new Error(`Installer not found: ${installerPath}`);
@@ -42,6 +43,7 @@ if (minimumVersion && compareVersions(minimumVersion, packageJson.version) > 0) 
     "MATCH_SESSION_OVERLAY_MINIMUM_VERSION cannot exceed the release version",
   );
 }
+
 const manifest = { version: packageJson.version, file, sha256 };
 if (forceUpdate) manifest.force = true;
 if (minimumVersion) manifest.minimumVersion = minimumVersion;

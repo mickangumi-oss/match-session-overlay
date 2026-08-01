@@ -176,8 +176,6 @@ const localDataRoot =
 const userDataPath = path.join(localDataRoot, "user-data");
 const sessionDataPath = path.join(localDataRoot, "session-data");
 const displaySettingsPath = path.join(userDataPath, "display-settings.json");
-const updateSettingsPath = path.join(userDataPath, "update-settings.json");
-const defaultUpdateSourcePath = path.join(localDataRoot, "updates");
 fs.mkdirSync(userDataPath, { recursive: true });
 fs.mkdirSync(sessionDataPath, { recursive: true });
 app.setPath("userData", userDataPath);
@@ -956,24 +954,6 @@ async function chooseGameExecutable() {
     throw new Error("INVALID_GAME_EXECUTABLE");
   }
   return updateDisplaySettings({ gameExecutableName: executableName });
-}
-
-async function chooseUpdateDirectory() {
-  beginAppUiModal();
-  let result;
-  try {
-    result = await dialog.showOpenDialog(mainWindow, {
-      title: "更新ファイルのフォルダを選択",
-      defaultPath: updater.getSourceDirectory(),
-      properties: ["openDirectory"],
-    });
-  } finally {
-    endAppUiModal();
-  }
-  if (result.canceled || !result.filePaths[0]) {
-    return updater.getState();
-  }
-  return updater.setSourceDirectory(result.filePaths[0]);
 }
 
 function isAllowedAuthUrl(value) {
@@ -1857,10 +1837,6 @@ function registerIpcHandlers() {
     resultHandler(async () => updater.install(), { allowDuringUpdate: true }),
   );
   ipcMain.handle(
-    "update:choose-directory",
-    resultHandler(chooseUpdateDirectory, { allowDuringUpdate: true }),
-  );
-  ipcMain.handle(
     "clipboard:write",
     resultHandler(async ({ text }) => {
       clipboard.writeText(String(text ?? ""));
@@ -1941,8 +1917,6 @@ app.whenReady().then(() => {
   sourceSession = session.fromPartition(LOGIN_PARTITION);
   configureRemoteSession(sourceSession);
   updater = createUpdater({
-    configPath: updateSettingsPath,
-    defaultSourceDirectory: defaultUpdateSourcePath,
     onState: (state) => {
       const requiredNow = state.required === true;
       const becameRequired = requiredNow && !updateRequired;

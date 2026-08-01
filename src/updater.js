@@ -3,11 +3,28 @@
 const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
+const https = require("node:https");
+const { URL } = require("node:url");
 const { spawn } = require("node:child_process");
 const { app } = require("electron");
 
+// The release manifest is a static GitHub Release asset.  The application
+// never sends credentials, cookies, or player data to GitHub.
 const MANIFEST_NAME = "local-update.json";
+const REMOTE_MANIFEST_URL =
+  "https://github.com/mickangumi-oss/match-session-overlay/releases/latest/download/local-update.json";
+const REMOTE_RELEASE_BASE_URL =
+  "https://github.com/mickangumi-oss/match-session-overlay/releases/download/";
+const REMOTE_ALLOWED_HOSTS = new Set([
+  "github.com",
+  "release-assets.githubusercontent.com",
+  "objects.githubusercontent.com",
+  "github-releases.githubusercontent.com",
+]);
 const MAX_MANIFEST_BYTES = 64 * 1024;
+const MAX_INSTALLER_BYTES = 250 * 1024 * 1024;
+const REQUEST_TIMEOUT_MS = 30_000;
+const REMOTE_CHECK_MIN_INTERVAL_MS = 5 * 60 * 1000;
 
 function isReleaseVersion(value) {
   return typeof value === "string" && /^\d+\.\d+\.\d+$/.test(value);
@@ -28,31 +45,9 @@ function compareVersions(left, right) {
   return 0;
 }
 
-function sha256File(filePath) {
-  return new Promise((resolve, reject) => {
-    const hash = crypto.createHash("sha256");
-    const input = fs.createReadStream(filePath);
-    input.on("error", reject);
-    input.on("data", (chunk) => hash.update(chunk));
-    input.on("end", () => resolve(hash.digest("hex").toUpperCase()));
-  });
-}
-
-function readManifest(sourceDirectory) {
-  const manifestPath = path.join(sourceDirectory, MANIFEST_NAME);
-  const descriptor = fs.openSync(manifestPath, "r");
-  let manifestText;
-  try {
-    const stat = fs.fstatSync(descriptor);
-    if (!stat.isFile() || stat.size > MAX_MANIFEST_BYTES) {
-      throw new Error("UPDATE_MANIFEST_INVALID");
-    }
-    manifestText = fs.readFileSync(descriptor, "utf8");
-  } finally {
-    fs.closeSync(descriptor);
-  }
-  const manifest = JSON.parse(manifestText);
+function validateManifest(manifest) {
   if (
+    !manifest ||
     !isReleaseVersion(manifest.version) ||
     typeof manifest.file !== "string" ||
     path.basename(manifest.file) !== manifest.file ||
@@ -66,42 +61,214 @@ function readManifest(sourceDirectory) {
   ) {
     throw new Error("UPDATE_MANIFEST_INVALID");
   }
-  const installerPath = path.resolve(sourceDirectory, manifest.file);
-  if (path.dirname(installerPath) !== path.resolve(sourceDirectory)) {
-    throw new Error("UPDATE_MANIFEST_INVALID");
-  }
   return {
     version: manifest.version,
-    installerPath,
+    file: manifest.file,
     sha256: manifest.sha256.toUpperCase(),
     force: manifest.force === true,
     minimumVersion: manifest.minimumVersion ?? null,
   };
 }
 
-function createUpdater({ onState, configPath, defaultSourceDirectory }) {
-  let sourceDirectory = defaultSourceDirectory;
+function validateRemoteUrl(rawUrl) {
+  let url;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    throw new Error("UPDATE_URL_INVALID");
+  }
+  if (url.protocol !== "https:" || !REMOTE_ALLOWED_HOSTS.has(url.hostname)) {
+    throw new Error("UPDATE_REDIRECT_BLOCKED");
+  }
+  return url;
+}
+
+function requestBuffer(rawUrl, { maxBytes, onProgress } = {}, redirectCount = 0) {
+  if (redirectCount > 5) return Promise.reject(new Error("UPDATE_TOO_MANY_REDIRECTS"));
+  const byteLimit = Number.isFinite(maxBytes) ? maxBytes : MAX_MANIFEST_BYTES;
+  const url = validateRemoteUrl(rawUrl);
+  return new Promise((resolve, reject) => {
+    const request = https.get(
+      url,
+      {
+        headers: {
+          Accept: "application/octet-stream, application/json",
+          "User-Agent": `Match-Session-Overlay/${app.getVersion()}`,
+        },
+      },
+      (response) => {
+        const status = response.statusCode ?? 0;
+        if (status >= 300 && status < 400 && response.headers.location) {
+          const nextUrl = new URL(response.headers.location, url).toString();
+          response.resume();
+          requestBuffer(nextUrl, { maxBytes, onProgress }, redirectCount + 1)
+            .then(resolve, reject);
+          return;
+        }
+        if (status < 200 || status >= 300) {
+          response.resume();
+          reject(new Error(`UPDATE_HTTP_${status}`));
+          return;
+        }
+        const total = Number.parseInt(response.headers["content-length"] ?? "", 10);
+        if (Number.isFinite(total) && total > byteLimit) {
+          response.resume();
+          reject(new Error("UPDATE_FILE_TOO_LARGE"));
+          return;
+        }
+        const chunks = [];
+        let received = 0;
+        response.on("data", (chunk) => {
+          received += chunk.length;
+          if (received > byteLimit) {
+            response.destroy(new Error("UPDATE_FILE_TOO_LARGE"));
+            return;
+          }
+          chunks.push(chunk);
+          if (typeof onProgress === "function") {
+            onProgress(total > 0 ? Math.min(100, (received / total) * 100) : 0);
+          }
+        });
+        response.on("end", () => resolve(Buffer.concat(chunks)));
+        response.on("error", reject);
+      },
+    );
+    request.setTimeout(REQUEST_TIMEOUT_MS, () => {
+      request.destroy(new Error("UPDATE_TIMEOUT"));
+    });
+    request.on("error", reject);
+  });
+}
+
+function downloadToFile(rawUrl, destinationPath, onProgress, redirectCount = 0) {
+  if (redirectCount > 5) return Promise.reject(new Error("UPDATE_TOO_MANY_REDIRECTS"));
+  const url = validateRemoteUrl(rawUrl);
+  return new Promise((resolve, reject) => {
+    const output = fs.createWriteStream(destinationPath, { flags: "wx" });
+    let settled = false;
+    const fail = (error) => {
+      if (settled) return;
+      settled = true;
+      output.destroy();
+      try { fs.rmSync(destinationPath, { force: true }); } catch { /* best effort */ }
+      reject(error);
+    };
+    output.on("error", fail);
+    const request = https.get(
+      url,
+      {
+        headers: {
+          Accept: "application/octet-stream",
+          "User-Agent": `Match-Session-Overlay/${app.getVersion()}`,
+        },
+      },
+      (response) => {
+        const status = response.statusCode ?? 0;
+        if (status >= 300 && status < 400 && response.headers.location) {
+          const nextUrl = new URL(response.headers.location, url).toString();
+          response.resume();
+          output.close(() => {
+            try { fs.rmSync(destinationPath, { force: true }); } catch { /* best effort */ }
+            downloadToFile(nextUrl, destinationPath, onProgress, redirectCount + 1)
+              .then(resolve, reject);
+          });
+          return;
+        }
+        if (status < 200 || status >= 300) {
+          response.resume();
+          fail(new Error(`UPDATE_HTTP_${status}`));
+          return;
+        }
+        const total = Number.parseInt(response.headers["content-length"] ?? "", 10);
+        if (Number.isFinite(total) && total > MAX_INSTALLER_BYTES) {
+          response.resume();
+          fail(new Error("UPDATE_FILE_TOO_LARGE"));
+          return;
+        }
+        let received = 0;
+        response.on("data", (chunk) => {
+          received += chunk.length;
+          if (received > MAX_INSTALLER_BYTES) {
+            response.destroy(new Error("UPDATE_FILE_TOO_LARGE"));
+            return;
+          }
+          if (typeof onProgress === "function") {
+            onProgress(total > 0 ? Math.min(100, (received / total) * 100) : 0);
+          }
+        });
+        response.on("error", fail);
+        response.pipe(output);
+        output.on("finish", () => {
+          if (settled) return;
+          settled = true;
+          output.close(() => resolve());
+        });
+      },
+    );
+    request.setTimeout(REQUEST_TIMEOUT_MS, () => {
+      request.destroy(new Error("UPDATE_TIMEOUT"));
+    });
+    request.on("error", fail);
+  });
+}
+
+function sha256File(filePath) {
+  return new Promise((resolve, reject) => {
+    const hash = crypto.createHash("sha256");
+    const input = fs.createReadStream(filePath);
+    input.on("error", reject);
+    input.on("data", (chunk) => hash.update(chunk));
+    input.on("end", () => resolve(hash.digest("hex").toUpperCase()));
+  });
+}
+
+async function fetchRemoteManifest() {
+  const buffer = await requestBuffer(REMOTE_MANIFEST_URL, {
+    maxBytes: MAX_MANIFEST_BYTES,
+  });
+  let manifest;
+  try {
+    manifest = JSON.parse(buffer.toString("utf8"));
+  } catch {
+    throw new Error("UPDATE_MANIFEST_INVALID");
+  }
+  const validated = validateManifest(manifest);
+  return {
+    ...validated,
+    installerUrl: new URL(
+      `v${validated.version}/${encodeURIComponent(validated.file)}`,
+      REMOTE_RELEASE_BASE_URL,
+    ).toString(),
+    source: "github",
+  };
+}
+
+function createUpdater({ onState }) {
   let pendingUpdate = null;
+  let remoteCache = { checkedAt: 0, manifest: null, error: null };
   let state = {
     status: "idle",
     currentVersion: app.getVersion(),
     availableVersion: null,
     required: false,
     progress: 0,
-    messageKey: "localUpdateNote",
-    message: "ローカル更新を確認できます",
+    source: "github",
+    messageKey: "githubUpdateNote",
+    message: "GitHub Releasesから更新を確認できます",
   };
 
+  // A previous update may have left a verified installer behind after the
+  // application exited. It is no longer needed once this process starts.
   try {
-    const saved = JSON.parse(fs.readFileSync(configPath, "utf8"));
-    if (typeof saved.sourceDirectory === "string" && path.isAbsolute(saved.sourceDirectory)) {
-      sourceDirectory = path.normalize(saved.sourceDirectory);
+    const stagingDirectory = path.join(app.getPath("userData"), "update-staging");
+    for (const entry of fs.readdirSync(stagingDirectory)) {
+      if (/\.exe(?:\.download)?$/i.test(entry)) {
+        fs.rmSync(path.join(stagingDirectory, entry), { force: true });
+      }
     }
   } catch {
-    // 初回起動または破損した設定は既定の更新フォルダへ戻す。
+    // The staging directory is best-effort housekeeping only.
   }
-
-  fs.mkdirSync(defaultSourceDirectory, { recursive: true });
 
   const publish = (patch) => {
     state = { ...state, ...patch };
@@ -109,60 +276,45 @@ function createUpdater({ onState, configPath, defaultSourceDirectory }) {
     return state;
   };
 
-  const saveSourceDirectory = () => {
-    fs.mkdirSync(path.dirname(configPath), { recursive: true });
-    fs.writeFileSync(
-      configPath,
-      JSON.stringify({ sourceDirectory }, null, 2),
-      "utf8",
-    );
+  const getManifest = async () => {
+    const now = Date.now();
+    if (now - remoteCache.checkedAt < REMOTE_CHECK_MIN_INTERVAL_MS) {
+      if (remoteCache.error) throw remoteCache.error;
+      return remoteCache.manifest;
+    }
+    try {
+      const manifest = await fetchRemoteManifest();
+      remoteCache = { checkedAt: Date.now(), manifest, error: null };
+      return manifest;
+    } catch (error) {
+      remoteCache = { checkedAt: Date.now(), manifest: null, error };
+      throw error;
+    }
   };
 
   return {
     getState: () => state,
-    getSourceDirectory: () => sourceDirectory,
-    setSourceDirectory(nextDirectory) {
-      if (typeof nextDirectory !== "string" || !path.isAbsolute(nextDirectory)) {
-        throw new Error("UPDATE_DIRECTORY_INVALID");
-      }
-      sourceDirectory = path.normalize(nextDirectory);
-      pendingUpdate = null;
-      saveSourceDirectory();
-      return publish({
-        status: "idle",
-        availableVersion: null,
-        progress: 0,
-        messageKey: "updateDirectory",
-        sourceDirectoryName: path.basename(sourceDirectory),
-        message: `更新フォルダ: ${path.basename(sourceDirectory)}`,
-      });
-    },
     async check() {
       pendingUpdate = null;
       publish({
         status: "checking",
         availableVersion: null,
+        required: false,
         progress: 0,
+        source: "github",
         messageKey: "updateChecking",
-        message: "ローカル更新を確認しています…",
+        message: "GitHub Releasesの更新を確認しています…",
       });
 
       let manifest;
       try {
-        manifest = readManifest(sourceDirectory);
-      } catch (error) {
-        if (error.code === "ENOENT") {
-          return publish({
-            status: "empty",
-            messageKey: "updateNoFiles",
-            sourceDirectoryName: path.basename(sourceDirectory),
-            message: `更新ファイルがありません（${path.basename(sourceDirectory)}）`,
-          });
-        }
+        manifest = await getManifest();
+      } catch {
         return publish({
           status: "error",
-          messageKey: "updateReadError",
-          message: "更新情報を読み取れませんでした",
+          availableVersion: null,
+          messageKey: "updateNetworkError",
+          message: "GitHubから更新情報を取得できませんでした",
         });
       }
 
@@ -180,34 +332,15 @@ function createUpdater({ onState, configPath, defaultSourceDirectory }) {
         });
       }
 
-      let actualHash;
-      try {
-        actualHash = await sha256File(manifest.installerPath);
-      } catch {
-        return publish({
-          status: "error",
-          messageKey: "updateInstallerMissing",
-          message: "更新用インストーラーが見つかりません",
-        });
-      }
-
-      if (actualHash !== manifest.sha256) {
-        return publish({
-          status: "error",
-          messageKey: "updateHashMismatch",
-          message: "更新ファイルの安全性を確認できませんでした",
-        });
-      }
-
       pendingUpdate = manifest;
       const required = manifest.force || belowMinimum;
       return publish({
         status: "ready",
         availableVersion: manifest.version,
         required,
-        progress: 100,
+        progress: 0,
+        source: "github",
         messageKey: required ? "updateSecurityRequired" : "updateReady",
-        sourceDirectoryName: path.basename(sourceDirectory),
         message: required
           ? `セキュリティ更新が必要です（バージョン ${manifest.version}）`
           : `バージョン ${manifest.version} に更新できます`,
@@ -217,34 +350,52 @@ function createUpdater({ onState, configPath, defaultSourceDirectory }) {
       if (!pendingUpdate || state.status !== "ready") {
         throw new Error("UPDATE_NOT_READY");
       }
-      const actualHash = await sha256File(pendingUpdate.installerPath);
-      if (actualHash !== pendingUpdate.sha256) {
+      if (!app.isPackaged) {
+        throw new Error("UPDATE_INSTALL_DEVELOPMENT");
+      }
+      const stagingDirectory = path.join(app.getPath("userData"), "update-staging");
+      fs.mkdirSync(stagingDirectory, { recursive: true });
+      const stagedInstallerPath = path.join(stagingDirectory, pendingUpdate.file);
+      const temporaryPath = `${stagedInstallerPath}.download`;
+      try { fs.rmSync(temporaryPath, { force: true }); } catch { /* best effort */ }
+
+      publish({
+        status: "downloading",
+        progress: 0,
+        messageKey: "updateDownloading",
+        message: `バージョン ${pendingUpdate.version} をダウンロードしています…`,
+      });
+      try {
+        await downloadToFile(
+          pendingUpdate.installerUrl,
+          temporaryPath,
+          (progress) => publish({ progress }),
+        );
+        const actualHash = await sha256File(temporaryPath);
+        if (actualHash !== pendingUpdate.sha256) {
+          throw new Error("UPDATE_HASH_MISMATCH");
+        }
+        try { fs.rmSync(stagedInstallerPath, { force: true }); } catch { /* best effort */ }
+        fs.renameSync(temporaryPath, stagedInstallerPath);
+      } catch (error) {
+        try { fs.rmSync(temporaryPath, { force: true }); } catch { /* best effort */ }
         pendingUpdate = null;
         publish({
           status: "error",
           availableVersion: null,
-          messageKey: "updateChanged",
-          message: "更新ファイルが変更されたため中止しました",
+          progress: 0,
+          messageKey: error.message === "UPDATE_HASH_MISMATCH"
+            ? "updateHashMismatch"
+            : "updateDownloadError",
+          message: error.message === "UPDATE_HASH_MISMATCH"
+            ? "更新ファイルの安全性を確認できませんでした"
+            : "更新ファイルをダウンロードできませんでした",
         });
-        throw new Error("UPDATE_HASH_MISMATCH");
+        throw error;
       }
-      if (!app.isPackaged) {
-        throw new Error("UPDATE_INSTALL_DEVELOPMENT");
-      }
-      const stagingDirectory = path.join(
-        path.dirname(configPath),
-        "update-staging",
-      );
-      fs.mkdirSync(stagingDirectory, { recursive: true });
-      const stagedInstallerPath = path.join(
-        stagingDirectory,
-        path.basename(pendingUpdate.installerPath),
-      );
-      fs.copyFileSync(pendingUpdate.installerPath, stagedInstallerPath);
-      const stagedHash = await sha256File(stagedInstallerPath);
-      if (stagedHash !== pendingUpdate.sha256) {
-        throw new Error("UPDATE_STAGING_HASH_MISMATCH");
-      }
+
+      pendingUpdate = null;
+      publish({ status: "launching", progress: 100, messageKey: "updateReadyToInstall" });
       const child = spawn(stagedInstallerPath, [], {
         detached: true,
         stdio: "ignore",
@@ -259,8 +410,10 @@ function createUpdater({ onState, configPath, defaultSourceDirectory }) {
 
 module.exports = {
   MANIFEST_NAME,
+  REMOTE_MANIFEST_URL,
   compareVersions,
   createUpdater,
-  readManifest,
+  fetchRemoteManifest,
   sha256File,
+  validateManifest,
 };

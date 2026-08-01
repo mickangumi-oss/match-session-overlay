@@ -29,7 +29,6 @@ contextBridge.exposeInMainWorld("matchOverlay", {
   checkForUpdates: () => ipcRenderer.invoke("update:check"),
   getUpdateState: () => ipcRenderer.invoke("update:state"),
   installUpdate: () => ipcRenderer.invoke("update:install"),
-  chooseUpdateDirectory: () => ipcRenderer.invoke("update:choose-directory"),
   copyText: (text) => ipcRenderer.invoke("clipboard:write", { text }),
   onState: (callback) => {
     const listener = (_event, state) => callback(state);
