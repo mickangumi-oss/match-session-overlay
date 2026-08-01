@@ -1,0 +1,30 @@
+appId: io.github.mickangumi.matchsessionoverlay
+productName: Match Session Overlay
+artifactName: Match-Session-Overlay-${version}-Setup.${ext}
+asar: true
+electronFuses:
+  runAsNode: false
+  enableCookieEncryption: true
+  enableNodeOptionsEnvironmentVariable: false
+  enableNodeCliInspectArguments: false
+  enableEmbeddedAsarIntegrityValidation: true
+  onlyLoadAppFromAsar: true
+  loadBrowserProcessSpecificV8Snapshot: false
+  grantFileProtocolExtraPrivileges: false
+files:
+  - package.json
+  - src/**/*
+  - LICENSE
+  - README.md
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  deleteAppDataOnUninstall: true
+  include: build/installer.nsh

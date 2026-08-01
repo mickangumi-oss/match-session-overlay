@@ -1,0 +1,341 @@
+<!doctype html>
+<html lang="ja-jp">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Match Session Overlay</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div class="brand-mark" aria-hidden="true"><span>M</span></div>
+        <div class="brand-copy">
+          <p class="eyebrow" data-i18n="appTagline">ROUND BY ROUND / LOCAL TRACKER</p>
+          <h1>Match Session Overlay</h1>
+        </div>
+        <div class="privacy-badge">
+          <span class="privacy-dot"></span>
+          <span data-i18n="privacyNoSave">ID・パスワードは保存しません。ログイン状態はこのPCに保存されます。</span>
+        </div>
+      </header>
+
+      <section class="cockpit">
+        <span class="paint-tag tag-one" aria-hidden="true">MATCH</span>
+        <span class="paint-tag tag-two" aria-hidden="true">VS</span>
+        <aside class="side-column">
+          <article class="hud-panel login-panel">
+            <header class="panel-heading">
+              <div>
+                <p class="kicker" data-i18n="accountStep">STEP 01 / ACCOUNT LINK</p>
+                <h2 data-i18n="playerConnection">プレイヤー接続</h2>
+              </div>
+              <span class="status neutral" id="authStatus" data-i18n="unverified">未確認</span>
+            </header>
+
+            <div class="player-panel hidden" id="playerPanel">
+              <div class="player-primary">
+                <span data-i18n="player">PLAYER</span>
+                <strong id="playerName">---</strong>
+              </div>
+              <dl>
+                <div>
+                  <dt data-i18n="userCode">USER CODE</dt>
+                  <dd id="playerCode">---</dd>
+                </div>
+              </dl>
+            </div>
+
+            <p class="panel-note">
+              <span data-i18n="loginNote">公式ログイン画面を使用します。ID・パスワードをアプリから読み取ることはありません。</span>
+            </p>
+            <div class="actions">
+              <button class="button primary" id="openLoginButton" data-i18n="openOfficial">公式サイトを開く</button>
+              <button class="button secondary" id="checkLoginButton" data-i18n="refresh">再取得</button>
+            </div>
+          </article>
+
+          <article class="hud-panel utility-panel">
+            <div class="utility-row">
+              <div>
+                <p class="kicker" data-i18n="privacy">PRIVACY</p>
+                <h3 data-i18n="localData">ローカルデータ</h3>
+              </div>
+              <button class="icon-button danger" id="clearDataButton" data-i18n-title="deleteLogin" title="ログイン情報を削除">
+                <span data-i18n="clear">消去</span>
+              </button>
+            </div>
+            <div class="utility-divider"></div>
+            <div class="utility-row update-row">
+              <div class="update-copy">
+                <div class="update-title">
+                  <p class="kicker" data-i18n="appUpdate">APP UPDATE</p>
+                  <span class="update-badge hidden" id="updateBadge" data-i18n="updateAvailable">更新</span>
+                </div>
+                <p id="updateMessage" data-i18n="localUpdateNote">ローカル更新を確認できます</p>
+                <div class="progress hidden" id="updateProgress">
+                  <div id="updateProgressBar"></div>
+                </div>
+              </div>
+              <div class="actions compact">
+                <button class="icon-button" id="chooseUpdateDirectoryButton" data-i18n-title="location" title="更新フォルダを選択" data-i18n="location">場所</button>
+                <button class="icon-button" id="checkUpdateButton" data-i18n="check">確認</button>
+                <button class="icon-button accent hidden" id="installUpdateButton" data-i18n="update">更新</button>
+              </div>
+            </div>
+            <div class="utility-divider"></div>
+            <div class="utility-row language-row">
+              <div>
+                <p class="kicker" data-i18n="language">LANGUAGE</p>
+                <h3 data-i18n="languageHeading">表示言語</h3>
+              </div>
+              <label class="language-select-label">
+                <span class="sr-only" data-i18n="language">LANGUAGE</span>
+                <select id="languageInput" data-i18n-aria-label="languageHeading" aria-label="表示言語">
+                  <option value="ja-jp">日本語</option>
+                  <option value="en">English</option>
+                  <option value="de">Deutsch</option>
+                  <option value="es-es">Español (ES)</option>
+                  <option value="es-us">Español (US)</option>
+                  <option value="fr">Français</option>
+                  <option value="it">Italiano</option>
+                  <option value="ko-kr">한국어</option>
+                  <option value="zh-hans">简体中文</option>
+                  <option value="zh-hant">繁體中文</option>
+                  <option value="pt-br">Português (BR)</option>
+                  <option value="pl">Polski</option>
+                  <option value="ru">Русский</option>
+                  <option value="ar">العربية</option>
+                </select>
+              </label>
+            </div>
+            <div class="utility-divider"></div>
+            <div class="game-auto">
+              <div class="game-auto-heading">
+                <div>
+                  <p class="kicker" data-i18n="startup">STARTUP</p>
+                  <h3 data-i18n="startupHeading">コンピューターの起動時にアプリを実行する</h3>
+                  <p class="setting-note" data-i18n="startupNote">Windowsへのサインイン時に管理画面を表示して起動します。ゲーム検知がONの場合は、この設定がOFFでも監視部分だけバックグラウンドで待機します。</p>
+                </div>
+                <label class="switch">
+                  <input id="launchAtLoginInput" type="checkbox" />
+                  <span aria-hidden="true"></span>
+                </label>
+              </div>
+              <div class="utility-divider compact-divider"></div>
+              <div class="game-auto-heading">
+                <div>
+                  <p class="kicker" data-i18n="gameDetection">GAME DETECTION</p>
+                  <h3 data-i18n="gameDetectionHeading">ゲーム起動を検知してオーバーレイを表示する</h3>
+                </div>
+                <label class="switch">
+                  <input id="gameDetectionInput" type="checkbox" />
+                  <span aria-hidden="true"></span>
+                </label>
+              </div>
+              <p class="setting-note">
+                <span data-i18n="gameDetectionNote">対象ゲームの.exeを指定します。有効にすると監視部分がバックグラウンドで待機し、ゲーム起動から最大10秒ほどでオーバーレイを表示します。</span>
+              </p>
+              <div class="game-picker">
+                <span id="gameExecutableName" data-i18n="gameNotSelected">ゲーム未選択</span>
+                <button class="icon-button" id="chooseGameButton" data-i18n="chooseExecutable">実行ファイルを選択</button>
+              </div>
+            </div>
+          </article>
+        </aside>
+
+        <section class="main-column">
+          <article class="hud-panel telemetry-panel">
+            <header class="panel-heading monitor-heading">
+              <div>
+                <p class="kicker" data-i18n="liveStep">STEP 02 / LIVE SESSION</p>
+                <h2 data-i18n="statsMonitor">戦績モニター</h2>
+              </div>
+              <div class="monitor-character" aria-live="polite">
+                <span class="control-label" data-i18n="currentCharacter">CURRENT CHARACTER</span>
+                <strong id="currentCharacter">—</strong>
+              </div>
+              <span class="status neutral" id="trackerStatus" data-i18n="stopped">停止中</span>
+            </header>
+
+            <div class="scoreboard">
+              <div class="score-block record-block">
+                <span class="record-headings"><b>W</b><b>L</b></span>
+                <strong class="record-values"><span id="recordWins">0</span><span>-</span><span id="recordLosses">0</span></strong>
+              </div>
+              <div class="score-block">
+                <span data-i18n="winRate">WIN RATE</span>
+                <strong class="win" id="winRate">0.0%</strong>
+              </div>
+              <div class="score-block">
+                <span id="currentRatingLabel">CURRENT MR</span>
+                <strong class="current-rating" id="currentRating">---</strong>
+              </div>
+              <div class="score-block">
+                <span id="ratingDeltaLabel">MR DELTA</span>
+                <strong id="ratingDelta">±0</strong>
+              </div>
+              <div class="signal-lines" aria-hidden="true">
+                <i></i><i></i><i></i><i></i><i></i>
+              </div>
+            </div>
+
+            <section class="monitor-chart" id="managementChartPanel">
+              <header>
+                <div>
+                  <span class="control-label" id="ratingTrendLabel">MR TREND</span>
+                  <small id="ratingTrendDescription">アプリ起動後のMR変動</small>
+                </div>
+                <span class="chart-state" id="managementChartState" data-i18n="dataWaiting">データ待機中</span>
+              </header>
+              <div class="monitor-chart-body">
+                <canvas id="managementRatingChart" data-i18n-aria-label="graphAriaLabel" aria-label="起動後のMR増減グラフ"></canvas>
+                <p class="monitor-chart-empty" id="managementChartEmpty">
+                  <span data-i18n="graphEmptyRanked">ランクマッチを計測するとグラフが表示されます</span>
+                </p>
+              </div>
+            </section>
+
+            <div class="session-actions">
+              <button class="button accent wide-action" id="startTrackingButton" disabled>
+                <span class="play-icon" aria-hidden="true"></span><span id="startTrackingLabel">計測を開始</span>
+              </button>
+              <span class="session-timer" id="nextUpdateInfo" data-i18n="nextUpdate">次回更新 --:--</span>
+              <button class="button secondary" id="resetTrackingButton" disabled data-i18n="reset">リセット</button>
+              <button class="button danger-ghost" id="stopTrackingButton" disabled data-i18n="end">終了</button>
+            </div>
+          </article>
+
+          <article class="hud-panel display-panel">
+            <header class="display-heading">
+              <div>
+                <p class="kicker" data-i18n="displayStep">STEP 03 / DISPLAY CONTROL</p>
+                <h2 data-i18n="displayLayout">表示レイアウト</h2>
+              </div>
+              <div class="display-actions">
+                <button class="button secondary option-button" id="optionsButton" aria-expanded="false">
+                  <span aria-hidden="true">⚙</span> <span data-i18n="options">オプション</span>
+                </button>
+                <button class="button secondary" id="overlayLockButton" disabled>
+                  <span data-i18n="overlayMove">オーバーレイ移動</span>
+                </button>
+                <button class="button primary" id="toggleStatsButton" data-i18n="showStats">戦績ウィンドウを表示</button>
+              </div>
+            </header>
+
+            <div class="control-grid quick-controls">
+              <div class="control-cell">
+                <span class="control-label" data-i18n="matchType">MATCH TYPE</span>
+                <div class="segments">
+                  <button class="active" data-match-type="ranked" data-i18n="ranked">ランク</button>
+                  <button data-match-type="battleHub" data-i18n="battleHub">バトルハブ</button>
+                  <button data-match-type="casual" data-i18n="casual">カジュアル</button>
+                </div>
+              </div>
+              <div class="control-cell">
+                <div class="mini-control">
+                  <span class="control-label" data-i18n="windowMode">WINDOW MODE</span>
+                  <div class="segments">
+                    <button class="active" data-display-mode="window" data-i18n="normal">通常</button>
+                    <button data-display-mode="overlay" data-i18n="overlay">オーバーレイ</button>
+                  </div>
+                </div>
+              </div>
+              <div class="control-cell orientation-control" id="windowOrientationControl">
+                <div class="mini-control">
+                  <span class="control-label" data-i18n="windowOrientation">WINDOW ORIENTATION</span>
+                  <div class="segments">
+                    <button class="active" data-window-orientation="horizontal" data-i18n="horizontal">横</button>
+                    <button data-window-orientation="vertical" data-i18n="vertical">縦</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <section class="options-drawer hidden" id="optionsPanel" aria-hidden="true">
+              <header class="options-heading">
+                <div>
+                  <p class="kicker" data-i18n="displayOptions">DISPLAY OPTIONS</p>
+                  <h3 data-i18n="displayOptions">表示オプション</h3>
+                </div>
+                <button class="icon-button" id="closeOptionsButton" data-i18n-title="closeOptions" title="オプションを閉じる">×</button>
+              </header>
+              <div class="control-grid options-grid">
+                <div class="control-cell">
+                  <span class="control-label" id="ratingGraphLabel">MR GRAPH</span>
+                  <div class="segments">
+                    <button class="active" data-graph-visible="true" data-i18n="on">ON</button>
+                    <button data-graph-visible="false" data-i18n="off">OFF</button>
+                  </div>
+                </div>
+              <div class="control-cell dual-range-cell">
+                <label class="mini-control range-cell">
+                  <span class="control-label"><span data-i18n="fontSize">FONT SIZE</span> <output id="fontScaleValue">100%</output></span>
+                  <input id="fontScaleInput" type="range" min="75" max="200" step="5" value="100" />
+                </label>
+                <label class="mini-control range-cell">
+                  <span class="control-label"><span id="ratingAxisLabel">MR AXIS SIZE</span> <output id="graphLabelScaleValue">130%</output></span>
+                  <input id="graphLabelScaleInput" type="range" min="75" max="200" step="5" value="130" />
+                </label>
+              </div>
+              <label class="control-cell range-cell">
+                <span class="control-label"><span data-i18n="background">BACKGROUND</span> <output id="opacityValue">94%</output></span>
+                <input id="opacityInput" type="range" min="0" max="100" step="1" value="94" />
+              </label>
+              <div class="control-cell typography-cell">
+                <label>
+                  <span class="control-label" data-i18n="font">FONT</span>
+                  <select id="fontFamilyInput">
+                    <option value="street" data-i18n="fontStreet">ストリート</option>
+                    <option value="condensed" data-i18n="fontCondensed">コンデンス</option>
+                    <option value="system" data-i18n="fontSystem">標準</option>
+                    <option value="japanese" data-i18n="fontJapanese">日本語</option>
+                    <option value="mono" data-i18n="fontMono">モノスペース</option>
+                  </select>
+                </label>
+                <label>
+                  <span class="control-label" data-i18n="fontStyle">STYLE</span>
+                  <select id="fontStyleInput">
+                    <option value="normal" data-i18n="fontNormal">通常</option>
+                    <option value="italic" data-i18n="fontItalic">斜体</option>
+                  </select>
+                </label>
+                <label>
+                  <span class="control-label" data-i18n="color">COLOR</span>
+                  <input id="textColorInput" type="color" value="#f7f8ff" />
+                </label>
+              </div>
+              <label class="control-cell poll-cell">
+                <span class="control-label" data-i18n="updateInterval">UPDATE INTERVAL</span>
+                <select id="pollIntervalInput">
+                  <option value="120" selected data-i18n="interval2">2分（推奨）</option>
+                  <option value="180" data-i18n="interval3">3分</option>
+                  <option value="300" data-i18n="interval5">5分</option>
+                </select>
+                <small data-i18n="updateIntervalNote">30分間対戦がなければ5分間隔、60分で自動停止します</small>
+              </label>
+              </div>
+            </section>
+
+            <div class="overlay-box">
+              <div class="obs-label"><span data-i18n="obsBrowser">OPTION  OBS ブラウザソース</span></div>
+              <code id="overlayUrl">http://127.0.0.1:37123/overlay</code>
+              <button class="icon-button" id="copyOverlayButton" data-i18n="copyUrl">URLコピー</button>
+            </div>
+          </article>
+        </section>
+      </section>
+
+      <div class="bottom-line">
+        <p class="notice" id="notice" aria-live="polite"></p>
+        <footer data-i18n="disclaimer">非公式のツールです。</footer>
+      </div>
+    </main>
+    <script src="./i18n.js"></script>
+    <script src="./renderer.js"></script>
+  </body>
+</html>
