@@ -178,6 +178,24 @@ function fitPlayerName() {
   });
 }
 
+function fitCurrentRating() {
+  const element = elements.currentRating;
+  if (!element) return;
+  element.style.fontSize = "";
+
+  // LP can reach seven digits. Keep the management card width fixed and
+  // reduce only the value when the selected font or window size needs it.
+  requestAnimationFrame(() => {
+    const baseSize = Number.parseFloat(getComputedStyle(element).fontSize) || 16;
+    const minimumSize = 18;
+    let size = baseSize;
+    while (size > minimumSize && element.scrollWidth > element.clientWidth + 1) {
+      size = Math.max(minimumSize, size - 0.5);
+      element.style.fontSize = `${size}px`;
+    }
+  });
+}
+
 function renderNextUpdate() {
   if (!trackerState?.active || !Number.isFinite(trackerState.nextPollAt)) {
     elements.nextUpdateInfo.textContent = trackerState?.stopReason
@@ -427,6 +445,7 @@ function renderCurrentRating(state = trackerState) {
           : "";
   elements.currentRatingLabel.textContent = `${t("currentRating", "CURRENT")} ${ratingType || "MR"}`;
   elements.currentRating.textContent = rating == null ? "---" : String(rating);
+  fitCurrentRating();
 }
 
 function renderCurrentCharacter(state = trackerState) {
@@ -897,6 +916,7 @@ elements.gameDetectionInput.addEventListener("change", async () => {
 });
 
 window.addEventListener("resize", () => {
+  fitCurrentRating();
   if (trackerState) {
     renderManagementChart(trackerState);
   }
