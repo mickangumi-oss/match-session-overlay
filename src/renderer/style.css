@@ -915,6 +915,10 @@ body.update-required .cockpit .hud-panel .update-row * {
 }
 
 .current-rating {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
   color: var(--cyan);
   white-space: nowrap;
 }
