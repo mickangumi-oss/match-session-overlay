@@ -866,6 +866,8 @@ body.update-required .cockpit .hud-panel .update-row * {
 }
 
 .score-block strong {
+  min-width: 0;
+  max-width: 100%;
   margin-top: 4px;
   font-family: var(--stats-font-family);
   font-size: clamp(28px, 4vw, 39px);
@@ -886,6 +888,7 @@ body.update-required .cockpit .hud-panel .update-row * {
 }
 
 .score-block .record-values {
+  width: 100%;
   grid-template-columns: max-content max-content max-content;
   justify-content: center;
   column-gap: 0.32ch;

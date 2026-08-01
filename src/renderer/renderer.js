@@ -178,13 +178,12 @@ function fitPlayerName() {
   });
 }
 
-function fitCurrentRating() {
-  const element = elements.currentRating;
+function fitScoreValue(element) {
   if (!element) return;
   element.style.fontSize = "";
 
-  // LP can reach seven digits. Keep the management card width fixed and
-  // reduce only the value when the selected font or window size needs it.
+  // Custom fonts and italics can be wider than the default condensed face.
+  // Keep the card width fixed and reduce only the value when it overflows.
   requestAnimationFrame(() => {
     const baseSize = Number.parseFloat(getComputedStyle(element).fontSize) || 16;
     const minimumSize = 18;
@@ -194,6 +193,20 @@ function fitCurrentRating() {
       element.style.fontSize = `${size}px`;
     }
   });
+}
+
+function fitManagementScoreValues() {
+  const recordValues = document.querySelector(
+    ".telemetry-panel .record-values",
+  );
+  for (const element of [
+    recordValues,
+    elements.winRate,
+    elements.currentRating,
+    elements.ratingDelta,
+  ]) {
+    fitScoreValue(element);
+  }
 }
 
 function renderNextUpdate() {
@@ -445,7 +458,7 @@ function renderCurrentRating(state = trackerState) {
           : "";
   elements.currentRatingLabel.textContent = `${t("currentRating", "CURRENT")} ${ratingType || "MR"}`;
   elements.currentRating.textContent = rating == null ? "---" : String(rating);
-  fitCurrentRating();
+  fitManagementScoreValues();
 }
 
 function renderCurrentCharacter(state = trackerState) {
@@ -504,6 +517,7 @@ function renderTracker(state) {
   elements.winRate.textContent = `${(total ? (wins / total) * 100 : 0).toFixed(1)}%`;
   elements.ratingDelta.textContent =
     delta == null ? "—" : `${delta > 0 ? "+" : delta < 0 ? "" : "±"}${delta}`;
+  fitManagementScoreValues();
   renderManagementChart(state);
   elements.overlayUrl.textContent = state.overlayUrl;
   setStatus(
@@ -916,7 +930,7 @@ elements.gameDetectionInput.addEventListener("change", async () => {
 });
 
 window.addEventListener("resize", () => {
-  fitCurrentRating();
+  fitManagementScoreValues();
   if (trackerState) {
     renderManagementChart(trackerState);
   }
