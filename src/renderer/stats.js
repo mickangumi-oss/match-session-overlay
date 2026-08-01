@@ -130,9 +130,7 @@ function drawStatsChart(history) {
   const fontStyle = FONT_STYLES.has(displaySettings?.fontStyle)
     ? `${displaySettings.fontStyle} `
     : "";
-  context.font = `${fontStyle}${labelFontSize}px ${fontStackFor(
-    displaySettings?.fontFamily,
-  )}`;
+  context.font = `${fontStyle}${labelFontSize}px ${fontStackFor("street")}`;
   const labels = [];
   for (let tick = minimum; tick <= maximum + step * 0.01; tick += step) {
     labels.push(Math.round(tick).toLocaleString("ja-JP"));
@@ -192,9 +190,7 @@ function drawStatsChart(history) {
   ])];
   context.textAlign = "center";
   context.textBaseline = "top";
-  context.font = `${fontStyle}${labelFontSize}px ${fontStackFor(
-    displaySettings?.fontFamily,
-  )}`;
+  context.font = `${fontStyle}${labelFontSize}px ${fontStackFor("street")}`;
   context.fillStyle = `${displaySettings?.textColor ?? "#f7f8ff"}cc`;
   for (const index of xLabelIndices) {
     const x = xFor(index);
@@ -316,9 +312,14 @@ function renderSettings(settings) {
     "--text",
     settings.textColor,
   );
+  const selectedFontStack = fontStackFor(settings.fontFamily);
   document.documentElement.style.setProperty(
-    "--stats-font-family",
-    fontStackFor(settings.fontFamily),
+    "--stats-value-font-family",
+    selectedFontStack,
+  );
+  document.documentElement.style.setProperty(
+    "--stats-label-font-family",
+    selectedFontStack,
   );
   document.documentElement.style.setProperty(
     "--stats-font-style",
