@@ -81,7 +81,6 @@ const elements = Object.fromEntries(
     "overlayUrl",
     "copyOverlayButton",
     "clearDataButton",
-    "chooseUpdateDirectoryButton",
     "checkUpdateButton",
     "installUpdateButton",
     "updateBadge",
@@ -585,7 +584,6 @@ function renderUpdateMessage(state) {
   if (!key) return state.message ?? "";
   const fallback = state.message ?? "";
   return t(key, fallback)
-    .replace("{name}", String(state.sourceDirectoryName ?? ""))
     .replace("{version}", String(state.availableVersion ?? ""));
 }
 
@@ -613,7 +611,6 @@ function renderUpdate(state) {
   elements.checkUpdateButton.classList.toggle("hidden", hasUpdate);
   elements.checkUpdateButton.disabled =
     state.status === "checking" || state.status === "downloading";
-  elements.chooseUpdateDirectoryButton.disabled = state.status === "checking";
 }
 
 elements.openLoginButton.addEventListener("click", async () => {
@@ -938,14 +935,6 @@ elements.clearDataButton.addEventListener("click", async () => {
 elements.checkUpdateButton.addEventListener("click", async () => {
   try {
     renderUpdate(await unwrap(api.checkForUpdates()));
-  } catch (error) {
-    showNotice(error.message, "error");
-  }
-});
-
-elements.chooseUpdateDirectoryButton.addEventListener("click", async () => {
-  try {
-    renderUpdate(await unwrap(api.chooseUpdateDirectory()));
   } catch (error) {
     showNotice(error.message, "error");
   }
