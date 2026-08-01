@@ -543,7 +543,6 @@ body.remote-overlay {
 }
 
 .stats-window.horizontal .stats-chart,
-.stats-window.overlay .stats-chart,
 .stats-window.vertical.no-chart .stats-chart {
   display: none;
 }

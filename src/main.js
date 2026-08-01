@@ -57,6 +57,14 @@ const STATS_WINDOW_PRESETS = {
       maxWidth: 560,
       maxHeight: 1100,
     },
+    verticalNoChart: {
+      width: 380,
+      height: 340,
+      minWidth: 320,
+      minHeight: 300,
+      maxWidth: 560,
+      maxHeight: 700,
+    },
     chart: { width: 520, height: 240, minWidth: 380, minHeight: 180 },
     summary: { width: 520, height: 102, minWidth: 320, minHeight: 82 },
     maxWidth: 1000,
@@ -65,6 +73,22 @@ const STATS_WINDOW_PRESETS = {
   overlay: {
     chart: { width: 480, height: 120, minWidth: 320, minHeight: 92 },
     summary: { width: 480, height: 72, minWidth: 300, minHeight: 68 },
+    vertical: {
+      width: 380,
+      height: 760,
+      minWidth: 320,
+      minHeight: 560,
+      maxWidth: 560,
+      maxHeight: 1100,
+    },
+    verticalNoChart: {
+      width: 380,
+      height: 340,
+      minWidth: 320,
+      minHeight: 300,
+      maxWidth: 560,
+      maxHeight: 700,
+    },
     maxWidth: 1000,
     maxHeight: 300,
   },
@@ -214,6 +238,7 @@ let hasPersistedDisplaySettings = fs.existsSync(displaySettingsPath);
 let statsWindowDrag = null;
 let updater;
 let updateRequired = false;
+let authenticatedRatingType = "MR";
 let statsWindowBounds = {
   window: { horizontal: null, vertical: null },
   overlay: null,
@@ -336,7 +361,7 @@ function createEmptyTrackerState() {
     streak: 0,
     initialRating: null,
     currentRating: null,
-    ratingType: "MR",
+    ratingType: authenticatedRatingType,
     characterId: null,
     characterStates: {},
     ratingDelta: 0,
@@ -376,29 +401,48 @@ function publicOverlayState() {
       ? statsWindow.getBounds()
       : null;
   const savedOverlayBounds = statsWindowBounds.overlay;
+  const overlayPreset =
+    displaySettings.windowOrientation === "vertical"
+      ? displaySettings.graphVisible === false
+        ? STATS_WINDOW_PRESETS.overlay.verticalNoChart
+        : STATS_WINDOW_PRESETS.overlay.vertical
+      : STATS_WINDOW_PRESETS.overlay.chart;
   const fallbackOverlaySize = {
-    width: STATS_WINDOW_PRESETS.overlay.chart.minWidth,
-    height: STATS_WINDOW_PRESETS.overlay.chart.minHeight,
+    width: overlayPreset.minWidth,
+    height: overlayPreset.minHeight,
   };
+  const savedOverlaySizeUsable =
+    savedOverlayBounds &&
+    Number.isFinite(Number(savedOverlayBounds.width)) &&
+    Number.isFinite(Number(savedOverlayBounds.height)) &&
+    Number(savedOverlayBounds.width) >= overlayPreset.minWidth &&
+    Number(savedOverlayBounds.width) <=
+      (overlayPreset.maxWidth ?? STATS_WINDOW_PRESETS.overlay.maxWidth) &&
+    Number(savedOverlayBounds.height) >= overlayPreset.minHeight &&
+    Number(savedOverlayBounds.height) <=
+      (overlayPreset.maxHeight ?? STATS_WINDOW_PRESETS.overlay.maxHeight);
   const overlaySize =
-    liveOverlayBounds ?? savedOverlayBounds ?? fallbackOverlaySize;
+    liveOverlayBounds ??
+    (savedOverlaySizeUsable ? savedOverlayBounds : null) ??
+    fallbackOverlaySize;
   return {
     active: trackerState.active,
     stats: trackerState.stats,
-    ratingType: trackerState.ratingType,
+    ratingType: trackerState.ratingType || authenticatedRatingType,
     selectedMatchType: displaySettings.matchType,
     overlaySize: {
       width: Math.min(
-        1000,
+        overlayPreset.maxWidth ?? STATS_WINDOW_PRESETS.overlay.maxWidth,
         Math.max(300, Number(overlaySize.width) || fallbackOverlaySize.width),
       ),
       height: Math.min(
-        300,
+        overlayPreset.maxHeight ?? STATS_WINDOW_PRESETS.overlay.maxHeight,
         Math.max(68, Number(overlaySize.height) || fallbackOverlaySize.height),
       ),
     },
     displaySettings: {
       matchType: displaySettings.matchType,
+      windowOrientation: displaySettings.windowOrientation,
       fontScale: displaySettings.fontScale,
       graphLabelScale: displaySettings.graphLabelScale,
       backgroundOpacity: displaySettings.backgroundOpacity,
@@ -524,9 +568,13 @@ function savedStatsWindowBounds(mode = displaySettings.mode) {
 
 function currentStatsWindowPreset() {
   const modePreset = STATS_WINDOW_PRESETS[displaySettings.mode];
-  const sizePreset =
-    displaySettings.mode === "window"
-      ? modePreset[displaySettings.windowOrientation] ?? modePreset.horizontal
+  const isVertical = displaySettings.windowOrientation === "vertical";
+  const sizePreset = isVertical
+    ? displaySettings.graphVisible === false
+      ? modePreset.verticalNoChart ?? modePreset.vertical ?? modePreset.summary
+      : modePreset.vertical ?? modePreset.summary
+    : displaySettings.mode === "window"
+      ? modePreset.horizontal
       : modePreset.summary;
   return {
     ...sizePreset,
@@ -648,6 +696,7 @@ function updateDisplaySettings(
   ensureUpdateAllowed();
   const previousMode = displaySettings.mode;
   const previousOrientation = displaySettings.windowOrientation;
+  const previousGraphVisible = displaySettings.graphVisible;
   const previousLocale = displaySettings.locale;
   const previousPollInterval = displaySettings.pollIntervalSeconds;
   const previousLaunchAtLogin = displaySettings.launchAtLogin;
@@ -656,6 +705,9 @@ function updateDisplaySettings(
   const orientationChanging =
     WINDOW_ORIENTATIONS.has(nextSettings.windowOrientation) &&
     nextSettings.windowOrientation !== previousOrientation;
+  const graphVisibilityChanging =
+    typeof nextSettings.graphVisible === "boolean" &&
+    nextSettings.graphVisible !== previousGraphVisible;
   if (orientationChanging && previousMode === "window") {
     // Preserve the current layout before switching the active orientation so
     // returning to it restores the exact size and position the user left.
@@ -736,7 +788,8 @@ function updateDisplaySettings(
   applyDisplayMode({
     resizeToPreset:
       previousMode !== displaySettings.mode ||
-      previousOrientation !== displaySettings.windowOrientation,
+      previousOrientation !== displaySettings.windowOrientation ||
+      graphVisibilityChanging,
     restoreSavedBounds:
       previousMode !== displaySettings.mode ||
       previousOrientation !== displaySettings.windowOrientation,
@@ -1338,7 +1391,16 @@ async function checkAuthentication() {
   if (authenticationInFlight) return authenticationInFlight;
   authenticationInFlight = checkAuthenticationInternal();
   try {
-    return await authenticationInFlight;
+    const result = await authenticationInFlight;
+    const player = result?.player;
+    authenticatedRatingType =
+      player?.mr != null ? "MR" : player?.lp != null ? "LP" : "MR";
+    if (!trackerState.active) {
+      trackerState.ratingType = authenticatedRatingType;
+      trackerState.updatedAt = Date.now();
+      sendTrackerState();
+    }
+    return result;
   } finally {
     authenticationInFlight = null;
   }
