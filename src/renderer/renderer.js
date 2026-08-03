@@ -225,7 +225,7 @@ function renderNextUpdate() {
   elements.nextUpdateInfo.textContent = `${t("nextUpdate", "次回更新")} ${minutes}:${seconds}`;
 }
 
-function drawManagementChart(history) {
+function drawManagementChart(history, matchCount) {
   const canvas = elements.managementRatingChart;
   const rect = canvas.getBoundingClientRect();
   if (!rect.width || !rect.height) return;
@@ -331,11 +331,14 @@ function drawManagementChart(history) {
     displaySettings.fontFamily,
   )}`;
   context.fillStyle = `${displaySettings.textColor ?? "#f7f8ff"}cc`;
+  const safeMatchCount = Math.max(0, Math.trunc(Number(matchCount) || 0));
+  const lastIndex = Math.max(1, values.length - 1);
+  const shownLabels = new Set();
   for (const index of xLabelIndices) {
     const x = xFor(index);
-    const label = index === values.length - 1
-      ? t("now", "NOW")
-      : `-${values.length - 1 - index}`;
+    const label = String(Math.round((index / lastIndex) * safeMatchCount));
+    if (shownLabels.has(label)) continue;
+    shownLabels.add(label);
     const labelWidth = context.measureText(label).width;
     const labelX = Math.min(
       width - right - labelWidth / 2,
@@ -434,12 +437,12 @@ function renderManagementChart(state) {
       ? t("graphEmptyRanked", "ランクマッチを計測するとグラフが表示されます")
       : `${ratingType} ${t("graphEmptyOther", "グラフはランクマッチで表示されます")}`;
   elements.managementChartState.textContent = hasGraphData
-    ? `${history.length} POINTS`
+    ? `${total} MATCHES`
     : matchType === "ranked"
       ? t("dataWaiting", "データ待機中")
       : t("rankedOnly", "ランクのみ");
   if (hasGraphData) {
-    requestAnimationFrame(() => drawManagementChart(history));
+    requestAnimationFrame(() => drawManagementChart(history, total));
   }
 }
 
