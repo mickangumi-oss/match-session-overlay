@@ -1,9 +1,13 @@
 {
   "name": "match-session-overlay",
-  "version": "1.0.1",
+  "version": "1.0.5",
   "private": true,
   "description": "Privacy-first local match session stats window with optional OBS overlay",
   "main": "src/main.js",
   "author": "mickangumi-oss",
-  "license": "PolyForm-Strict-1.0.0"
+  "license": "PolyForm-Strict-1.0.0",
+  "devDependencies": {
+    "electron": "43.2.0",
+    "electron-builder": "26.15.3"
+  }
 }

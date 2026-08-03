@@ -27,6 +27,11 @@ function fontStackFor(value) {
 let selectedPlayer = null;
 let trackerState = null;
 let displaySettings = { matchType: "ranked" };
+let historyState = { records: [], canFetch: false, authenticated: false, cooldownSeconds: 0 };
+let historyPanelOpen = false;
+const HISTORY_PAGE_SIZE = 10;
+const RECENT_HISTORY_PREVIEW_LIMIT = 5;
+let historyPage = 0;
 
 const elements = Object.fromEntries(
   [
@@ -41,6 +46,7 @@ const elements = Object.fromEntries(
     "startTrackingLabel",
     "nextUpdateInfo",
     "stopTrackingButton",
+    "openHistoryButton",
     "recordWins",
     "recordLosses",
     "winRate",
@@ -89,12 +95,392 @@ const elements = Object.fromEntries(
     "updateProgressBar",
     "notice",
     "languageInput",
+    "historyPanel",
+    "closeHistoryButton",
+    "fetchHistoryButton",
+    "historyFetchState",
+    "historyDateFrom",
+    "historyDateTo",
+    "historyMatchType",
+    "historyCharacter",
+    "historyWinsLosses",
+    "historyWinRate",
+    "historyMaxStreak",
+    "historyMaxRating",
+    "historyCount",
+    "historyResultChart",
+    "historyEmpty",
+    "historyMrChart",
+    "historyMrEmpty",
+    "historyLpChart",
+    "historyLpEmpty",
+    "historyTableBody",
+    "historyPreviousButton",
+    "historyNextButton",
+    "historyPageInfo",
+    "recentHistoryBody",
+    "recentHistoryCount",
+    "recentHistoryEmpty",
   ].map((id) => [id, document.getElementById(id)]),
 );
 
 function showNotice(message, type = "") {
   elements.notice.textContent = message;
   elements.notice.className = `notice ${type}`;
+}
+
+function dateKeyForHistory(record) {
+  const timestamp = Number(record?.playedAt ?? record?.uploadedAt ?? 0);
+  if (!Number.isFinite(timestamp) || timestamp <= 0) return "";
+  const date = new Date(timestamp < 10_000_000_000 ? timestamp * 1000 : timestamp);
+  if (Number.isNaN(date.getTime())) return "";
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${date.getFullYear()}-${month}-${day}`;
+}
+
+function formatHistoryDate(record) {
+  const timestamp = Number(record?.playedAt ?? record?.uploadedAt ?? 0);
+  const date = new Date(timestamp < 10_000_000_000 ? timestamp * 1000 : timestamp);
+  if (Number.isNaN(date.getTime())) return "—";
+  return date.toLocaleString(undefined, {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function historyModeLabel(value) {
+  if (value === "ranked") return t("ranked", "Ranked");
+  if (value === "battleHub") return t("battleHub", "Battle Hub");
+  if (value === "casual") return t("casual", "Casual");
+  return value || "—";
+}
+
+function historyCharacterLabel(record, own = true) {
+  const value = own ? record?.ownCharacterName : record?.opponentCharacterName;
+  if (value) return String(value).toLocaleUpperCase();
+  const id = own ? record?.characterId : record?.opponentCharacterId;
+  return id ? `#${id}` : "—";
+}
+
+function filteredHistoryRecords() {
+  const from = elements.historyDateFrom?.value || "";
+  const to = elements.historyDateTo?.value || "";
+  const mode = elements.historyMatchType?.value || "all";
+  const character = elements.historyCharacter?.value || "all";
+  return (Array.isArray(historyState.records) ? historyState.records : [])
+    .filter((record) => {
+      const date = dateKeyForHistory(record);
+      return (!from || date >= from) && (!to || date <= to);
+    })
+    .filter((record) => mode === "all" || record.matchType === mode)
+    .filter((record) => {
+      if (character === "all") return true;
+      return String(record.characterId ?? "") === character;
+    })
+    .sort((a, b) => Number(b.uploadedAt) - Number(a.uploadedAt));
+}
+
+function drawHistoryResultChart(records) {
+  const canvas = elements.historyResultChart;
+  if (!canvas) return;
+  const rect = canvas.getBoundingClientRect();
+  const width = Math.max(1, rect.width);
+  const height = Math.max(1, rect.height);
+  const ratio = window.devicePixelRatio || 1;
+  canvas.width = Math.round(width * ratio);
+  canvas.height = Math.round(height * ratio);
+  const context = canvas.getContext("2d");
+  context.setTransform(ratio, 0, 0, ratio, 0, 0);
+  context.clearRect(0, 0, width, height);
+  if (!records.length) return;
+  // Aggregate results by calendar day so each bar represents one date.
+  // Losses are drawn at the bottom and wins above them, making the daily
+  // result composition readable without requiring one bar per match.
+  const grouped = new Map();
+  for (const record of records) {
+    const date = dateKeyForHistory(record);
+    if (!date) continue;
+    const bucket = grouped.get(date) || { win: 0, loss: 0, draw: 0 };
+    if (record.result === "win") bucket.win += 1;
+    else if (record.result === "loss") bucket.loss += 1;
+    else bucket.draw += 1;
+    grouped.set(date, bucket);
+  }
+  const ordered = [...grouped.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([date, values]) => ({ date, ...values }));
+  if (!ordered.length) return;
+  const padding = { top: 12, right: 14, bottom: 32, left: 32 };
+  const plotWidth = Math.max(1, width - padding.left - padding.right);
+  const plotHeight = Math.max(1, height - padding.top - padding.bottom);
+
+  const maximum = Math.max(1, ...ordered.map((bucket) => bucket.win + bucket.loss + bucket.draw));
+  const tickStep = maximum <= 5 ? 1 : Math.ceil(maximum / 5);
+  const axisMaximum = Math.ceil(maximum / tickStep) * tickStep;
+  context.strokeStyle = "rgba(120, 190, 220, .18)";
+  context.lineWidth = 1;
+  context.fillStyle = "rgba(247,248,255,.68)";
+  context.font = `10px ${fontStackFor(displaySettings.fontFamily)}`;
+  context.textAlign = "right";
+  context.textBaseline = "middle";
+  for (let tick = 0; tick <= axisMaximum; tick += tickStep) {
+    const y = padding.top + plotHeight - (tick / axisMaximum) * plotHeight;
+    context.beginPath();
+    context.moveTo(padding.left, y);
+    context.lineTo(width - padding.right, y);
+    context.stroke();
+    context.fillText(String(tick), padding.left - 6, y);
+  }
+
+  const slotWidth = plotWidth / ordered.length;
+  const barGap = Math.max(3, Math.min(14, slotWidth / 5));
+  const barWidth = Math.max(5, slotWidth - barGap);
+  ordered.forEach((bucket, index) => {
+    const x = padding.left + index * slotWidth + (slotWidth - barWidth) / 2;
+    let cursor = padding.top + plotHeight;
+    for (const [count, color] of [
+      [bucket.loss, "#2d78df"],
+      [bucket.win, "#f32755"],
+      [bucket.draw, "#9aa7b2"],
+    ]) {
+      if (!count) continue;
+      const segmentHeight = (count / axisMaximum) * plotHeight;
+      cursor -= segmentHeight;
+      context.fillStyle = color;
+      context.fillRect(x, cursor, barWidth, segmentHeight);
+    }
+    if (ordered.length <= 12 || index % Math.ceil(ordered.length / 12) === 0) {
+      const parsedDate = new Date(`${bucket.date}T00:00:00`);
+      const label = `${String(parsedDate.getMonth() + 1).padStart(2, "0")}/${String(parsedDate.getDate()).padStart(2, "0")}`;
+      context.fillStyle = "rgba(247,248,255,.72)";
+      context.textAlign = "center";
+      context.textBaseline = "top";
+      context.fillText(label, x + barWidth / 2, padding.top + plotHeight + 7);
+    }
+  });
+}
+
+function drawHistoryRatingChart(records, ratingType, canvas, emptyElement) {
+  if (!canvas) return;
+  const orderedRecords = [...records]
+    .filter((record) => String(record.ownRatingType || "").toUpperCase() === ratingType)
+    .filter((record) => Number.isFinite(Number(record.ownRating)))
+    .sort((a, b) => Number(a.playedAt ?? a.uploadedAt) - Number(b.playedAt ?? b.uploadedAt));
+  const points = orderedRecords.map((record, index) => ({
+    match: index + 1,
+    value: Number(record.ownRating),
+  }));
+  if (emptyElement) emptyElement.classList.toggle("hidden", points.length > 0);
+
+  const rect = canvas.getBoundingClientRect();
+  const width = Math.max(1, rect.width);
+  const height = Math.max(1, rect.height);
+  const ratio = window.devicePixelRatio || 1;
+  canvas.width = Math.round(width * ratio);
+  canvas.height = Math.round(height * ratio);
+  const context = canvas.getContext("2d");
+  context.setTransform(ratio, 0, 0, ratio, 0, 0);
+  context.clearRect(0, 0, width, height);
+  if (!points.length) return;
+
+  const padding = { top: 10, right: 8, bottom: 24, left: 44 };
+  const plotWidth = Math.max(1, width - padding.left - padding.right);
+  const plotHeight = Math.max(1, height - padding.top - padding.bottom);
+  const values = points.map((point) => point.value);
+  const rawMin = Math.min(...values);
+  const rawMax = Math.max(...values);
+  const range = Math.max(1, rawMax - rawMin);
+  const axisMin = Math.max(0, rawMin - Math.ceil(range * 0.12));
+  const axisMax = rawMax + Math.ceil(range * 0.12) || axisMin + 1;
+  const color = ratingType === "MR" ? "#ff2e69" : "#43d8ff";
+  const formatValue = (value) => Math.round(value).toLocaleString();
+
+  context.font = `9px ${fontStackFor(displaySettings.fontFamily)}`;
+  context.textAlign = "right";
+  context.textBaseline = "middle";
+  context.fillStyle = "rgba(247,248,255,.62)";
+  context.strokeStyle = "rgba(120, 190, 220, .16)";
+  context.lineWidth = 1;
+  for (let step = 0; step <= 2; step += 1) {
+    const value = axisMin + ((axisMax - axisMin) * (2 - step)) / 2;
+    const y = padding.top + (plotHeight * step) / 2;
+    context.beginPath();
+    context.moveTo(padding.left, y);
+    context.lineTo(width - padding.right, y);
+    context.stroke();
+    context.fillText(formatValue(value), padding.left - 5, y);
+  }
+
+  const xFor = (index) => padding.left + (points.length === 1 ? plotWidth / 2 : (index / (points.length - 1)) * plotWidth);
+  const yFor = (value) => padding.top + plotHeight - ((value - axisMin) / (axisMax - axisMin)) * plotHeight;
+  context.strokeStyle = color;
+  context.fillStyle = color;
+  context.lineWidth = 2;
+  context.beginPath();
+  points.forEach((point, index) => {
+    const x = xFor(index);
+    const y = yFor(point.value);
+    if (index === 0) context.moveTo(x, y);
+    else context.lineTo(x, y);
+  });
+  context.stroke();
+  points.forEach((point, index) => {
+    const x = xFor(index);
+    const y = yFor(point.value);
+    context.beginPath();
+    context.arc(x, y, 2.5, 0, Math.PI * 2);
+    context.fill();
+    if (points.length <= 10 || index % Math.ceil(points.length / 10) === 0) {
+      const label = `#${point.match}`;
+      context.fillStyle = "rgba(247,248,255,.66)";
+      context.textAlign = "center";
+      context.textBaseline = "top";
+      context.fillText(label, x, padding.top + plotHeight + 6);
+      context.fillStyle = color;
+    }
+  });
+}
+
+function renderHistoryCharacters(records) {
+  const select = elements.historyCharacter;
+  if (!select) return;
+  const selected = select.value || "all";
+  const characters = [...new Map(
+    records
+      .filter((record) => record.characterId != null)
+      .map((record) => [String(record.characterId), historyCharacterLabel(record)]),
+  ).entries()].sort((a, b) => a[1].localeCompare(b[1]));
+  const allLabel = t("allCharacters", "All characters");
+  select.replaceChildren(new Option(allLabel, "all"));
+  for (const [value, label] of characters) select.append(new Option(label, value));
+  select.value = characters.some(([value]) => value === selected) ? selected : "all";
+}
+
+function renderHistoryTable(records) {
+  const body = elements.historyTableBody;
+  if (!body) return;
+  body.replaceChildren();
+  for (const record of records) {
+    const row = document.createElement("tr");
+    const result = record.result === "win" ? "W" : record.result === "loss" ? "L" : "—";
+    const cells = [
+      formatHistoryDate(record),
+      result,
+      historyModeLabel(record.matchType),
+      record.ownName || "—",
+      historyCharacterLabel(record),
+      record.opponentName || "—",
+      record.ownRating == null ? "—" : `${record.ownRatingType || ""} ${record.ownRating}`,
+    ];
+    // Keep the player's rating next to their character for quick scanning.
+    cells.splice(5, 0, cells.splice(6, 1)[0]);
+    cells.splice(
+      7,
+      0,
+      historyCharacterLabel(record, false),
+      record.opponentRating == null ? "—" : `${record.opponentRatingType || ""} ${record.opponentRating}`,
+    );
+    cells.forEach((value, index) => {
+      const cell = document.createElement("td");
+      cell.textContent = value;
+      if (index === 1) cell.className = result === "W" ? "result-win" : result === "L" ? "result-loss" : "result-draw";
+      row.append(cell);
+    });
+    body.append(row);
+  }
+}
+
+function renderRecentHistoryPreview(records) {
+  const body = elements.recentHistoryBody;
+  if (!body) return;
+  const recent = [...records]
+    .sort((a, b) => Number(b.uploadedAt) - Number(a.uploadedAt))
+    .slice(0, RECENT_HISTORY_PREVIEW_LIMIT);
+  body.replaceChildren();
+  for (const record of recent) {
+    const result = record.result === "win" ? "W" : record.result === "loss" ? "L" : "—";
+    const row = document.createElement("tr");
+    const values = [
+      formatHistoryDate(record),
+      result,
+      historyModeLabel(record.matchType),
+      record.opponentName || "—",
+    ];
+    values.forEach((value, index) => {
+      const cell = document.createElement("td");
+      cell.textContent = value;
+      if (index === 1) {
+        cell.className = result === "W" ? "result-win" : result === "L" ? "result-loss" : "result-draw";
+      }
+      row.append(cell);
+    });
+    body.append(row);
+  }
+  if (elements.recentHistoryCount) elements.recentHistoryCount.textContent = String(recent.length);
+  elements.recentHistoryEmpty?.classList.toggle("hidden", recent.length > 0);
+}
+
+function renderHistoryState(nextState = historyState) {
+  historyState = nextState || { records: [], canFetch: false, authenticated: false, cooldownSeconds: 0 };
+  const allRecords = Array.isArray(historyState.records) ? historyState.records : [];
+  renderHistoryCharacters(allRecords);
+  renderRecentHistoryPreview(allRecords);
+  const records = filteredHistoryRecords();
+  const wins = records.filter((record) => record.result === "win").length;
+  const losses = records.filter((record) => record.result === "loss").length;
+  const rate = wins + losses ? (wins / (wins + losses)) * 100 : 0;
+  let maxStreak = 0;
+  let streak = 0;
+  [...records].sort((a, b) => Number(a.uploadedAt) - Number(b.uploadedAt)).forEach((record) => {
+    streak = record.result === "win" ? streak + 1 : 0;
+    maxStreak = Math.max(maxStreak, streak);
+  });
+  const ratings = records.map((record) => Number(record.ownRating)).filter(Number.isFinite);
+  elements.historyWinsLosses.textContent = `${wins} - ${losses}`;
+  elements.historyWinRate.textContent = `${rate.toFixed(1)}%`;
+  elements.historyMaxStreak.textContent = String(maxStreak);
+  elements.historyMaxRating.textContent = ratings.length ? String(Math.max(...ratings)) : "—";
+  elements.historyCount.textContent = `${records.length} ${t("matches", "MATCHES")}`;
+  elements.historyEmpty.classList.toggle("hidden", records.length > 0);
+  drawHistoryResultChart(records);
+  drawHistoryRatingChart(records, "MR", elements.historyMrChart, elements.historyMrEmpty);
+  drawHistoryRatingChart(records, "LP", elements.historyLpChart, elements.historyLpEmpty);
+  const totalPages = Math.ceil(records.length / HISTORY_PAGE_SIZE);
+  historyPage = totalPages ? Math.min(historyPage, totalPages - 1) : 0;
+  const pageRecords = records.slice(
+    historyPage * HISTORY_PAGE_SIZE,
+    (historyPage + 1) * HISTORY_PAGE_SIZE,
+  );
+  renderHistoryTable(pageRecords);
+  if (elements.historyPageInfo) {
+    elements.historyPageInfo.textContent = t("historyPage", "Page {current} / {total}")
+      .replace("{current}", String(totalPages ? historyPage + 1 : 0))
+      .replace("{total}", String(totalPages));
+  }
+  if (elements.historyPreviousButton) {
+    elements.historyPreviousButton.disabled = historyPage <= 0;
+  }
+  if (elements.historyNextButton) {
+    elements.historyNextButton.disabled = !totalPages || historyPage >= totalPages - 1;
+  }
+  const cooldown = Number(historyState.cooldownSeconds || 0);
+  elements.fetchHistoryButton.disabled = !historyState.canFetch;
+  elements.historyFetchState.textContent = !historyState.authenticated
+    ? t("historyFetchUnavailable", "Log in to import match history")
+    : historyState.canFetch
+    ? t("historyFetchReady", "Ready (one request per 10 minutes)")
+    : t("historyFetchCooldown", "Available again in {seconds}s").replace("{seconds}", String(cooldown));
+}
+
+function setHistoryPanelOpen(open) {
+  historyPanelOpen = Boolean(open);
+  elements.historyPanel.classList.toggle("hidden", !historyPanelOpen);
+  elements.historyPanel.setAttribute("aria-hidden", String(!historyPanelOpen));
+  if (historyPanelOpen) renderHistoryState();
 }
 
 const FONT_PRESETS = [
@@ -509,6 +895,14 @@ function applyAuthenticatedPlayer(player) {
   renderCurrentCharacter();
   setStatus(elements.authStatus, t("loggedIn", "ログイン済み"), "ok");
   elements.startTrackingButton.disabled = false;
+  if (api.getHistoryState) {
+    api.getHistoryState().then((result) => {
+      if (result?.ok) {
+        historyPage = 0;
+        renderHistoryState(result.data);
+      }
+    }).catch(() => {});
+  }
 }
 
 async function unwrap(promise) {
@@ -707,6 +1101,39 @@ elements.stopTrackingButton.addEventListener("click", async () => {
 elements.resetTrackingButton.addEventListener("click", async () => {
   renderTracker(await unwrap(api.resetTracking()));
   showNotice(t("statsReset", "起動後の戦績を0から数え直します"), "success");
+});
+
+elements.openHistoryButton?.addEventListener("click", () => setHistoryPanelOpen(true));
+elements.closeHistoryButton?.addEventListener("click", () => setHistoryPanelOpen(false));
+for (const input of [
+  elements.historyDateFrom,
+  elements.historyDateTo,
+  elements.historyMatchType,
+  elements.historyCharacter,
+]) {
+  input?.addEventListener("change", () => {
+    historyPage = 0;
+    renderHistoryState();
+  });
+}
+elements.historyPreviousButton?.addEventListener("click", () => {
+  historyPage = Math.max(0, historyPage - 1);
+  renderHistoryState();
+});
+elements.historyNextButton?.addEventListener("click", () => {
+  historyPage += 1;
+  renderHistoryState();
+});
+elements.fetchHistoryButton?.addEventListener("click", async () => {
+  elements.fetchHistoryButton.disabled = true;
+  try {
+    historyPage = 0;
+    renderHistoryState(await unwrap(api.fetchHistory()));
+    showNotice(t("historyFetched", "Match history imported locally"), "success");
+  } catch (error) {
+    showNotice(error.message, "error");
+    renderHistoryState();
+  }
 });
 
 elements.toggleStatsButton.addEventListener("click", async () => {
@@ -965,9 +1392,13 @@ window.addEventListener("resize", () => {
   if (trackerState) {
     renderManagementChart(trackerState);
   }
+  if (historyPanelOpen) renderHistoryState();
 });
 
 setInterval(renderNextUpdate, 1000);
+setInterval(() => {
+  if (historyPanelOpen) renderHistoryState();
+}, 1000);
 
 elements.copyOverlayButton.addEventListener("click", async () => {
   await unwrap(api.copyText(elements.overlayUrl.textContent));
@@ -1006,6 +1437,10 @@ elements.installUpdateButton.addEventListener("click", async () => {
 });
 
 api.onState(renderTracker);
+api.onHistoryState?.((state) => {
+  historyPage = 0;
+  renderHistoryState(state);
+});
 api.onUpdateState(renderUpdate);
 api.onDisplaySettings(renderDisplaySettings);
 api.onAuthenticatedPlayer((player) => {
@@ -1015,13 +1450,16 @@ api.onAuthenticatedPlayer((player) => {
 
 Promise.all([
   unwrap(api.getState()),
+  unwrap(api.getHistoryState ? api.getHistoryState() : Promise.resolve({ records: [] })),
   unwrap(api.getUpdateState()),
   unwrap(api.getDisplaySettings()),
 ])
-  .then(async ([state, updateState, settings]) => {
+  .then(async ([state, savedHistory, updateState, settings]) => {
     renderDisplaySettings(settings);
     await populateInstalledFonts(settings.fontFamily);
     renderTracker(state);
+    historyPage = 0;
+    renderHistoryState(savedHistory);
     renderUpdate(updateState);
   })
   .catch((error) => showNotice(error.message, "error"));
