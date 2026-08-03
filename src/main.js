@@ -350,6 +350,9 @@ try {
 } catch {
   // 初回起動、または設定ファイル破損時は安全な既定値を使う。
 }
+if (!displaySettings.launchAtLogin) {
+  displaySettings.autoDetectGame = false;
+}
 overlayEditPreference = !hasPersistedDisplaySettings;
 
 function createEmptyTrackerState() {
@@ -782,6 +785,13 @@ function updateDisplaySettings(
   if (typeof nextSettings.autoDetectGame === "boolean") {
     displaySettings.autoDetectGame = nextSettings.autoDetectGame;
   }
+  // Game detection is intentionally tied to the Windows-startup option. The
+  // watcher needs the app to be resident before the game launches; allowing
+  // it while startup is disabled would make the setting appear to work even
+  // though a fully closed app cannot observe a new process.
+  if (!displaySettings.launchAtLogin) {
+    displaySettings.autoDetectGame = false;
+  }
   if (isSafeExecutableName(nextSettings.gameExecutableName)) {
     displaySettings.gameExecutableName = nextSettings.gameExecutableName;
   }
@@ -806,10 +816,10 @@ function updateDisplaySettings(
     configureLaunchAtLogin();
   }
   if (
+    previousLaunchAtLogin !== displaySettings.launchAtLogin ||
     previousAutoDetectGame !== displaySettings.autoDetectGame ||
     previousGameExecutable !== displaySettings.gameExecutableName
   ) {
-    configureLaunchAtLogin();
     configureGameDetection();
   }
   return publicDisplaySettings();
@@ -912,12 +922,30 @@ async function isConfiguredGameRunning() {
   return stdout.toLowerCase().includes(`"${executableName.toLowerCase()}"`);
 }
 
+function isGameDetectionEnabled() {
+  return (
+    !updateRequired &&
+    displaySettings.launchAtLogin &&
+    displaySettings.autoDetectGame &&
+    isSafeExecutableName(displaySettings.gameExecutableName)
+  );
+}
+
 async function checkConfiguredGame() {
-  if (updateRequired) return;
+  if (!isGameDetectionEnabled()) {
+    stopAutoGameSession();
+    return;
+  }
   let running;
   try {
     running = await isConfiguredGameRunning();
   } catch {
+    return;
+  }
+  // Settings can change while tasklist.exe is running. Do not start or keep
+  // an automatic session after the user disables the required startup option.
+  if (!isGameDetectionEnabled()) {
+    stopAutoGameSession();
     return;
   }
   if (running === gameWasRunning) return;
@@ -936,8 +964,10 @@ async function checkConfiguredGame() {
     }
     try {
       const { player } = await checkAuthentication();
+      if (!isGameDetectionEnabled()) return;
       await startTracking(player);
       autoGameSessionActive = true;
+      if (!isGameDetectionEnabled()) stopAutoGameSession();
     } catch (error) {
       trackerState.status = friendlyError(error);
       trackerState.updatedAt = Date.now();
@@ -950,23 +980,14 @@ async function checkConfiguredGame() {
   }
 
   if (autoGameSessionActive) {
-    autoGameSessionActive = false;
-    stopTracking();
-    if (statsWindow && !statsWindow.isDestroyed()) {
-      statsWindowDrag = null;
-      statsWindow.hide();
-      sendDisplaySettings();
-    }
+    stopAutoGameSession();
   }
 }
 
 function configureLaunchAtLogin() {
   if (app.isPackaged) {
-    const backgroundGameWatcher =
-      displaySettings.autoDetectGame &&
-      isSafeExecutableName(displaySettings.gameExecutableName);
     app.setLoginItemSettings({
-      openAtLogin: displaySettings.launchAtLogin || backgroundGameWatcher,
+      openAtLogin: displaySettings.launchAtLogin,
       args: displaySettings.launchAtLogin ? [] : ["--background"],
     });
   }
@@ -977,10 +998,8 @@ function configureGameDetection() {
   gameMonitorTimer = null;
   gameWasRunning = false;
   syncMainWindowGameFocusMode();
-  if (
-    !displaySettings.autoDetectGame ||
-    !isSafeExecutableName(displaySettings.gameExecutableName)
-  ) {
+  if (!isGameDetectionEnabled()) {
+    stopAutoGameSession();
     return;
   }
   checkConfiguredGame();
@@ -1503,12 +1522,16 @@ function syncCurrentPlayerRating(state, player, hasNewRankedReplay = false) {
   const lastHistoryIndex = history.length - 1;
   if (lastHistoryIndex < 0) {
     history.push(currentRating);
+  } else if (hasNewRankedReplay && history.length < 2) {
+    // Keep a flat two-point series when a ranked replay has no per-replay
+    // rating value (or when the rating did not change).
+    history.push(currentRating);
   } else if (history[lastHistoryIndex] !== currentRating) {
-    if (hasNewRankedReplay) {
-      history[lastHistoryIndex] = currentRating;
-    } else {
-      history.push(currentRating);
-    }
+    // A battle-log entry may not include its rating. Keep the previous point
+    // and append the profile's current value so the graph still records the
+    // change. When the log already supplied the same value, the branch above
+    // avoids adding a duplicate point.
+    history.push(currentRating);
   }
 
   ranked.ratingDelta = currentRating - ranked.initialRating;
@@ -1529,7 +1552,6 @@ async function startTrackingInternal(player) {
 
   if (resumable) {
     const previousReplayIds = new Set(trackerState.seenReplayIds);
-    const previousCharacterId = trackerState.characterId;
     const hasNewRankedReplay = replays.some(
       (replay) =>
         replay.matchType === "ranked" &&
@@ -1537,14 +1559,10 @@ async function startTrackingInternal(player) {
         !previousReplayIds.has(replay.replayId),
     );
     trackerState = applyNewReplays(trackerState, replays);
-    const characterChanged =
-      previousCharacterId != null &&
-      trackerState.characterId != null &&
-      previousCharacterId !== trackerState.characterId;
     trackerState = syncCurrentPlayerRating(
       trackerState,
       player,
-      hasNewRankedReplay || characterChanged,
+      hasNewRankedReplay,
     );
     trackerState.active = true;
     trackerState.player = player;
@@ -1720,7 +1738,7 @@ async function refreshTracking(sessionId = trackingSessionId) {
       trackerState = syncCurrentPlayerRating(
         trackerState,
         refreshedPlayer,
-        hasNewRankedReplay || characterChanged,
+        hasNewRankedReplay,
       );
     }
   }
@@ -1758,6 +1776,17 @@ function stopTracking() {
   trackerState = createEmptyTrackerState();
   sendTrackerState();
   return publicTrackerState();
+}
+
+function stopAutoGameSession() {
+  if (!autoGameSessionActive) return;
+  autoGameSessionActive = false;
+  stopTracking();
+  if (statsWindow && !statsWindow.isDestroyed()) {
+    statsWindowDrag = null;
+    statsWindow.hide();
+    sendDisplaySettings();
+  }
 }
 
 function resetTrackingStats() {
