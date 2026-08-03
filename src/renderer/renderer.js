@@ -424,6 +424,21 @@ function renderRecentHistoryPreview(records) {
   elements.recentHistoryEmpty?.classList.toggle("hidden", recent.length > 0);
 }
 
+function selectHistoryMaximumRating(records) {
+  const typedRatings = (type) => records
+    .filter((record) => String(record.ownRatingType || "").toUpperCase() === type)
+    .map((record) => Number(record.ownRating))
+    .filter(Number.isFinite);
+  // MR and LP use different numeric scales. Prefer the MR series whenever
+  // the filtered period contains one; fall back to LP only when no MR match
+  // is present, instead of comparing the two scales directly.
+  const mrRatings = typedRatings("MR");
+  if (mrRatings.length) return Math.max(...mrRatings);
+  const lpRatings = typedRatings("LP");
+  if (lpRatings.length) return Math.max(...lpRatings);
+  return null;
+}
+
 function renderHistoryState(nextState = historyState) {
   historyState = nextState || { records: [], canFetch: false, authenticated: false, cooldownSeconds: 0 };
   const allRecords = Array.isArray(historyState.records) ? historyState.records : [];
@@ -439,11 +454,11 @@ function renderHistoryState(nextState = historyState) {
     streak = record.result === "win" ? streak + 1 : 0;
     maxStreak = Math.max(maxStreak, streak);
   });
-  const ratings = records.map((record) => Number(record.ownRating)).filter(Number.isFinite);
   elements.historyWinsLosses.textContent = `${wins} - ${losses}`;
   elements.historyWinRate.textContent = `${rate.toFixed(1)}%`;
   elements.historyMaxStreak.textContent = String(maxStreak);
-  elements.historyMaxRating.textContent = ratings.length ? String(Math.max(...ratings)) : "—";
+  const maximumRating = selectHistoryMaximumRating(records);
+  elements.historyMaxRating.textContent = maximumRating == null ? "—" : String(maximumRating);
   elements.historyCount.textContent = `${records.length} ${t("matches", "MATCHES")}`;
   elements.historyEmpty.classList.toggle("hidden", records.length > 0);
   drawHistoryResultChart(records);
