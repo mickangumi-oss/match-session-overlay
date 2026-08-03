@@ -11,6 +11,8 @@ contextBridge.exposeInMainWorld("matchOverlay", {
   stopTracking: () => ipcRenderer.invoke("tracker:stop"),
   resetTracking: () => ipcRenderer.invoke("tracker:reset"),
   getState: () => ipcRenderer.invoke("tracker:state"),
+  getHistoryState: () => ipcRenderer.invoke("history:state"),
+  fetchHistory: () => ipcRenderer.invoke("history:fetch"),
   openStatsWindow: () => ipcRenderer.invoke("display:open"),
   hideStatsWindow: () => ipcRenderer.invoke("display:hide"),
   toggleStatsWindow: () => ipcRenderer.invoke("display:toggle"),
@@ -34,6 +36,11 @@ contextBridge.exposeInMainWorld("matchOverlay", {
     const listener = (_event, state) => callback(state);
     ipcRenderer.on("tracker:state", listener);
     return () => ipcRenderer.removeListener("tracker:state", listener);
+  },
+  onHistoryState: (callback) => {
+    const listener = (_event, state) => callback(state);
+    ipcRenderer.on("history:state", listener);
+    return () => ipcRenderer.removeListener("history:state", listener);
   },
   onAuthenticatedPlayer: (callback) => {
     const listener = (_event, player) => callback(player);
