@@ -253,9 +253,20 @@ function renderStatsChart(state) {
   const matchType = displaySettings?.matchType ?? "ranked";
   const selected = state.stats?.[matchType] ?? {};
   const total = Number(selected.wins ?? 0) + Number(selected.losses ?? 0);
-  const history = Array.isArray(selected.ratingHistory)
-    ? selected.ratingHistory
+  const rawHistory = Array.isArray(selected.ratingHistory)
+    ? selected.ratingHistory.filter(Number.isFinite)
     : [];
+  const initial = Number(selected.initialRating);
+  const current = Number(selected.currentRating);
+  const history =
+    rawHistory.length >= 2 || total <= 0
+      ? rawHistory
+      : selected.initialRating != null &&
+          selected.currentRating != null &&
+          Number.isFinite(initial) &&
+          Number.isFinite(current)
+        ? [initial, current]
+        : rawHistory;
   const hasGraphData = matchType === "ranked" && total > 0 && history.length >= 2;
   elements.statsRatingChart.classList.toggle("hidden", !hasGraphData);
   elements.statsChartEmpty.classList.toggle("hidden", hasGraphData);

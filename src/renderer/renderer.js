@@ -396,6 +396,24 @@ function resolveRatingType(state = trackerState) {
   return "MR";
 }
 
+function historyForDisplay(selected, total) {
+  const history = Array.isArray(selected?.ratingHistory)
+    ? selected.ratingHistory.filter(Number.isFinite)
+    : [];
+  if (history.length >= 2 || total <= 0) return history;
+  const initial = Number(selected?.initialRating);
+  const current = Number(selected?.currentRating);
+  if (
+    selected?.initialRating != null &&
+    selected?.currentRating != null &&
+    Number.isFinite(initial) &&
+    Number.isFinite(current)
+  ) {
+    return [initial, current];
+  }
+  return history;
+}
+
 function renderManagementChart(state) {
   // The graph option controls the compact stats window/overlay only. The
   // management screen is the dedicated graph workspace and always keeps it
@@ -406,9 +424,7 @@ function renderManagementChart(state) {
   const ratingType = resolveRatingType(state);
   const selected = state.stats?.[matchType] ?? {};
   const total = Number(selected.wins ?? 0) + Number(selected.losses ?? 0);
-  const history = Array.isArray(selected.ratingHistory)
-    ? selected.ratingHistory
-    : [];
+  const history = historyForDisplay(selected, total);
   const hasGraphData =
     matchType === "ranked" && total > 0 && history.length >= 2;
   elements.managementRatingChart.classList.toggle("hidden", !hasGraphData);
@@ -592,6 +608,7 @@ function renderDisplaySettings(settings) {
   elements.pollIntervalInput.value = String(settings.pollIntervalSeconds);
   elements.launchAtLoginInput.checked = settings.launchAtLogin;
   elements.gameDetectionInput.checked = settings.autoDetectGame;
+  elements.gameDetectionInput.disabled = !settings.launchAtLogin;
   elements.gameExecutableName.textContent =
     settings.gameExecutableName || t("gameNotSelected", "ゲーム未選択");
   elements.overlayLockButton.disabled = settings.mode !== "overlay";
@@ -906,6 +923,17 @@ elements.launchAtLoginInput.addEventListener("change", async () => {
 });
 
 elements.gameDetectionInput.addEventListener("change", async () => {
+  if (!displaySettings.launchAtLogin) {
+    elements.gameDetectionInput.checked = false;
+    showNotice(
+      t(
+        "gameDetectionRequiresStartup",
+        "ゲーム起動検知には、コンピューター起動時のアプリ実行をONにしてください",
+      ),
+      "error",
+    );
+    return;
+  }
   if (
     elements.gameDetectionInput.checked &&
     !displaySettings.gameExecutableName
