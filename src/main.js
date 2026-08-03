@@ -200,6 +200,12 @@ const localDataRoot =
 const userDataPath = path.join(localDataRoot, "user-data");
 const sessionDataPath = path.join(localDataRoot, "session-data");
 const displaySettingsPath = path.join(userDataPath, "display-settings.json");
+const matchHistoryPath = path.join(userDataPath, "match-history.json");
+const MATCH_HISTORY_LIMIT = 5000;
+// A manual history import is one request for the site's existing 100-entry
+// battle log. Keep it deliberately infrequent so the feature cannot be used
+// to poll the service repeatedly.
+const MATCH_HISTORY_FETCH_COOLDOWN_MS = 10 * 60 * 1000;
 fs.mkdirSync(userDataPath, { recursive: true });
 fs.mkdirSync(sessionDataPath, { recursive: true });
 app.setPath("userData", userDataPath);
@@ -239,12 +245,17 @@ let statsWindowDrag = null;
 let updater;
 let updateRequired = false;
 let authenticatedRatingType = "MR";
+let authenticatedProfileId = null;
 let statsWindowBounds = {
   window: { horizontal: null, vertical: null },
   overlay: null,
 };
 
 let trackerState = createEmptyTrackerState();
+let matchHistoryRecords = [];
+let matchHistoryLastFetchedAt = 0;
+let matchHistoryLastFetchedProfileId = null;
+let matchHistoryFetchInFlight = null;
 let displaySettings = {
   mode: "window",
   windowOrientation: "horizontal",
@@ -350,6 +361,7 @@ try {
 } catch {
   // 初回起動、または設定ファイル破損時は安全な既定値を使う。
 }
+loadMatchHistory();
 if (!displaySettings.launchAtLogin) {
   displaySettings.autoDetectGame = false;
 }
@@ -381,6 +393,146 @@ function createEmptyTrackerState() {
     status: "停止中",
     overlayUrl: `http://${OVERLAY_HOST}:${OVERLAY_PORT}/overlay`,
   };
+}
+
+function normalizeStoredHistoryRecord(value) {
+  if (!value || typeof value !== "object") return null;
+  const replayId = String(value.replayId ?? "").trim();
+  if (!replayId) return null;
+  const profileId = String(value.profileId ?? value.ownUserCode ?? "").trim();
+  const uploadedAt = Number(value.uploadedAt ?? 0);
+  if (!profileId || !Number.isFinite(uploadedAt) || uploadedAt <= 0) return null;
+  const matchType = ["ranked", "battleHub", "casual"].includes(value.matchType)
+    ? value.matchType
+    : null;
+  if (!matchType) return null;
+  const finiteOrNull = (candidate) => {
+    const number = Number(candidate);
+    return Number.isFinite(number) && number > 0 ? number : null;
+  };
+  return {
+    replayId,
+    profileId,
+    uploadedAt,
+    playedAt: finiteOrNull(value.playedAt) ?? uploadedAt,
+    matchType,
+    battleTypeName: String(value.battleTypeName ?? "").slice(0, 80),
+    result: ["win", "loss", "draw"].includes(value.result)
+      ? value.result
+      : "draw",
+    ownName: String(value.ownName ?? "").slice(0, 80),
+    ownCharacterName: String(value.ownCharacterName ?? "").slice(0, 80),
+    characterId: finiteOrNull(value.characterId),
+    ownRating: finiteOrNull(value.ownRating ?? value.rating),
+    ownRatingType: ["MR", "LP"].includes(value.ownRatingType ?? value.ratingType)
+      ? value.ownRatingType ?? value.ratingType
+      : null,
+    opponentName: String(value.opponentName ?? "").slice(0, 80),
+    opponentCharacterName: String(value.opponentCharacterName ?? "").slice(0, 80),
+    opponentCharacterId: finiteOrNull(value.opponentCharacterId),
+    opponentRating: finiteOrNull(value.opponentRating),
+    opponentRatingType: ["MR", "LP"].includes(value.opponentRatingType)
+      ? value.opponentRatingType
+      : null,
+  };
+}
+
+function loadMatchHistory() {
+  try {
+    const saved = JSON.parse(fs.readFileSync(matchHistoryPath, "utf8"));
+    const records = Array.isArray(saved) ? saved : saved?.records;
+    matchHistoryRecords = Array.isArray(records)
+      ? records.map(normalizeStoredHistoryRecord).filter(Boolean)
+      : [];
+    matchHistoryLastFetchedAt = Number(saved?.lastFetchedAt ?? 0) || 0;
+    matchHistoryLastFetchedProfileId = String(saved?.lastFetchedProfileId ?? "").trim() || null;
+    matchHistoryRecords = [...new Map(
+      matchHistoryRecords.map((record) => [record.replayId, record]),
+    ).values()]
+      .sort((a, b) => b.uploadedAt - a.uploadedAt)
+      .slice(0, MATCH_HISTORY_LIMIT);
+  } catch {
+    matchHistoryRecords = [];
+    matchHistoryLastFetchedAt = 0;
+    matchHistoryLastFetchedProfileId = null;
+  }
+}
+
+function persistMatchHistory() {
+  try {
+    fs.writeFileSync(
+      matchHistoryPath,
+      JSON.stringify(
+        {
+          version: 1,
+          lastFetchedAt: matchHistoryLastFetchedAt,
+          lastFetchedProfileId: matchHistoryLastFetchedProfileId,
+          records: matchHistoryRecords,
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+  } catch {
+    // Local history is an enhancement; a full disk must not stop tracking.
+  }
+}
+
+function mergeMatchHistory(replays, profileId) {
+  const normalizedProfileId = String(profileId ?? "").trim();
+  if (!normalizedProfileId || !Array.isArray(replays)) return false;
+  const existing = new Map(
+    matchHistoryRecords.map((record) => [record.replayId, record]),
+  );
+  let changed = false;
+  for (const replay of replays) {
+    const normalized = normalizeStoredHistoryRecord({
+      ...replay,
+      profileId: normalizedProfileId,
+    });
+    if (!normalized) continue;
+    const previous = existing.get(normalized.replayId);
+    if (!previous || JSON.stringify(previous) !== JSON.stringify(normalized)) {
+      existing.set(normalized.replayId, normalized);
+      changed = true;
+    }
+  }
+  if (!changed) return false;
+  matchHistoryRecords = [...existing.values()]
+    .sort((a, b) => b.uploadedAt - a.uploadedAt)
+    .slice(0, MATCH_HISTORY_LIMIT);
+  persistMatchHistory();
+  sendHistoryState();
+  return true;
+}
+
+function publicHistoryState(
+  profileId = trackerState.player?.profileId ?? authenticatedProfileId,
+) {
+  const normalizedProfileId = String(profileId ?? "").trim();
+  const records = normalizedProfileId
+    ? matchHistoryRecords.filter((record) => record.profileId === normalizedProfileId)
+    : [];
+  const nextAllowedAt = matchHistoryLastFetchedProfileId === normalizedProfileId && matchHistoryLastFetchedAt
+    ? matchHistoryLastFetchedAt + MATCH_HISTORY_FETCH_COOLDOWN_MS
+    : 0;
+  return {
+    records,
+    count: records.length,
+    authenticated: Boolean(normalizedProfileId),
+    lastFetchedAt: matchHistoryLastFetchedAt || null,
+    nextAllowedAt: nextAllowedAt || null,
+    canFetch: Boolean(normalizedProfileId) && Date.now() >= nextAllowedAt,
+    cooldownSeconds: Math.max(0, Math.ceil((nextAllowedAt - Date.now()) / 1000)),
+  };
+}
+
+function sendHistoryState() {
+  const state = publicHistoryState();
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send("history:state", state);
+  }
 }
 
 function publicTrackerState() {
@@ -1256,6 +1408,18 @@ async function clearPrivateDataWithConfirmation() {
   if (loginWindow && !loginWindow.isDestroyed()) loginWindow.close();
   await sourceSession.clearData();
   await sourceSession.clearAuthCache();
+  matchHistoryRecords = [];
+  matchHistoryLastFetchedAt = 0;
+  matchHistoryLastFetchedProfileId = null;
+  matchHistoryFetchInFlight = null;
+  authenticatedProfileId = null;
+  try {
+    fs.rmSync(matchHistoryPath, { force: true });
+  } catch {
+    // Continue clearing the authenticated browser session even if the local
+    // history file is temporarily locked by another process.
+  }
+  sendHistoryState();
   buildId = null;
   return { cleared: true };
 }
@@ -1412,6 +1576,7 @@ async function checkAuthentication() {
   try {
     const result = await authenticationInFlight;
     const player = result?.player;
+    authenticatedProfileId = player?.profileId ?? player?.userCode ?? null;
     authenticatedRatingType =
       player?.mr != null ? "MR" : player?.lp != null ? "LP" : "MR";
     if (!trackerState.active) {
@@ -1488,6 +1653,40 @@ async function fetchRankedReplays(profileId) {
     .filter(Boolean);
 }
 
+async function fetchLocalMatchHistory() {
+  ensureUpdateAllowed();
+  if (matchHistoryFetchInFlight) return matchHistoryFetchInFlight;
+  const now = Date.now();
+  const profileId = trackerState.player?.profileId ?? authenticatedProfileId;
+  const retryAfterMs = matchHistoryLastFetchedProfileId === profileId && matchHistoryLastFetchedAt
+    ? matchHistoryLastFetchedAt + MATCH_HISTORY_FETCH_COOLDOWN_MS - now
+    : 0;
+  if (retryAfterMs > 0) {
+    const error = new Error("HISTORY_COOLDOWN");
+    error.retryAfterMs = retryAfterMs;
+    throw error;
+  }
+
+  matchHistoryFetchInFlight = (async () => {
+    const player = trackerState.player ?? (await checkAuthentication()).player;
+    if (!player?.profileId) throw new Error("SERVICE_SELF_NOT_FOUND");
+    // battlelog.json is the single 100-entry source already used by the live
+    // tracker. This feature adds no extra endpoint or per-match requests.
+    const replays = await fetchRankedReplays(player.profileId);
+    mergeMatchHistory(replays, player.profileId);
+    matchHistoryLastFetchedAt = Date.now();
+    matchHistoryLastFetchedProfileId = player.profileId;
+    persistMatchHistory();
+    sendHistoryState();
+    return publicHistoryState(player.profileId);
+  })();
+  try {
+    return await matchHistoryFetchInFlight;
+  } finally {
+    matchHistoryFetchInFlight = null;
+  }
+}
+
 function syncCurrentPlayerRating(state, player, hasNewRankedReplay = false) {
   const currentRating = player?.mr ?? player?.lp ?? null;
   if (currentRating == null) return state;
@@ -1548,6 +1747,9 @@ async function startTrackingInternal(player) {
   stopPolling();
   const replays = await fetchRankedReplays(player.profileId);
   if (sessionId !== trackingSessionId) return publicTrackerState();
+  // Keep the existing session counter semantics while also enriching the
+  // local history when the tracker already made this request.
+  mergeMatchHistory(replays, player.profileId);
   const now = Date.now();
 
   if (resumable) {
@@ -1710,6 +1912,7 @@ async function refreshTracking(sessionId = trackingSessionId) {
   if (sessionId !== trackingSessionId || !trackerState.active) {
     return publicTrackerState();
   }
+  mergeMatchHistory(replays, trackerState.player.profileId);
   const hasNewReplay = replays.some(
     (replay) =>
       replay.replayId &&
@@ -1827,6 +2030,7 @@ function friendlyError(error) {
     PLAYER_NOT_FOUND: "該当するプレイヤーが見つかりませんでした",
     SERVICE_AUTH_REQUIRED: "対象サイトへのログインが必要です",
     SERVICE_RATE_LIMITED: "対象サイトが混雑しているため、しばらく待ってから再試行します",
+    HISTORY_COOLDOWN: "対戦履歴は一定時間ごとに一度だけ取得できます。しばらく待ってから再試行してください。",
     SERVICE_BUILD_ID_NOT_FOUND:
       "対象サイトのページ構成を確認できませんでした",
     SERVICE_SELF_NOT_FOUND:
@@ -1868,6 +2072,17 @@ function registerIpcHandlers() {
   ipcMain.handle(
     "tracker:state",
     resultHandler(async () => publicTrackerState(), { allowDuringUpdate: true }),
+  );
+  ipcMain.handle(
+    "history:state",
+    resultHandler(
+      async () => publicHistoryState(),
+      { allowDuringUpdate: true },
+    ),
+  );
+  ipcMain.handle(
+    "history:fetch",
+    resultHandler(() => fetchLocalMatchHistory()),
   );
   ipcMain.handle(
     "display:open",
@@ -1962,6 +2177,18 @@ function startOverlayServer() {
       "/stats.css": ["stats.css", "text/css; charset=utf-8"],
       "/stats.js": ["stats.js", "text/javascript; charset=utf-8"],
       "/i18n.js": ["i18n.js", "text/javascript; charset=utf-8"],
+      "/assets/stats-frame-horizontal.png": [
+        path.join("assets", "stats-frame-horizontal.png"),
+        "image/png",
+      ],
+      "/assets/stats-frame-vertical.png": [
+        path.join("assets", "stats-frame-vertical.png"),
+        "image/png",
+      ],
+      "/assets/header-graffiti-m.png": [
+        path.join("assets", "header-graffiti-m.png"),
+        "image/png",
+      ],
     };
     if (requestPath === "/state") {
       response.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
@@ -1971,10 +2198,7 @@ function startOverlayServer() {
     if (rendererAssets[requestPath]) {
       const [fileName, contentType] = rendererAssets[requestPath];
       try {
-        const content = fs.readFileSync(
-          path.join(__dirname, "renderer", fileName),
-          "utf8",
-        );
+        const content = fs.readFileSync(path.join(__dirname, "renderer", fileName));
         response.writeHead(200, { "Content-Type": contentType });
         response.end(content);
       } catch {

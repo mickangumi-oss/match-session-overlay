@@ -180,10 +180,16 @@ function normalizeReplay(raw, targetProfileId) {
   const opponentRounds = Array.isArray(opponent.round_results)
     ? opponent.round_results
     : [];
-  const ownWins = ownRounds.filter((value) => Number(value) === 1).length;
-  const opponentWins = opponentRounds.filter(
-    (value) => Number(value) === 1,
-  ).length;
+  // The official battle log stores the winning pattern for each round rather
+  // than a separate match-level winner: 1=N, 2=C, 3=T, 4=D, 5=OD, 6=SA,
+  // 7=CA and 8=P. The site renders these as icon_result{code}; 0 is the
+  // losing/no-result marker. For the match result we only need to count the
+  // positive pattern codes. Checking only `=== 1` would misclassify matches
+  // such as [5, 8] as draws.
+  const countWonRounds = (rounds) =>
+    rounds.filter((value) => Number.isFinite(Number(value)) && Number(value) > 0).length;
+  const ownWins = countWonRounds(ownRounds);
+  const opponentWins = countWonRounds(opponentRounds);
 
   let result = "draw";
   if (ownWins > opponentWins) result = "win";
@@ -191,6 +197,32 @@ function normalizeReplay(raw, targetProfileId) {
 
   const mr = Number(own.master_rating ?? 0) || null;
   const lp = Number(own.league_point ?? 0) || null;
+
+  const displayName = (value) => {
+    const candidate = String(value ?? "").trim();
+    return candidate;
+  };
+  const characterName = (entry) =>
+    displayName(
+      entry?.playing_character_name ??
+        entry?.character_name ??
+        entry?.playing_character_display_name ??
+        entry?.character?.name ??
+        entry?.playing_character_tool_name ??
+        "",
+    );
+  const playerName = (entry) =>
+    displayName(
+      entry?.player?.fighter_id ?? entry?.player?.name ?? entry?.fighter_id,
+    );
+  const normalizeTimestamp = (value) => {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric) || numeric <= 0) return null;
+    return numeric < 10_000_000_000 ? numeric * 1000 : numeric;
+  };
+  const opponentMr = Number(opponent.master_rating ?? 0) || null;
+  const opponentLp = Number(opponent.league_point ?? 0) || null;
+  const ownRatingType = mr != null ? "MR" : lp != null ? "LP" : null;
 
   return {
     replayId: String(raw?.replay_id ?? ""),
@@ -201,14 +233,25 @@ function normalizeReplay(raw, targetProfileId) {
       raw?.replay_battle_type_name,
     ),
     uploadedAt: Number(raw?.uploaded_at ?? 0),
+    playedAt: normalizeTimestamp(raw?.uploaded_at),
     result,
     mr,
     lp,
     rating: mr ?? lp,
-    ratingType: mr ? "MR" : "LP",
+    ratingType: ownRatingType,
+    ownUserCode: p1Id === target ? p1Id : p2Id,
+    ownName: playerName(own),
+    ownCharacterName: characterName(own),
+    ownRating: mr ?? lp,
+    ownRatingType: ownRatingType,
     characterId:
       Number(own?.playing_character_id ?? own?.character_id ?? 0) || null,
     opponentName: String(opponent?.player?.fighter_id ?? ""),
+    opponentCharacterName: characterName(opponent),
+    opponentMr,
+    opponentLp,
+    opponentRating: opponentMr ?? opponentLp,
+    opponentRatingType: opponentMr != null ? "MR" : opponentLp != null ? "LP" : null,
     opponentCharacterId:
       Number(opponent?.playing_character_id ?? opponent?.character_id ?? 0) ||
       null,
