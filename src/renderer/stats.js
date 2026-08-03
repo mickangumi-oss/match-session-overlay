@@ -94,7 +94,7 @@ function unwrap(result) {
   return result.data;
 }
 
-function drawStatsChart(history) {
+function drawStatsChart(history, matchCount) {
   const canvas = elements.statsRatingChart;
   const rect = canvas.getBoundingClientRect();
   if (!rect.width || !rect.height) return;
@@ -192,11 +192,14 @@ function drawStatsChart(history) {
   context.textBaseline = "top";
   context.font = `${fontStyle}${labelFontSize}px ${fontStackFor("street")}`;
   context.fillStyle = `${displaySettings?.textColor ?? "#f7f8ff"}cc`;
+  const safeMatchCount = Math.max(0, Math.trunc(Number(matchCount) || 0));
+  const lastIndex = Math.max(1, values.length - 1);
+  const shownLabels = new Set();
   for (const index of xLabelIndices) {
     const x = xFor(index);
-    const label = index === values.length - 1
-      ? t("now", "NOW")
-      : `-${values.length - 1 - index}`;
+    const label = String(Math.round((index / lastIndex) * safeMatchCount));
+    if (shownLabels.has(label)) continue;
+    shownLabels.add(label);
     const labelWidth = context.measureText(label).width;
     const labelX = Math.min(
       rect.width - right - labelWidth / 2,
@@ -271,7 +274,7 @@ function renderStatsChart(state) {
   elements.statsRatingChart.classList.toggle("hidden", !hasGraphData);
   elements.statsChartEmpty.classList.toggle("hidden", hasGraphData);
   elements.statsChartState.textContent = hasGraphData
-    ? `${history.length} POINTS`
+    ? `${total} MATCHES`
     : matchType === "ranked"
       ? t("dataWaiting", "データ待機中")
       : t("rankedOnly", "ランクのみ");
@@ -281,7 +284,7 @@ function renderStatsChart(state) {
     matchType === "ranked"
       ? t("graphEmptyRanked", "ランクマッチを計測するとグラフが表示されます")
       : t("graphEmptyOther", "グラフはランクマッチで表示されます");
-  if (hasGraphData) requestAnimationFrame(() => drawStatsChart(history));
+  if (hasGraphData) requestAnimationFrame(() => drawStatsChart(history, total));
 }
 
 function renderTracker(state) {
