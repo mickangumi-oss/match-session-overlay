@@ -178,6 +178,11 @@
                 <span id="ratingDeltaLabel">MR DELTA</span>
                 <strong id="ratingDelta">±0</strong>
               </div>
+              <div class="score-block potential-block">
+                <span id="medianRatingLabel">POTENTIAL MR</span>
+                <strong class="potential-rating" id="medianRating">---</strong>
+                <small class="metric-sample" id="medianRatingSample"></small>
+              </div>
               <div class="signal-lines" aria-hidden="true">
                 <i></i><i></i><i></i><i></i><i></i>
               </div>
@@ -354,6 +359,15 @@
             <button class="icon-button" id="closeHistoryButton" data-i18n-title="closeHistory" title="対戦履歴を閉じる">×</button>
           </div>
         </header>
+        <section class="history-target" aria-label="History target">
+          <label>
+            <span class="control-label" data-i18n="historyTargetCode">VIEW USER CODE</span>
+            <input id="historyTargetCode" type="text" inputmode="numeric" autocomplete="off" maxlength="12" placeholder="1234567890" />
+          </label>
+          <button class="button secondary" id="selectHistoryTargetButton" data-i18n="historySelectTarget">表示対象を設定</button>
+          <button class="button secondary" id="clearHistoryTargetButton" data-i18n="historySelectSelf" disabled>自分に戻す</button>
+          <p id="historyTargetStatus" aria-live="polite"></p>
+        </section>
         <div class="history-filters">
           <label>
             <span class="control-label" data-i18n="dateFrom">DATE FROM</span>
@@ -384,6 +398,7 @@
           <article><span data-i18n="winRate">WIN RATE</span><strong id="historyWinRate">0.0%</strong></article>
           <article><span data-i18n="maxStreak">MAX STREAK</span><strong id="historyMaxStreak">0</strong></article>
           <article><span data-i18n="maxRating">MAX MR / LP</span><strong id="historyMaxRating">—</strong></article>
+          <article><span id="historyPotentialLabel">POTENTIAL MR</span><strong id="historyPotentialRating">—</strong><small class="history-potential-sample" id="historyPotentialSample"></small></article>
         </div>
         <div class="history-content">
           <section class="history-chart-card">
