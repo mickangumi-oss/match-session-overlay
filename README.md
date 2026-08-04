@@ -72,7 +72,7 @@
 
 ## プライバシー
 
-- ID・パスワードをアプリのコードで取得または保存しません。
+- ID・パスワードをこのアプリで収集、保存することはありません。
 - 表示設定は`%LOCALAPPDATA%\MatchSessionOverlay\user-data\display-settings.json`に保存されます。
 - 取得した対戦履歴は`%LOCALAPPDATA%\MatchSessionOverlay\user-data\match-history\<USER CODE>.json`にUSER CODEごとに分けて保存されます。
 - 対戦履歴ファイルには公式サイトから取得した表示用データだけを保存し、ID・パスワード・ログインCookieは保存しません。
