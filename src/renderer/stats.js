@@ -88,6 +88,48 @@ const elements = {
 let trackerState = null;
 let displaySettings = null;
 let dragPointerId = null;
+let renderedBackgroundOpacity = null;
+let backgroundOpacityAnimationFrame = null;
+
+function animateBackgroundOpacity(value) {
+  const target = Math.min(1, Math.max(0, Number(value) || 0));
+  const start = Number.isFinite(renderedBackgroundOpacity)
+    ? renderedBackgroundOpacity
+    : target;
+  if (backgroundOpacityAnimationFrame != null) {
+    cancelAnimationFrame(backgroundOpacityAnimationFrame);
+    backgroundOpacityAnimationFrame = null;
+  }
+  if (Math.abs(start - target) < 0.001) {
+    renderedBackgroundOpacity = target;
+    document.documentElement.style.setProperty("--panel-opacity", String(target));
+    elements.root.classList.toggle("transparent", target === 0);
+    return;
+  }
+
+  // Keep the fade short enough for slider feedback while still avoiding a
+  // sudden disappearance when the user clicks directly to 0%.
+  const duration = Math.min(320, Math.max(150, Math.abs(target - start) * 320));
+  const startedAt = performance.now();
+  elements.root.classList.remove("transparent");
+  const tick = (now) => {
+    const progress = Math.min(1, (now - startedAt) / duration);
+    const eased = 1 - (1 - progress) ** 3;
+    const current = start + (target - start) * eased;
+    renderedBackgroundOpacity = current;
+    document.documentElement.style.setProperty("--panel-opacity", String(current));
+    if (trackerState) renderStatsChart(trackerState);
+    if (progress < 1) {
+      backgroundOpacityAnimationFrame = requestAnimationFrame(tick);
+      return;
+    }
+    backgroundOpacityAnimationFrame = null;
+    renderedBackgroundOpacity = target;
+    document.documentElement.style.setProperty("--panel-opacity", String(target));
+    elements.root.classList.toggle("transparent", target === 0);
+  };
+  backgroundOpacityAnimationFrame = requestAnimationFrame(tick);
+}
 
 function unwrap(result) {
   if (!result?.ok) throw new Error(result?.error || "処理に失敗しました");
@@ -219,7 +261,10 @@ function drawStatsChart(history, matchCount) {
   areaPath.lineTo(xFor(values.length - 1), plotBottom);
   areaPath.lineTo(xFor(0), plotBottom);
   areaPath.closePath();
-  if (Number(displaySettings?.backgroundOpacity) !== 0) {
+  const renderedOpacity = Number.isFinite(renderedBackgroundOpacity)
+    ? renderedBackgroundOpacity
+    : Number(displaySettings?.backgroundOpacity);
+  if (renderedOpacity > 0.001) {
     const areaGradient = context.createLinearGradient(0, top, 0, plotBottom);
     areaGradient.addColorStop(0, "rgba(67,216,255,.32)");
     areaGradient.addColorStop(1, "rgba(67,216,255,.025)");
@@ -321,10 +366,6 @@ function renderSettings(settings) {
     String(settings.fontScale),
   );
   document.documentElement.style.setProperty(
-    "--panel-opacity",
-    String(settings.backgroundOpacity),
-  );
-  document.documentElement.style.setProperty(
     "--text",
     settings.textColor,
   );
@@ -355,13 +396,10 @@ function renderSettings(settings) {
     settings.windowOrientation !== "vertical" || settings.graphVisible === false,
   );
   elements.root.classList.toggle(
-    "transparent",
-    settings.backgroundOpacity === 0,
-  );
-  elements.root.classList.toggle(
     "locked",
     settings.overlayInteractionLocked === true,
   );
+  animateBackgroundOpacity(settings.backgroundOpacity);
   for (const tab of elements.matchTabs) {
     tab.classList.toggle("active", tab.dataset.matchType === settings.matchType);
   }
