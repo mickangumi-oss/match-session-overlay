@@ -243,7 +243,7 @@ body.remote-overlay {
   min-width: 0;
   justify-items: center;
   align-content: center;
-  gap: 1px;
+  row-gap: 5px;
 }
 
 .record-group {
@@ -251,6 +251,7 @@ body.remote-overlay {
   width: 100%;
   min-width: 0;
   align-content: center;
+  row-gap: 4px;
 }
 
 .record-labels,
@@ -1157,6 +1158,83 @@ body.remote-overlay {
     padding-inline: 10px;
     background: rgba(3, 8, 15, 0.72);
   }
+}
+
+/* Keep the frame art on its own fading layer so the live text remains fully
+   readable while the visual background transitions toward transparency. */
+.stats-window {
+  background: transparent !important;
+  background-image: none !important;
+}
+
+.stats-window > .hud-background {
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  pointer-events: none;
+  opacity: var(--panel-opacity);
+  background-image:
+    linear-gradient(
+      rgba(4, 8, 15, calc(1 - var(--panel-opacity))),
+      rgba(4, 8, 15, calc(1 - var(--panel-opacity)))
+    ),
+    url("./assets/stats-frame-horizontal.png");
+  background-position: center, center;
+  background-repeat: no-repeat, no-repeat;
+  background-size: 100% 100%, 100% 100%;
+}
+
+.stats-window.vertical > .hud-background {
+  background-image:
+    linear-gradient(
+      rgba(4, 8, 15, calc(1 - var(--panel-opacity))),
+      rgba(4, 8, 15, calc(1 - var(--panel-opacity)))
+    ),
+    url("./assets/stats-frame-vertical.png");
+}
+
+.stats-window > :not(.hud-background) {
+  position: relative;
+  z-index: 1;
+}
+
+.stats-window.overlay .summary > .record-group,
+.stats-window.overlay .summary > .metric-group {
+  border-color: rgba(135, 172, 212, calc(0.4 * var(--panel-opacity))) !important;
+  background:
+    linear-gradient(110deg, rgba(255, 61, 141, calc(0.18 * var(--panel-opacity))), transparent 46%),
+    rgba(3, 8, 15, calc(0.76 * var(--panel-opacity))) !important;
+  box-shadow:
+    inset 2px 0 0 rgba(255, 61, 141, calc(0.7 * var(--panel-opacity))),
+    inset -2px 0 0 rgba(67, 216, 255, calc(0.62 * var(--panel-opacity))) !important;
+}
+
+.stats-window:not(.overlay) .summary > .record-group,
+.stats-window:not(.overlay) .summary > .metric-group {
+  border-color: rgba(67, 168, 255, calc(0.24 * var(--panel-opacity))) !important;
+  background:
+    linear-gradient(105deg, rgba(255, 61, 141, calc(0.12 * var(--panel-opacity))), transparent 48%),
+    repeating-linear-gradient(-35deg, transparent 0 18px, rgba(255, 255, 255, calc(0.015 * var(--panel-opacity))) 18px 20px),
+    rgba(7, 10, 17, calc(0.86 * var(--panel-opacity))) !important;
+}
+
+.stats-window.overlay .match-tabs button {
+  border-color: rgba(135, 172, 212, calc(0.56 * var(--panel-opacity))) !important;
+  border-bottom-color: rgba(67, 216, 255, calc(0.72 * var(--panel-opacity))) !important;
+  background: rgba(4, 9, 17, calc(0.72 * var(--panel-opacity))) !important;
+}
+
+.stats-window.overlay .match-tabs button.active {
+  border-color: rgba(255, 61, 141, calc(0.8 * var(--panel-opacity))) !important;
+  background: linear-gradient(110deg, rgba(255, 61, 141, calc(0.8 * var(--panel-opacity))), rgba(255, 61, 141, calc(0.22 * var(--panel-opacity)))) !important;
+}
+
+.stats-window.vertical .stats-chart {
+  border-color: rgba(67, 168, 255, calc(0.28 * var(--panel-opacity))) !important;
+  background:
+    linear-gradient(90deg, rgba(67, 168, 255, calc(0.08 * var(--panel-opacity))), transparent 45%),
+    repeating-linear-gradient(-35deg, transparent 0 18px, rgba(255, 255, 255, calc(0.014 * var(--panel-opacity))) 18px 20px),
+    rgba(4, 7, 12, calc(0.82 * var(--panel-opacity))) !important;
 }
 
 /* At 0% opacity the HUD must be a true transparent overlay: keep live text
