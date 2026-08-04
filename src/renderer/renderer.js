@@ -53,6 +53,9 @@ const elements = Object.fromEntries(
     "currentCharacter",
     "currentRatingLabel",
     "currentRating",
+    "medianRatingLabel",
+    "medianRating",
+    "medianRatingSample",
     "ratingDeltaLabel",
     "ratingDelta",
     "ratingTrendLabel",
@@ -97,6 +100,10 @@ const elements = Object.fromEntries(
     "languageInput",
     "historyPanel",
     "closeHistoryButton",
+    "historyTargetCode",
+    "selectHistoryTargetButton",
+    "clearHistoryTargetButton",
+    "historyTargetStatus",
     "fetchHistoryButton",
     "historyFetchState",
     "historyDateFrom",
@@ -107,6 +114,9 @@ const elements = Object.fromEntries(
     "historyWinRate",
     "historyMaxStreak",
     "historyMaxRating",
+    "historyPotentialLabel",
+    "historyPotentialRating",
+    "historyPotentialSample",
     "historyCount",
     "historyResultChart",
     "historyEmpty",
@@ -360,6 +370,22 @@ function renderHistoryCharacters(records) {
   select.value = characters.some(([value]) => value === selected) ? selected : "all";
 }
 
+function appendHistoryCell(row, value, { opponentUserCode = null } = {}) {
+  const cell = document.createElement("td");
+  if (opponentUserCode && /^\d{4,12}$/.test(String(opponentUserCode))) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "history-opponent-link";
+    button.dataset.historyOpponentCode = String(opponentUserCode);
+    button.textContent = value;
+    button.title = t("historyViewOpponent", "View this player's history");
+    cell.append(button);
+  } else {
+    cell.textContent = value;
+  }
+  row.append(cell);
+}
+
 function renderHistoryTable(records) {
   const body = elements.historyTableBody;
   if (!body) return;
@@ -386,9 +412,14 @@ function renderHistoryTable(records) {
     );
     cells.forEach((value, index) => {
       const cell = document.createElement("td");
-      cell.textContent = value;
       if (index === 1) cell.className = result === "W" ? "result-win" : result === "L" ? "result-loss" : "result-draw";
-      row.append(cell);
+      if (index === 6) {
+        appendHistoryCell(row, value, { opponentUserCode: record.opponentUserCode });
+        row.lastElementChild.className = cell.className;
+      } else {
+        cell.textContent = value;
+        row.append(cell);
+      }
     });
     body.append(row);
   }
@@ -412,11 +443,16 @@ function renderRecentHistoryPreview(records) {
     ];
     values.forEach((value, index) => {
       const cell = document.createElement("td");
-      cell.textContent = value;
       if (index === 1) {
         cell.className = result === "W" ? "result-win" : result === "L" ? "result-loss" : "result-draw";
       }
-      row.append(cell);
+      if (index === 3) {
+        appendHistoryCell(row, value, { opponentUserCode: record.opponentUserCode });
+        row.lastElementChild.className = cell.className;
+      } else {
+        cell.textContent = value;
+        row.append(cell);
+      }
     });
     body.append(row);
   }
@@ -439,9 +475,48 @@ function selectHistoryMaximumRating(records) {
   return null;
 }
 
+function selectHistoryPotentialRating(records, player = historyState.player) {
+  const ordered = [...records]
+    .filter((record) => ["MR", "LP"].includes(record.ownRatingType))
+    .sort((a, b) => Number(a.playedAt ?? a.uploadedAt) - Number(b.playedAt ?? b.uploadedAt));
+  const ratingType =
+    ordered.at(-1)?.ownRatingType ??
+    (player?.mr != null ? "MR" : player?.lp != null ? "LP" : "MR");
+  const values = ordered
+    .filter((record) => record.ownRatingType === ratingType)
+    .map((record) => Number(record.ownRating))
+    .filter(Number.isFinite)
+    .sort((a, b) => a - b);
+  if (elements.historyPotentialLabel) {
+    elements.historyPotentialLabel.textContent = `${t("potential", "POTENTIAL")} ${ratingType}`;
+  }
+  if (values.length < 2) {
+    return { ratingType, value: null, sampleCount: values.length };
+  }
+  const middle = Math.floor(values.length / 2);
+  const value = values.length % 2
+    ? values[middle]
+    : (values[middle - 1] + values[middle]) / 2;
+  return { ratingType, value: Math.round(value), sampleCount: values.length };
+}
+
 function renderHistoryState(nextState = historyState) {
   historyState = nextState || { records: [], canFetch: false, authenticated: false, cooldownSeconds: 0 };
   const allRecords = Array.isArray(historyState.records) ? historyState.records : [];
+  if (elements.historyTargetCode && document.activeElement !== elements.historyTargetCode) {
+    elements.historyTargetCode.value = historyState.player?.userCode ?? "";
+  }
+  if (elements.historyTargetStatus) {
+    const player = historyState.player;
+    elements.historyTargetStatus.textContent = !player
+      ? t("historyFetchUnavailable", "Log in to select a player")
+      : historyState.viewingOther
+        ? `${t("historyViewing", "Viewing")}: ${player.name} (${player.userCode})`
+        : t("historyViewingSelf", "Viewing your player");
+  }
+  if (elements.clearHistoryTargetButton) {
+    elements.clearHistoryTargetButton.disabled = !historyState.viewingOther;
+  }
   renderHistoryCharacters(allRecords);
   renderRecentHistoryPreview(allRecords);
   const records = filteredHistoryRecords();
@@ -459,6 +534,18 @@ function renderHistoryState(nextState = historyState) {
   elements.historyMaxStreak.textContent = String(maxStreak);
   const maximumRating = selectHistoryMaximumRating(records);
   elements.historyMaxRating.textContent = maximumRating == null ? "—" : String(maximumRating);
+  const potential = selectHistoryPotentialRating(records);
+  elements.historyPotentialRating.textContent =
+    potential.value == null
+      ? "—"
+      : Number.isInteger(potential.value)
+        ? String(potential.value)
+        : potential.value.toFixed(1);
+  if (elements.historyPotentialSample) {
+    elements.historyPotentialSample.textContent = potential.sampleCount
+      ? `(${potential.sampleCount} ${t("matchUnit", "Match")})`
+      : "";
+  }
   elements.historyCount.textContent = `${records.length} ${t("matches", "MATCHES")}`;
   elements.historyEmpty.classList.toggle("hidden", records.length > 0);
   drawHistoryResultChart(records);
@@ -484,11 +571,18 @@ function renderHistoryState(nextState = historyState) {
   }
   const cooldown = Number(historyState.cooldownSeconds || 0);
   elements.fetchHistoryButton.disabled = !historyState.canFetch;
-  elements.historyFetchState.textContent = !historyState.authenticated
-    ? t("historyFetchUnavailable", "Log in to import match history")
-    : historyState.canFetch
-    ? t("historyFetchReady", "Ready (one request per 10 minutes)")
-    : t("historyFetchCooldown", "Available again in {seconds}s").replace("{seconds}", String(cooldown));
+  elements.historyFetchState.textContent = historyState.viewingOther && historyState.polling
+    ? t("historyAutoUpdating", "Automatic update: every {seconds}s").replace(
+      "{seconds}",
+      String(historyState.pollIntervalSeconds ?? "--"),
+    )
+    : historyState.viewingOther && historyState.pollStopReason
+      ? t("historyAutoStopped", "Automatic update stopped after inactivity")
+      : !historyState.authenticated
+        ? t("historyFetchUnavailable", "Log in to import match history")
+        : historyState.canFetch
+          ? t("historyFetchReady", "Ready (one request per 10 minutes)")
+          : t("historyFetchCooldown", "Available again in {seconds}s").replace("{seconds}", String(cooldown));
 }
 
 function setHistoryPanelOpen(open) {
@@ -553,6 +647,7 @@ function setStatus(element, label, kind = "neutral") {
 }
 
 function translateStatus(status) {
+  if (status === "historyViewing") return t("historyViewing", "Viewing");
   return localeApi?.statusLabel ? localeApi.statusLabel(status) : status;
 }
 
@@ -605,6 +700,7 @@ function fitManagementScoreValues() {
     elements.winRate,
     elements.currentRating,
     elements.ratingDelta,
+    elements.medianRating,
   ]) {
     fitScoreValue(element);
   }
@@ -626,7 +722,7 @@ function renderNextUpdate() {
   elements.nextUpdateInfo.textContent = `${t("nextUpdate", "次回更新")} ${minutes}:${seconds}`;
 }
 
-function drawManagementChart(history, matchCount) {
+function drawManagementChart(history, matchCount, ratingType = "MR") {
   const canvas = elements.managementRatingChart;
   const rect = canvas.getBoundingClientRect();
   if (!rect.width || !rect.height) return;
@@ -634,10 +730,29 @@ function drawManagementChart(history, matchCount) {
   canvas.width = Math.max(1, Math.round(rect.width * ratio));
   canvas.height = Math.max(1, Math.round(rect.height * ratio));
   const context = canvas.getContext("2d");
-  context.scale(ratio, ratio);
+  context.setTransform(ratio, 0, 0, ratio, 0, 0);
+  context.clearRect(0, 0, rect.width, rect.height);
 
-  const width = rect.width;
-  const height = rect.height;
+  // Keep the graph's visual proportion stable when the management panel is
+  // resized.  The canvas may grow with its container, but the plot itself is
+  // drawn inside a centered 4:1 frame matching the horizontal dashboard and
+  // uses only unavoidable letterboxing instead of stretching the line graph.
+  const chartAspectRatio = 4;
+  const containerAspectRatio = rect.width / rect.height;
+  const chartWidth =
+    containerAspectRatio >= chartAspectRatio
+      ? rect.height * chartAspectRatio
+      : rect.width;
+  const chartHeight =
+    containerAspectRatio >= chartAspectRatio
+      ? rect.height
+      : rect.width / chartAspectRatio;
+  const chartLeft = (rect.width - chartWidth) / 2;
+  const chartTop = (rect.height - chartHeight) / 2;
+  context.translate(chartLeft, chartTop);
+
+  const width = chartWidth;
+  const height = chartHeight;
   const values = history.filter(Number.isFinite);
   if (!values.length) return;
   const labelScale = Math.min(
@@ -659,7 +774,9 @@ function drawManagementChart(history, matchCount) {
         : normalizedStep <= 5
           ? 5
           : 10) * magnitude;
-  let minimum = Math.floor((dataMinimum - step * 0.5) / step) * step;
+  let minimum = ratingType === "LP"
+    ? 0
+    : Math.floor((dataMinimum - step * 0.5) / step) * step;
   let maximum = Math.ceil((dataMaximum + step * 0.5) / step) * step;
   if (minimum === maximum) maximum += step;
 
@@ -827,10 +944,15 @@ function renderManagementChart(state) {
   const matchType = displaySettings.matchType ?? "ranked";
   const ratingType = resolveRatingType(state);
   const selected = state.stats?.[matchType] ?? {};
-  const total = Number(selected.wins ?? 0) + Number(selected.losses ?? 0);
+  const total = Number.isFinite(Number(selected.matchCount))
+    ? Math.max(0, Math.trunc(Number(selected.matchCount)))
+    : Number(selected.wins ?? 0) + Number(selected.losses ?? 0);
   const history = historyForDisplay(selected, total);
+  // matchCount is maintained per character and per mode by the main process;
+  // never substitute the all-character session total here.
+  const graphMatchCount = total;
   const hasGraphData =
-    matchType === "ranked" && total > 0 && history.length >= 2;
+    matchType === "ranked" && graphMatchCount > 0 && history.length >= 2;
   elements.managementRatingChart.classList.toggle("hidden", !hasGraphData);
   elements.managementChartEmpty.classList.toggle("hidden", hasGraphData);
   elements.managementChartEmpty.textContent =
@@ -838,12 +960,14 @@ function renderManagementChart(state) {
       ? t("graphEmptyRanked", "ランクマッチを計測するとグラフが表示されます")
       : `${ratingType} ${t("graphEmptyOther", "グラフはランクマッチで表示されます")}`;
   elements.managementChartState.textContent = hasGraphData
-    ? `${total} MATCHES`
+    ? `${graphMatchCount} MATCHES`
     : matchType === "ranked"
       ? t("dataWaiting", "データ待機中")
       : t("rankedOnly", "ランクのみ");
   if (hasGraphData) {
-    requestAnimationFrame(() => drawManagementChart(history, total));
+    requestAnimationFrame(() =>
+      drawManagementChart(history, graphMatchCount, ratingType),
+    );
   }
 }
 
@@ -878,7 +1002,31 @@ function renderCurrentRating(state = trackerState) {
           : "";
   elements.currentRatingLabel.textContent = `${t("currentRating", "CURRENT")} ${ratingType || "MR"}`;
   elements.currentRating.textContent = rating == null ? "---" : String(rating);
+  renderMedianRating(state);
   fitManagementScoreValues();
+}
+
+function formatMedianNumber(value) {
+  return Number.isFinite(value) ? String(Math.round(value)) : "—";
+}
+
+function renderMedianRating(state = trackerState) {
+  if (!elements.medianRating) return;
+  const ratingType = state?.medianRatingType || resolveRatingType(state);
+  const median = Number(state?.medianRating);
+  const sampleCount = Math.max(0, Math.trunc(Number(state?.medianRatingSampleCount) || 0));
+  const potentialLabel = t("potential", "POTENTIAL");
+  const label = `${potentialLabel} ${ratingType || "MR"}`;
+  if (elements.medianRatingLabel) elements.medianRatingLabel.textContent = label;
+  elements.medianRating.textContent =
+    Number.isFinite(median) && sampleCount >= 2
+      ? formatMedianNumber(median)
+      : "—";
+  if (elements.medianRatingSample) {
+    elements.medianRatingSample.textContent = sampleCount
+      ? `(${sampleCount} ${t("matchUnit", "Match")})`
+      : "";
+  }
 }
 
 function renderCurrentCharacter(state = trackerState) {
@@ -953,11 +1101,11 @@ function renderTracker(state) {
     translateStatus(state.status),
     state.active ? "ok" : "neutral",
   );
-  elements.startTrackingButton.disabled = !selectedPlayer || state.active;
+  elements.startTrackingButton.disabled = Boolean(state.readOnly) || !selectedPlayer || state.active;
   elements.startTrackingLabel.textContent =
     state.stopReason === "idle" ? t("resumeMeasure", "計測を再開") : t("startMeasure", "計測を開始");
-  elements.stopTrackingButton.disabled = !state.active;
-  elements.resetTrackingButton.disabled = !state.active;
+  elements.stopTrackingButton.disabled = Boolean(state.readOnly) || !state.active;
+  elements.resetTrackingButton.disabled = Boolean(state.readOnly) || !state.active;
   renderNextUpdate();
 }
 
@@ -1120,6 +1268,55 @@ elements.resetTrackingButton.addEventListener("click", async () => {
 
 elements.openHistoryButton?.addEventListener("click", () => setHistoryPanelOpen(true));
 elements.closeHistoryButton?.addEventListener("click", () => setHistoryPanelOpen(false));
+async function selectHistoryTarget(userCode, { autoFetch = false } = {}) {
+  const normalizedCode = String(userCode ?? "").trim();
+  setHistoryPanelOpen(true);
+  elements.selectHistoryTargetButton.disabled = true;
+  try {
+    const result = await unwrap(api.selectHistoryProfile(normalizedCode));
+    historyPage = 0;
+    renderHistoryState(result.history);
+    let currentHistory = result.history;
+    if (autoFetch && currentHistory?.viewingOther && currentHistory.canFetch) {
+      currentHistory = await unwrap(api.fetchHistory());
+      historyPage = 0;
+      renderHistoryState(currentHistory);
+    }
+    showNotice(
+      currentHistory?.viewingOther
+        ? autoFetch && currentHistory.count > 0
+          ? t("historyFetched", "Match history imported locally")
+          : t("historyTargetSelected", "Player selected. Import history when ready.")
+        : t("historyViewingSelf", "Viewing your player"),
+      "success",
+    );
+  } catch (error) {
+    showNotice(error.message, "error");
+  } finally {
+    elements.selectHistoryTargetButton.disabled = false;
+  }
+}
+elements.selectHistoryTargetButton?.addEventListener("click", () =>
+  selectHistoryTarget(elements.historyTargetCode?.value?.trim() ?? ""),
+);
+for (const body of [elements.recentHistoryBody, elements.historyTableBody]) {
+  body?.addEventListener("click", (event) => {
+    const target = event.target instanceof Element ? event.target : null;
+    const button = target?.closest("[data-history-opponent-code]");
+    if (!button) return;
+    void selectHistoryTarget(button.dataset.historyOpponentCode, { autoFetch: true });
+  });
+}
+elements.clearHistoryTargetButton?.addEventListener("click", async () => {
+  elements.clearHistoryTargetButton.disabled = true;
+  try {
+    historyPage = 0;
+    renderHistoryState(await unwrap(api.clearHistoryProfile()));
+    showNotice(t("historyViewingSelf", "Viewing your player"), "success");
+  } catch (error) {
+    showNotice(error.message, "error");
+  }
+});
 for (const input of [
   elements.historyDateFrom,
   elements.historyDateTo,

@@ -22,6 +22,7 @@ function createEmptyMatchStats() {
     ranked: {
       wins: 0,
       losses: 0,
+      matchCount: 0,
       initialRating: null,
       currentRating: null,
       ratingDelta: 0,
@@ -30,6 +31,7 @@ function createEmptyMatchStats() {
     battleHub: {
       wins: 0,
       losses: 0,
+      matchCount: 0,
       initialRating: null,
       currentRating: null,
       ratingDelta: null,
@@ -38,6 +40,7 @@ function createEmptyMatchStats() {
     casual: {
       wins: 0,
       losses: 0,
+      matchCount: 0,
       initialRating: null,
       currentRating: null,
       ratingDelta: null,
@@ -247,6 +250,7 @@ function normalizeReplay(raw, targetProfileId) {
     characterId:
       Number(own?.playing_character_id ?? own?.character_id ?? 0) || null,
     opponentName: String(opponent?.player?.fighter_id ?? ""),
+    opponentUserCode: String(opponent?.player?.short_id ?? ""),
     opponentCharacterName: characterName(opponent),
     opponentMr,
     opponentLp,
@@ -288,6 +292,9 @@ function applyNewReplays(state, replays) {
     if (replay.characterId != null) {
       next.characterId = replay.characterId;
     }
+
+    next.stats[matchType].matchCount =
+      Number(next.stats[matchType].matchCount ?? 0) + 1;
 
     if (replay.result === "win") {
       next.stats[matchType].wins += 1;
