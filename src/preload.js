@@ -13,6 +13,9 @@ contextBridge.exposeInMainWorld("matchOverlay", {
   getState: () => ipcRenderer.invoke("tracker:state"),
   getHistoryState: () => ipcRenderer.invoke("history:state"),
   fetchHistory: () => ipcRenderer.invoke("history:fetch"),
+  selectHistoryProfile: (userCode) =>
+    ipcRenderer.invoke("history:select-profile", { userCode }),
+  clearHistoryProfile: () => ipcRenderer.invoke("history:clear-profile"),
   openStatsWindow: () => ipcRenderer.invoke("display:open"),
   hideStatsWindow: () => ipcRenderer.invoke("display:hide"),
   toggleStatsWindow: () => ipcRenderer.invoke("display:toggle"),

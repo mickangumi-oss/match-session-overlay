@@ -284,6 +284,22 @@ body.remote-overlay {
     0 0 5px #000;
 }
 
+.stats-window.suppressed {
+  display: none;
+}
+
+.median-rating {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--muted);
+  font: 700 min(calc(8px * var(--font-scale)), 10px)/1 var(--stats-label-font-family);
+  letter-spacing: 0.035em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .accent {
   color: var(--accent);
 }
@@ -365,6 +381,12 @@ body.remote-overlay {
 .overlay .summary small {
   display: block;
   font-size: min(calc(8px * var(--font-scale)), 4vw);
+}
+
+.overlay .median-rating {
+  margin-top: 1px;
+  font-size: min(calc(6px * var(--font-scale)), 8px);
+  letter-spacing: 0;
 }
 
 .overlay .divider {
@@ -1279,4 +1301,113 @@ body.remote-overlay {
 
 .stats-window.transparent .divider {
   background: transparent !important;
+}
+
+/* POTENTIAL MR/LP is a first-class metric. Keep it in its own card instead
+   of placing it beneath CURRENT/DELTA, across all window orientations. */
+.stats-window .summary {
+  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+}
+
+.stats-window .summary > .divider {
+  display: none !important;
+}
+
+.stats-window .potential-group {
+  min-width: 0;
+}
+
+.stats-window .potential-group strong {
+  color: var(--accent);
+  line-height: 0.86;
+}
+
+.stats-window .metric-sample {
+  position: absolute;
+  right: 0;
+  bottom: 5px;
+  left: 0;
+  display: block;
+  min-height: 8px;
+  color: rgba(247, 248, 255, 0.56);
+  font: 700 min(calc(7px * var(--font-scale)), 9px)/1 var(--stats-label-font-family);
+  letter-spacing: 0.02em;
+  text-align: center;
+}
+
+.stats-window.horizontal .potential-group {
+  padding-bottom: 9px;
+}
+
+.stats-window.horizontal .potential-group strong {
+  font-size: min(calc(21px * var(--stats-value-scale)), 6.5vw);
+}
+
+.stats-window.vertical .potential-group {
+  /* Keep the sample count in the same layout flow as the value.  Absolute
+     positioning made wide/italic fonts overlap the bottom of the number. */
+  padding-bottom: 0;
+  row-gap: 4px;
+}
+
+.stats-window.vertical .metric-sample {
+  position: static;
+  min-height: 9px;
+}
+
+.stats-window.vertical .potential-group strong {
+  font-size: clamp(
+    calc(30px * var(--stats-value-scale)),
+    calc(8vw * var(--stats-value-scale)),
+    calc(48px * var(--stats-value-scale))
+  );
+}
+
+.stats-window.overlay:not(.vertical) .potential-group strong {
+  font-size: min(calc(16px * var(--stats-value-scale)), 7vw);
+}
+
+.stats-window .metric-group {
+  position: relative;
+}
+
+.stats-window.vertical .summary {
+  grid-template-columns: 1fr !important;
+  grid-template-rows: repeat(4, minmax(84px, auto)) !important;
+}
+
+.stats-window.vertical .summary > .record-group,
+.stats-window.vertical .summary > .metric-group {
+  min-height: 84px;
+}
+
+.stats-window.vertical.overlay .summary {
+  grid-template-rows: repeat(4, minmax(84px, auto)) !important;
+}
+
+.stats-window.vertical.no-chart .summary {
+  grid-template-rows: repeat(4, minmax(84px, auto)) !important;
+}
+
+/* Four stacked metric cards need a real minimum track size. Without this,
+   Chromium can shrink the auto summary track below its contents and let the
+   chart track paint over the POTENTIAL card at the window minimum height. */
+.stats-window.vertical {
+  grid-template-rows: 34px 30px minmax(360px, auto) minmax(180px, 1fr);
+  min-height: 700px;
+}
+
+.stats-window.vertical .summary {
+  min-height: 360px;
+  height: 360px;
+}
+
+.stats-window.vertical.no-chart {
+  grid-template-rows: 34px 30px minmax(360px, auto);
+  min-height: 470px;
+}
+
+.stats-window.vertical.no-chart .summary {
+  min-height: 360px;
+  height: 360px;
 }

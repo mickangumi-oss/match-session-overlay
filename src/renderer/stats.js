@@ -73,8 +73,12 @@ const elements = {
   winRate: document.getElementById("winRate"),
   recordWins: document.getElementById("recordWins"),
   recordLosses: document.getElementById("recordLosses"),
+  recordValues: document.querySelector(".record-values"),
   ratingTypeLabel: document.getElementById("ratingTypeLabel"),
   ratingDelta: document.getElementById("ratingDelta"),
+  medianRatingLabel: document.getElementById("medianRatingLabel"),
+  medianRating: document.getElementById("medianRating"),
+  medianRatingSample: document.getElementById("medianRatingSample"),
   statsChartPanel: document.getElementById("statsChartPanel"),
   statsRatingChart: document.getElementById("statsRatingChart"),
   statsChartEmpty: document.getElementById("statsChartEmpty"),
@@ -136,7 +140,37 @@ function unwrap(result) {
   return result.data;
 }
 
-function drawStatsChart(history, matchCount) {
+function fitStatsValue(element) {
+  if (!element) return;
+  element.style.fontSize = "";
+  requestAnimationFrame(() => {
+    if (!element.isConnected || element.clientWidth <= 0) return;
+    const computedSize = Number.parseFloat(getComputedStyle(element).fontSize);
+    const baseSize = Number.isFinite(computedSize) ? computedSize : 16;
+    const minimumSize = 18;
+    let size = baseSize;
+    // Width is the reliable overflow signal for these metric cards.  A grid
+    // item's scrollHeight includes its line box and made vertical cards shrink
+    // even when the text was visually fitting.
+    while (size > minimumSize && element.scrollWidth > element.clientWidth + 1) {
+      size = Math.max(minimumSize, size - 0.5);
+      element.style.fontSize = `${size}px`;
+    }
+  });
+}
+
+function fitStatsValues() {
+  for (const element of [
+    elements.recordValues,
+    elements.winRate,
+    elements.ratingDelta,
+    elements.medianRating,
+  ]) {
+    fitStatsValue(element);
+  }
+}
+
+function drawStatsChart(history, matchCount, ratingType = "MR") {
   const canvas = elements.statsRatingChart;
   const rect = canvas.getBoundingClientRect();
   if (!rect.width || !rect.height) return;
@@ -144,7 +178,29 @@ function drawStatsChart(history, matchCount) {
   canvas.width = Math.max(1, Math.round(rect.width * ratio));
   canvas.height = Math.max(1, Math.round(rect.height * ratio));
   const context = canvas.getContext("2d");
-  context.scale(ratio, ratio);
+  context.setTransform(ratio, 0, 0, ratio, 0, 0);
+  context.clearRect(0, 0, rect.width, rect.height);
+
+  // Horizontal stats use the compact 4:1 HUD ratio. Vertical stats use a
+  // 16:9 plot: it fills the portrait overlay's wide chart area while keeping
+  // the same proportions in the normal window and the OBS overlay.
+  const isVertical = document.querySelector(".stats-window.vertical") !== null;
+  // Use the same internal frame for both window and overlay presentations.
+  // Only the outer container may letterbox; the graph itself never changes
+  // proportion when the mode or window size changes.
+  const chartAspectRatio = isVertical ? 16 / 9 : 4;
+  const containerAspectRatio = rect.width / rect.height;
+  const chartWidth =
+    containerAspectRatio >= chartAspectRatio
+      ? rect.height * chartAspectRatio
+      : rect.width;
+  const chartHeight =
+    containerAspectRatio >= chartAspectRatio
+      ? rect.height
+      : rect.width / chartAspectRatio;
+  const chartLeft = (rect.width - chartWidth) / 2;
+  const chartTop = (rect.height - chartHeight) / 2;
+  context.translate(chartLeft, chartTop);
   const values = history.filter(Number.isFinite);
   if (!values.length) return;
   const labelScale = Math.min(
@@ -166,7 +222,9 @@ function drawStatsChart(history, matchCount) {
         : normalizedStep <= 5
           ? 5
           : 10) * magnitude;
-  let minimum = Math.floor((dataMinimum - step * 0.5) / step) * step;
+  let minimum = ratingType === "LP"
+    ? 0
+    : Math.floor((dataMinimum - step * 0.5) / step) * step;
   let maximum = Math.ceil((dataMaximum + step * 0.5) / step) * step;
   if (minimum === maximum) maximum += step;
   const fontStyle = FONT_STYLES.has(displaySettings?.fontStyle)
@@ -186,11 +244,11 @@ function drawStatsChart(history, matchCount) {
   const top = Math.max(9, labelFontSize / 2 + 2);
   const bottom = Math.max(24, labelFontSize + 8);
   const yFor = (value) =>
-    top + ((maximum - value) / (maximum - minimum)) * (rect.height - top - bottom);
+    top + ((maximum - value) / (maximum - minimum)) * (chartHeight - top - bottom);
   const xFor = (index) =>
     left +
-    (index / Math.max(1, values.length - 1)) * (rect.width - left - right);
-  const plotBottom = rect.height - bottom;
+    (index / Math.max(1, values.length - 1)) * (chartWidth - left - right);
+  const plotBottom = chartHeight - bottom;
   context.textAlign = "right";
   context.textBaseline = "middle";
   context.fillStyle = `${displaySettings?.textColor ?? "#f7f8ff"}99`;
@@ -201,7 +259,7 @@ function drawStatsChart(history, matchCount) {
     context.strokeStyle = "rgba(255,255,255,.12)";
     context.beginPath();
     context.moveTo(left, y);
-    context.lineTo(rect.width - right, y);
+    context.lineTo(chartWidth - right, y);
     context.stroke();
   }
   values.forEach((value, index) => {
@@ -209,7 +267,7 @@ function drawStatsChart(history, matchCount) {
     context.strokeStyle = "rgba(255,255,255,.07)";
     context.beginPath();
     context.moveTo(x, top);
-    context.lineTo(x, rect.height - bottom);
+    context.lineTo(x, chartHeight - bottom);
     context.stroke();
   });
 
@@ -217,7 +275,7 @@ function drawStatsChart(history, matchCount) {
   context.lineWidth = 1.2;
   context.beginPath();
   context.moveTo(left, plotBottom);
-  context.lineTo(rect.width - right, plotBottom);
+  context.lineTo(chartWidth - right, plotBottom);
   context.stroke();
   context.beginPath();
   context.moveTo(left, top);
@@ -244,7 +302,7 @@ function drawStatsChart(history, matchCount) {
     shownLabels.add(label);
     const labelWidth = context.measureText(label).width;
     const labelX = Math.min(
-      rect.width - right - labelWidth / 2,
+      chartWidth - right - labelWidth / 2,
       Math.max(left + labelWidth / 2, x),
     );
     context.fillText(label, labelX, plotBottom + 6);
@@ -302,7 +360,9 @@ function renderStatsChart(state) {
   if (!isVertical) return;
   const matchType = displaySettings?.matchType ?? "ranked";
   const selected = state.stats?.[matchType] ?? {};
-  const total = Number(selected.wins ?? 0) + Number(selected.losses ?? 0);
+  const total = Number.isFinite(Number(selected.matchCount))
+    ? Math.max(0, Math.trunc(Number(selected.matchCount)))
+    : Number(selected.wins ?? 0) + Number(selected.losses ?? 0);
   const rawHistory = Array.isArray(selected.ratingHistory)
     ? selected.ratingHistory.filter(Number.isFinite)
     : [];
@@ -317,11 +377,15 @@ function renderStatsChart(state) {
           Number.isFinite(current)
         ? [initial, current]
         : rawHistory;
-  const hasGraphData = matchType === "ranked" && total > 0 && history.length >= 2;
+  // matchCount is maintained per character and per mode by the main process;
+  // never substitute the all-character session total here.
+  const graphMatchCount = total;
+  const hasGraphData =
+    matchType === "ranked" && graphMatchCount > 0 && history.length >= 2;
   elements.statsRatingChart.classList.toggle("hidden", !hasGraphData);
   elements.statsChartEmpty.classList.toggle("hidden", hasGraphData);
   elements.statsChartState.textContent = hasGraphData
-    ? `${total} MATCHES`
+    ? `${graphMatchCount} MATCHES`
     : matchType === "ranked"
       ? t("dataWaiting", "データ待機中")
       : t("rankedOnly", "ランクのみ");
@@ -331,11 +395,20 @@ function renderStatsChart(state) {
     matchType === "ranked"
       ? t("graphEmptyRanked", "ランクマッチを計測するとグラフが表示されます")
       : t("graphEmptyOther", "グラフはランクマッチで表示されます");
-  if (hasGraphData) requestAnimationFrame(() => drawStatsChart(history, total));
+  if (hasGraphData) {
+    requestAnimationFrame(() => {
+      drawStatsChart(history, graphMatchCount, ratingType);
+    });
+  }
+}
+
+function redrawStatsChart() {
+  if (trackerState) renderStatsChart(trackerState);
 }
 
 function renderTracker(state) {
   trackerState = state;
+  elements.root.classList.toggle("suppressed", state?.overlaySuppressed === true);
   const matchType = displaySettings?.matchType ?? "ranked";
   const selected = state.stats?.[matchType] ?? {};
   const wins = Number(selected.wins ?? 0);
@@ -351,7 +424,29 @@ function renderTracker(state) {
   elements.ratingTypeLabel.textContent = `${ratingType} ${t("delta", "DELTA")}`;
   elements.ratingDelta.textContent =
     delta == null ? "—" : `${delta > 0 ? "+" : delta < 0 ? "" : "±"}${delta}`;
+  renderMedianRating(state);
+  fitStatsValues();
   renderStatsChart(state);
+}
+
+function renderMedianRating(state) {
+  if (!elements.medianRating) return;
+  const ratingType = state?.medianRatingType || (state?.ratingType === "LP" ? "LP" : "MR");
+  const median = Number(state?.medianRating);
+  const sampleCount = Math.max(0, Math.trunc(Number(state?.medianRatingSampleCount) || 0));
+  const potentialLabel = t("potential", "POTENTIAL");
+  const label = `${potentialLabel} ${ratingType}`;
+  const formatted = Number.isFinite(median) ? String(Math.round(median)) : "—";
+  if (elements.medianRatingLabel) elements.medianRatingLabel.textContent = label;
+  elements.medianRating.textContent =
+    Number.isFinite(median) && sampleCount >= 2
+      ? formatted
+      : "—";
+  if (elements.medianRatingSample) {
+    elements.medianRatingSample.textContent = sampleCount
+      ? `(${sampleCount} ${t("matchUnit", "Match")})`
+      : "";
+  }
 }
 
 function renderSettings(settings) {
@@ -404,6 +499,7 @@ function renderSettings(settings) {
     tab.classList.toggle("active", tab.dataset.matchType === settings.matchType);
   }
   if (trackerState) renderTracker(trackerState);
+  else fitStatsValues();
 }
 
 elements.hideButton.addEventListener("click", () => api.hideStatsWindow());
@@ -446,6 +542,18 @@ for (const tab of elements.matchTabs) {
 }
 api.onState(renderTracker);
 api.onDisplaySettings(renderSettings);
+
+if (typeof ResizeObserver === "function") {
+  const statsResizeObserver = new ResizeObserver(() => {
+    fitStatsValues();
+    redrawStatsChart();
+  });
+  statsResizeObserver.observe(elements.root);
+}
+window.addEventListener("resize", () => {
+  fitStatsValues();
+  redrawStatsChart();
+});
 
 if (remoteOverlay) {
   document.body.classList.add("remote-overlay");

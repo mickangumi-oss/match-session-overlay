@@ -12,8 +12,11 @@ const {
   clipboard,
   dialog,
   ipcMain,
+  Menu,
+  nativeImage,
   screen,
   session,
+  Tray,
 } = require("electron");
 const {
   SERVICE_ORIGIN,
@@ -37,7 +40,11 @@ const { createUpdater } = require("./updater");
 
 const APP_NAME = "MatchSessionOverlay";
 const OVERLAY_HOST = "127.0.0.1";
-const OVERLAY_PORT = 37123;
+const devOverlayPort = Number(process.env.MATCH_OVERLAY_DEV_PORT);
+const OVERLAY_PORT =
+  !app.isPackaged && Number.isInteger(devOverlayPort) && devOverlayPort >= 1024 && devOverlayPort <= 65535
+    ? devOverlayPort
+    : 37123;
 const LOGIN_PARTITION = "persist:source-login";
 const STATS_WINDOW_PRESETS = {
   window: {
@@ -51,19 +58,19 @@ const STATS_WINDOW_PRESETS = {
     },
     vertical: {
       width: 380,
-      height: 760,
+      height: 820,
       minWidth: 320,
-      minHeight: 560,
+      minHeight: 700,
       maxWidth: 560,
       maxHeight: 1100,
     },
     verticalNoChart: {
       width: 380,
-      height: 340,
+      height: 460,
       minWidth: 320,
-      minHeight: 300,
+      minHeight: 470,
       maxWidth: 560,
-      maxHeight: 700,
+      maxHeight: 760,
     },
     chart: { width: 520, height: 240, minWidth: 380, minHeight: 180 },
     summary: { width: 520, height: 102, minWidth: 320, minHeight: 82 },
@@ -75,19 +82,19 @@ const STATS_WINDOW_PRESETS = {
     summary: { width: 480, height: 72, minWidth: 300, minHeight: 68 },
     vertical: {
       width: 380,
-      height: 760,
+      height: 820,
       minWidth: 320,
-      minHeight: 560,
+      minHeight: 700,
       maxWidth: 560,
       maxHeight: 1100,
     },
     verticalNoChart: {
       width: 380,
-      height: 340,
+      height: 460,
       minWidth: 320,
-      minHeight: 300,
+      minHeight: 470,
       maxWidth: 560,
-      maxHeight: 700,
+      maxHeight: 760,
     },
     maxWidth: 1000,
     maxHeight: 300,
@@ -200,14 +207,25 @@ const localDataRoot =
 const userDataPath = path.join(localDataRoot, "user-data");
 const sessionDataPath = path.join(localDataRoot, "session-data");
 const displaySettingsPath = path.join(userDataPath, "display-settings.json");
+const matchHistoryDirectory = path.join(userDataPath, "match-history");
 const matchHistoryPath = path.join(userDataPath, "match-history.json");
 const MATCH_HISTORY_LIMIT = 5000;
-// A manual history import is one request for the site's existing 100-entry
-// battle log. Keep it deliberately infrequent so the feature cannot be used
+// The battle log is paginated at ten entries per page. A manual import walks
+// at most ten pages (100 entries) through the existing request queue; live
+// polling intentionally remains a single-page request.
+const MATCH_HISTORY_PAGE_SIZE = 10;
+const MATCH_HISTORY_MAX_PAGES = 10;
+const MEDIAN_RATING_SAMPLE_LIMIT = 20;
+// Keep manual imports deliberately infrequent so the feature cannot be used
 // to poll the service repeatedly.
 const MATCH_HISTORY_FETCH_COOLDOWN_MS = 10 * 60 * 1000;
+// Selecting another profile also performs a search request. Reuse a recent
+// lookup so repeated clicks or switching back and forth cannot create a
+// request burst against the official service.
+const HISTORY_PROFILE_LOOKUP_COOLDOWN_MS = 10 * 60 * 1000;
 fs.mkdirSync(userDataPath, { recursive: true });
 fs.mkdirSync(sessionDataPath, { recursive: true });
+fs.mkdirSync(matchHistoryDirectory, { recursive: true });
 app.setPath("userData", userDataPath);
 app.setPath("sessionData", sessionDataPath);
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
@@ -218,6 +236,7 @@ if (!hasSingleInstanceLock) {
 let mainWindow;
 let loginWindow;
 let statsWindow;
+let tray;
 let overlayServer;
 let sourceSession;
 let buildId;
@@ -235,6 +254,7 @@ let displaySettingsWriteTimer;
 let gameMonitorTimer;
 let gameWasRunning = false;
 let autoGameSessionActive = false;
+let overlaySuppressed = false;
 let isQuitting = false;
 let appUiModalDepth = 0;
 let applyingStatsBounds = false;
@@ -246,16 +266,26 @@ let updater;
 let updateRequired = false;
 let authenticatedRatingType = "MR";
 let authenticatedProfileId = null;
+let authenticatedPlayer = null;
 let statsWindowBounds = {
   window: { horizontal: null, vertical: null },
   overlay: null,
 };
 
 let trackerState = createEmptyTrackerState();
-let matchHistoryRecords = [];
-let matchHistoryLastFetchedAt = 0;
-let matchHistoryLastFetchedProfileId = null;
+const matchHistoryStores = new Map();
+const historyProfileLookupCache = new Map();
 let matchHistoryFetchInFlight = null;
+let historyViewPlayer = null;
+let historyViewPollTimer = null;
+let historyViewPollInFlight = false;
+let historyViewSessionId = 0;
+let historyViewPollingActive = false;
+let historyViewLastNewMatchAt = null;
+let historyViewNextPollAt = null;
+let historyViewEffectivePollIntervalSeconds = null;
+let historyViewConsecutiveFailures = 0;
+let historyViewStopReason = null;
 let displaySettings = {
   mode: "window",
   windowOrientation: "horizontal",
@@ -361,7 +391,7 @@ try {
 } catch {
   // 初回起動、または設定ファイル破損時は安全な既定値を使う。
 }
-loadMatchHistory();
+migrateLegacyMatchHistory();
 if (!displaySettings.launchAtLogin) {
   displaySettings.autoDetectGame = false;
 }
@@ -399,7 +429,9 @@ function normalizeStoredHistoryRecord(value) {
   if (!value || typeof value !== "object") return null;
   const replayId = String(value.replayId ?? "").trim();
   if (!replayId) return null;
-  const profileId = String(value.profileId ?? value.ownUserCode ?? "").trim();
+  const profileId = normalizeHistoryProfileId(
+    value.profileId ?? value.ownUserCode,
+  );
   const uploadedAt = Number(value.uploadedAt ?? 0);
   if (!profileId || !Number.isFinite(uploadedAt) || uploadedAt <= 0) return null;
   const matchType = ["ranked", "battleHub", "casual"].includes(value.matchType)
@@ -428,6 +460,7 @@ function normalizeStoredHistoryRecord(value) {
       ? value.ownRatingType ?? value.ratingType
       : null,
     opponentName: String(value.opponentName ?? "").slice(0, 80),
+    opponentUserCode: normalizeHistoryProfileId(value.opponentUserCode),
     opponentCharacterName: String(value.opponentCharacterName ?? "").slice(0, 80),
     opponentCharacterId: finiteOrNull(value.opponentCharacterId),
     opponentRating: finiteOrNull(value.opponentRating),
@@ -437,53 +470,120 @@ function normalizeStoredHistoryRecord(value) {
   };
 }
 
-function loadMatchHistory() {
-  try {
-    const saved = JSON.parse(fs.readFileSync(matchHistoryPath, "utf8"));
-    const records = Array.isArray(saved) ? saved : saved?.records;
-    matchHistoryRecords = Array.isArray(records)
-      ? records.map(normalizeStoredHistoryRecord).filter(Boolean)
-      : [];
-    matchHistoryLastFetchedAt = Number(saved?.lastFetchedAt ?? 0) || 0;
-    matchHistoryLastFetchedProfileId = String(saved?.lastFetchedProfileId ?? "").trim() || null;
-    matchHistoryRecords = [...new Map(
-      matchHistoryRecords.map((record) => [record.replayId, record]),
-    ).values()]
+function normalizeHistoryProfileId(value) {
+  const normalized = String(value ?? "").replace(/\s/g, "");
+  return /^\d{4,12}$/.test(normalized) ? normalized : null;
+}
+
+function historyStorePath(profileId) {
+  const normalized = normalizeHistoryProfileId(profileId);
+  return normalized
+    ? path.join(matchHistoryDirectory, `${normalized}.json`)
+    : null;
+}
+
+function emptyMatchHistoryStore() {
+  return { version: 1, lastFetchedAt: 0, records: [] };
+}
+
+function normalizeMatchHistoryStore(value) {
+  const records = Array.isArray(value) ? value : value?.records;
+  const deduplicated = new Map(
+    (Array.isArray(records) ? records : [])
+      .map(normalizeStoredHistoryRecord)
+      .filter(Boolean)
+      .map((record) => [record.replayId, record]),
+  );
+  return {
+    version: 1,
+    lastFetchedAt: Number(value?.lastFetchedAt ?? 0) || 0,
+    records: [...deduplicated.values()]
       .sort((a, b) => b.uploadedAt - a.uploadedAt)
-      .slice(0, MATCH_HISTORY_LIMIT);
+      .slice(0, MATCH_HISTORY_LIMIT),
+  };
+}
+
+function loadMatchHistoryStore(profileId) {
+  const normalizedProfileId = normalizeHistoryProfileId(profileId);
+  if (!normalizedProfileId) return emptyMatchHistoryStore();
+  if (matchHistoryStores.has(normalizedProfileId)) {
+    return matchHistoryStores.get(normalizedProfileId);
+  }
+  const filePath = historyStorePath(normalizedProfileId);
+  let store = emptyMatchHistoryStore();
+  try {
+    store = normalizeMatchHistoryStore(
+      JSON.parse(fs.readFileSync(filePath, "utf8")),
+    );
   } catch {
-    matchHistoryRecords = [];
-    matchHistoryLastFetchedAt = 0;
-    matchHistoryLastFetchedProfileId = null;
+    store = emptyMatchHistoryStore();
+  }
+  matchHistoryStores.set(normalizedProfileId, store);
+  return store;
+}
+
+function persistMatchHistoryStore(profileId, store = loadMatchHistoryStore(profileId)) {
+  const normalizedProfileId = normalizeHistoryProfileId(profileId);
+  const filePath = historyStorePath(normalizedProfileId);
+  if (!normalizedProfileId || !filePath || !store) return false;
+  try {
+    fs.writeFileSync(
+      filePath,
+      JSON.stringify(store, null, 2),
+      "utf8",
+    );
+    return true;
+  } catch {
+    // Local history is an enhancement; a full disk must not stop tracking.
+    return false;
   }
 }
 
-function persistMatchHistory() {
+function migrateLegacyMatchHistory() {
+  if (!fs.existsSync(matchHistoryPath)) return;
   try {
-    fs.writeFileSync(
-      matchHistoryPath,
-      JSON.stringify(
-        {
-          version: 1,
-          lastFetchedAt: matchHistoryLastFetchedAt,
-          lastFetchedProfileId: matchHistoryLastFetchedProfileId,
-          records: matchHistoryRecords,
-        },
-        null,
-        2,
-      ),
-      "utf8",
+    const legacy = normalizeMatchHistoryStore(
+      JSON.parse(fs.readFileSync(matchHistoryPath, "utf8")),
     );
+    const grouped = new Map();
+    for (const record of legacy.records) {
+      const profileId = normalizeHistoryProfileId(record.profileId);
+      if (!profileId) continue;
+      const store = grouped.get(profileId) ?? emptyMatchHistoryStore();
+      store.records.push(record);
+      grouped.set(profileId, store);
+    }
+    let migrated = true;
+    for (const [profileId, records] of grouped) {
+      const store = loadMatchHistoryStore(profileId);
+      const merged = normalizeMatchHistoryStore({
+        ...store,
+        lastFetchedAt: Math.max(store.lastFetchedAt, legacy.lastFetchedAt),
+        records: [...store.records, ...records.records],
+      });
+      matchHistoryStores.set(profileId, merged);
+      migrated = persistMatchHistoryStore(profileId, merged) && migrated;
+    }
+    if (migrated) fs.rmSync(matchHistoryPath, { force: true });
   } catch {
-    // Local history is an enhancement; a full disk must not stop tracking.
+    // Leave the legacy file in place if migration cannot be completed.
   }
+}
+
+function activeHistoryProfileId() {
+  return normalizeHistoryProfileId(
+    historyViewPlayer?.profileId ??
+      trackerState.player?.profileId ??
+      authenticatedProfileId,
+  );
 }
 
 function mergeMatchHistory(replays, profileId) {
-  const normalizedProfileId = String(profileId ?? "").trim();
+  const normalizedProfileId = normalizeHistoryProfileId(profileId);
   if (!normalizedProfileId || !Array.isArray(replays)) return false;
+  const store = loadMatchHistoryStore(normalizedProfileId);
   const existing = new Map(
-    matchHistoryRecords.map((record) => [record.replayId, record]),
+    store.records.map((record) => [record.replayId, record]),
   );
   let changed = false;
   for (const replay of replays) {
@@ -499,32 +599,41 @@ function mergeMatchHistory(replays, profileId) {
     }
   }
   if (!changed) return false;
-  matchHistoryRecords = [...existing.values()]
+  store.records = [...existing.values()]
     .sort((a, b) => b.uploadedAt - a.uploadedAt)
     .slice(0, MATCH_HISTORY_LIMIT);
-  persistMatchHistory();
+  persistMatchHistoryStore(normalizedProfileId, store);
   sendHistoryState();
   return true;
 }
 
 function publicHistoryState(
-  profileId = trackerState.player?.profileId ?? authenticatedProfileId,
+  profileId = activeHistoryProfileId(),
 ) {
-  const normalizedProfileId = String(profileId ?? "").trim();
-  const records = normalizedProfileId
-    ? matchHistoryRecords.filter((record) => record.profileId === normalizedProfileId)
-    : [];
-  const nextAllowedAt = matchHistoryLastFetchedProfileId === normalizedProfileId && matchHistoryLastFetchedAt
-    ? matchHistoryLastFetchedAt + MATCH_HISTORY_FETCH_COOLDOWN_MS
+  const normalizedProfileId = normalizeHistoryProfileId(profileId);
+  const store = normalizedProfileId
+    ? loadMatchHistoryStore(normalizedProfileId)
+    : emptyMatchHistoryStore();
+  const nextAllowedAt = store.lastFetchedAt
+    ? store.lastFetchedAt + MATCH_HISTORY_FETCH_COOLDOWN_MS
     : 0;
   return {
-    records,
-    count: records.length,
+    records: store.records,
+    count: store.records.length,
+    profileId: normalizedProfileId,
+    player: historyViewPlayer ?? authenticatedPlayer ?? trackerState.player,
+    viewingOther: Boolean(historyViewPlayer),
     authenticated: Boolean(normalizedProfileId),
-    lastFetchedAt: matchHistoryLastFetchedAt || null,
+    lastFetchedAt: store.lastFetchedAt || null,
     nextAllowedAt: nextAllowedAt || null,
     canFetch: Boolean(normalizedProfileId) && Date.now() >= nextAllowedAt,
     cooldownSeconds: Math.max(0, Math.ceil((nextAllowedAt - Date.now()) / 1000)),
+    polling: Boolean(historyViewPlayer && historyViewPollingActive),
+    pollNextAt: historyViewPlayer ? historyViewNextPollAt : null,
+    pollIntervalSeconds: historyViewPlayer
+      ? historyViewEffectivePollIntervalSeconds
+      : null,
+    pollStopReason: historyViewPlayer ? historyViewStopReason : null,
   };
 }
 
@@ -535,20 +644,307 @@ function sendHistoryState() {
   }
 }
 
+function stopHistoryViewPolling(reason = null) {
+  if (historyViewPollTimer) {
+    clearTimeout(historyViewPollTimer);
+    historyViewPollTimer = null;
+  }
+  historyViewSessionId += 1;
+  historyViewPollingActive = false;
+  historyViewNextPollAt = null;
+  historyViewEffectivePollIntervalSeconds = null;
+  historyViewConsecutiveFailures = 0;
+  historyViewStopReason = reason;
+}
+
+function startHistoryViewPolling({ resetActivity = true } = {}) {
+  if (!historyViewPlayer) return;
+  if (historyViewPollTimer) clearTimeout(historyViewPollTimer);
+  historyViewSessionId += 1;
+  historyViewPollingActive = true;
+  historyViewStopReason = null;
+  historyViewConsecutiveFailures = 0;
+  if (resetActivity || historyViewLastNewMatchAt == null) {
+    historyViewLastNewMatchAt = Date.now();
+  }
+  scheduleHistoryViewPolling();
+}
+
+function scheduleHistoryViewPolling(delayMs = null) {
+  if (!historyViewPlayer || !historyViewPollingActive || updateRequired) return;
+  if (historyViewPollTimer) clearTimeout(historyViewPollTimer);
+  const nextDelay =
+    delayMs ??
+    successfulPollDelayMs({
+      configuredIntervalSeconds: displaySettings.pollIntervalSeconds,
+      lastNewMatchAt: historyViewLastNewMatchAt,
+      jitterMs: Math.floor(Math.random() * (POLL_JITTER_MAX_MS + 1)),
+    });
+  historyViewNextPollAt = Date.now() + nextDelay;
+  historyViewEffectivePollIntervalSeconds = Math.ceil(nextDelay / 1000);
+  const sessionId = historyViewSessionId;
+  historyViewPollTimer = setTimeout(
+    () => runHistoryViewPoll(sessionId),
+    nextDelay,
+  );
+  sendTrackerState();
+  sendHistoryState();
+}
+
+async function runHistoryViewPoll(sessionId) {
+  historyViewPollTimer = null;
+  historyViewNextPollAt = null;
+  if (
+    historyViewPollInFlight ||
+    !historyViewPollingActive ||
+    !historyViewPlayer ||
+    sessionId !== historyViewSessionId
+  ) {
+    return;
+  }
+  historyViewPollInFlight = true;
+  const profileId = historyViewPlayer.profileId;
+  try {
+    const store = loadMatchHistoryStore(profileId);
+    const previousReplayIds = new Set(store.records.map((record) => record.replayId));
+    const replays = await fetchRankedReplays(profileId);
+    if (
+      !historyViewPollingActive ||
+      !historyViewPlayer ||
+      historyViewPlayer.profileId !== profileId ||
+      sessionId !== historyViewSessionId
+    ) {
+      return;
+    }
+    const newReplays = replays.filter(
+      (replay) => replay.replayId && !previousReplayIds.has(replay.replayId),
+    );
+    mergeMatchHistory(replays, profileId);
+    const fetchedStore = loadMatchHistoryStore(profileId);
+    fetchedStore.lastFetchedAt = Date.now();
+    persistMatchHistoryStore(profileId, fetchedStore);
+    if (newReplays.length) {
+      historyViewLastNewMatchAt = Date.now();
+      const newest = [...newReplays].sort(
+        (a, b) => Number(b.uploadedAt) - Number(a.uploadedAt),
+      )[0];
+      if (newest?.characterId != null) {
+        historyViewPlayer = {
+          ...historyViewPlayer,
+          characterId: newest.characterId,
+          characterDisplayName:
+            newest.ownCharacterName || historyViewPlayer.characterDisplayName,
+          mr: newest.ownRatingType === "MR" ? newest.ownRating : historyViewPlayer.mr,
+          lp: newest.ownRatingType === "LP" ? newest.ownRating : historyViewPlayer.lp,
+        };
+      }
+    }
+    historyViewConsecutiveFailures = 0;
+    if (shouldAutoStopForInactivity(historyViewLastNewMatchAt)) {
+      stopHistoryViewPolling("idle");
+    } else {
+      scheduleHistoryViewPolling();
+    }
+    sendHistoryState();
+    sendTrackerState();
+  } catch (error) {
+    if (
+      !historyViewPollingActive ||
+      !historyViewPlayer ||
+      historyViewPlayer.profileId !== profileId ||
+      sessionId !== historyViewSessionId
+    ) {
+      return;
+    }
+    historyViewConsecutiveFailures += 1;
+    if (error instanceof Error && error.message === "SERVICE_AUTH_REQUIRED") {
+      stopHistoryViewPolling("authentication");
+    } else if (historyViewConsecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+      stopHistoryViewPolling("network");
+    } else {
+      const retryAfterMs = Number(error.retryAfterMs);
+      const retryDelay = Math.max(
+        errorBackoffMs(historyViewConsecutiveFailures),
+        Number.isFinite(retryAfterMs) ? retryAfterMs : 0,
+      );
+      scheduleHistoryViewPolling(retryDelay);
+    }
+    sendHistoryState();
+    sendTrackerState();
+  } finally {
+    historyViewPollInFlight = false;
+  }
+}
+
+function historyViewTrackerState() {
+  if (!historyViewPlayer) return null;
+  const records = loadMatchHistoryStore(historyViewPlayer.profileId).records;
+  const stats = createEmptyMatchStats();
+  const ordered = [...records].sort(
+    (a, b) => Number(a.playedAt ?? a.uploadedAt) - Number(b.playedAt ?? b.uploadedAt),
+  );
+  const currentCharacterId = Number(historyViewPlayer.characterId) || null;
+  const characterRecords = currentCharacterId == null
+    ? ordered
+    : ordered.filter((record) => Number(record.characterId) === currentCharacterId);
+  const ratingRecords = characterRecords.filter(
+    (record) =>
+      record.matchType === "ranked" &&
+      Number.isFinite(Number(record.ownRating)) &&
+      ["MR", "LP"].includes(record.ownRatingType),
+  );
+  const fallbackRating = historyViewPlayer.mr ?? historyViewPlayer.lp ?? null;
+  const ratingType =
+    ratingRecords.at(-1)?.ownRatingType ??
+    (historyViewPlayer.mr != null ? "MR" : historyViewPlayer.lp != null ? "LP" : "MR");
+  for (const record of characterRecords) {
+    const matchType = record.matchType;
+    if (!stats[matchType]) continue;
+    stats[matchType].matchCount += 1;
+    if (record.result === "win") stats[matchType].wins += 1;
+    if (record.result === "loss") stats[matchType].losses += 1;
+    if (
+      matchType === "ranked" &&
+      record.ownRatingType === ratingType &&
+      Number.isFinite(Number(record.ownRating))
+    ) {
+      const rating = Number(record.ownRating);
+      stats.ranked.ratingHistory.push(rating);
+      stats.ranked.currentRating = rating;
+      stats.ranked.currentRatingType = record.ownRatingType;
+    }
+  }
+  const firstRating = Number.isFinite(Number(ratingRecords[0]?.ownRating))
+    ? Number(ratingRecords[0].ownRating)
+    : fallbackRating;
+  const currentRating = Number.isFinite(Number(ratingRecords.at(-1)?.ownRating))
+    ? Number(ratingRecords.at(-1).ownRating)
+    : fallbackRating;
+  stats.ranked.initialRating = firstRating;
+  stats.ranked.currentRating = currentRating;
+  stats.ranked.ratingDelta =
+    firstRating != null && currentRating != null && ratingType === (ratingRecords[0]?.ownRatingType ?? ratingType)
+      ? currentRating - firstRating
+      : 0;
+  if (!stats.ranked.ratingHistory.length && firstRating != null) {
+    stats.ranked.ratingHistory = [firstRating];
+  }
+  const wins = stats.ranked.wins;
+  const losses = stats.ranked.losses;
+  return {
+    ...createEmptyTrackerState(),
+    active: historyViewPollingActive,
+    readOnly: true,
+    viewingOther: true,
+    player: historyViewPlayer,
+    wins,
+    losses,
+    initialRating: firstRating,
+    currentRating,
+    ratingType,
+    characterId: historyViewPlayer.characterId ?? null,
+    ratingDelta: stats.ranked.ratingDelta,
+    lastMatch: characterRecords.at(-1) ?? null,
+    updatedAt: Date.now(),
+    lastNewMatchAt: historyViewLastNewMatchAt,
+    nextPollAt: historyViewNextPollAt,
+    effectivePollIntervalSeconds: historyViewEffectivePollIntervalSeconds,
+    consecutiveFailures: historyViewConsecutiveFailures,
+    stopReason: historyViewStopReason,
+    seenReplayIds: characterRecords.map((record) => record.replayId).filter(Boolean),
+    stats,
+    status: "historyViewing",
+  };
+}
+
+function medianValue(values) {
+  const sorted = values
+    .map((value) => Number(value))
+    .filter(Number.isFinite)
+    .sort((a, b) => a - b);
+  if (sorted.length < 2) return null;
+  const middle = Math.floor(sorted.length / 2);
+  const median = sorted.length % 2
+    ? sorted[middle]
+    : (sorted[middle - 1] + sorted[middle]) / 2;
+  // MR/LP are displayed as whole points. When an even-sized sample produces
+  // a fractional median, use ordinary half-up rounding instead of decimals.
+  return Math.round(median);
+}
+
+function publicMedianRating(sourceState) {
+  const hasStateRating =
+    sourceState?.currentRating != null || sourceState?.active || sourceState?.readOnly;
+  const ratingType = hasStateRating
+    ? sourceState?.ratingType === "LP"
+      ? "LP"
+      : "MR"
+    : authenticatedPlayer?.mr != null
+      ? "MR"
+      : authenticatedPlayer?.lp != null
+        ? "LP"
+        : authenticatedRatingType;
+  const profileId = normalizeHistoryProfileId(
+    sourceState?.player?.profileId ?? authenticatedProfileId,
+  );
+  const characterId = Number(
+    sourceState?.characterId ?? sourceState?.player?.characterId ?? authenticatedPlayer?.characterId,
+  ) || null;
+  let values = [];
+  if (profileId) {
+    const records = loadMatchHistoryStore(profileId).records
+      .filter(
+        (record) =>
+          record.matchType === "ranked" &&
+          record.ownRatingType === ratingType &&
+          (characterId == null || Number(record.characterId) === characterId),
+      )
+      .sort(
+        (a, b) => Number(a.playedAt ?? a.uploadedAt) - Number(b.playedAt ?? b.uploadedAt),
+      );
+    values = records
+      .map((record) => Number(record.ownRating))
+      .filter(Number.isFinite)
+      .slice(-MEDIAN_RATING_SAMPLE_LIMIT);
+  }
+  if (values.length < 2) {
+    const history = Array.isArray(sourceState?.stats?.ranked?.ratingHistory)
+      ? sourceState.stats.ranked.ratingHistory
+      : [];
+    const fallback = sourceState?.readOnly ? history : history.slice(1);
+    values = fallback
+      .map((value) => Number(value))
+      .filter(Number.isFinite)
+      .slice(-MEDIAN_RATING_SAMPLE_LIMIT);
+  }
+  return {
+    medianRating: medianValue(values),
+    medianRatingType: ratingType,
+    medianRatingSampleCount: values.length,
+  };
+}
+
 function publicTrackerState() {
+  const viewState = historyViewTrackerState();
+  const sourceState = viewState ?? trackerState;
   const {
     seenReplayIds: _privateIds,
     characterStates: _privateCharacterStates,
     ...publicState
-  } = trackerState;
+  } = sourceState;
   return {
     ...publicState,
+    ...publicMedianRating(sourceState),
+    overlaySuppressed,
     selectedMatchType: displaySettings.matchType,
     displaySettings: publicDisplaySettings(),
   };
 }
 
 function publicOverlayState() {
+  const viewState = historyViewTrackerState();
+  const sourceState = viewState ?? trackerState;
+  const median = publicMedianRating(sourceState);
   const liveOverlayBounds =
     displaySettings.mode === "overlay" &&
     statsWindow &&
@@ -581,9 +977,13 @@ function publicOverlayState() {
     (savedOverlaySizeUsable ? savedOverlayBounds : null) ??
     fallbackOverlaySize;
   return {
-    active: trackerState.active,
-    stats: trackerState.stats,
-    ratingType: trackerState.ratingType || authenticatedRatingType,
+    active: sourceState.active,
+    stats: sourceState.stats,
+    overlaySuppressed,
+    medianRating: median.medianRating,
+    medianRatingType: median.medianRatingType,
+    medianRatingSampleCount: median.medianRatingSampleCount,
+    ratingType: sourceState.ratingType || authenticatedRatingType,
     selectedMatchType: displaySettings.matchType,
     overlaySize: {
       width: Math.min(
@@ -930,6 +1330,7 @@ function updateDisplaySettings(
     if (trackerState.active && trackerState.player?.userCode) {
       void refreshTrackedPlayerForLocale();
     }
+    refreshTrayMenu();
   }
   if (typeof nextSettings.launchAtLogin === "boolean") {
     displaySettings.launchAtLogin = nextSettings.launchAtLogin;
@@ -1140,7 +1541,7 @@ function configureLaunchAtLogin() {
   if (app.isPackaged) {
     app.setLoginItemSettings({
       openAtLogin: displaySettings.launchAtLogin,
-      args: displaySettings.launchAtLogin ? [] : ["--background"],
+      args: displaySettings.launchAtLogin ? ["--background"] : [],
     });
   }
 }
@@ -1210,10 +1611,69 @@ function loadRendererFile(targetWindow, filePath) {
   return targetWindow.loadURL(pathToFileURL(filePath).toString());
 }
 
+function trayText(key) {
+  const japanese = serviceLocale() === "ja-jp";
+  const labels = {
+    show: japanese ? "管理画面を表示" : "Show management window",
+    stats: japanese ? "戦績ウィンドウを表示／非表示" : "Show / hide stats window",
+    exit: japanese ? "終了" : "Exit",
+  };
+  return labels[key] ?? key;
+}
+
+function refreshTrayMenu() {
+  if (!tray) return;
+  tray.setContextMenu(Menu.buildFromTemplate([
+    {
+      label: trayText("show"),
+      click: () => showMainWindowFromTray(),
+    },
+    {
+      label: trayText("stats"),
+      click: () => {
+        try {
+          toggleStatsWindow();
+        } catch {
+          showMainWindowFromTray();
+        }
+      },
+    },
+    { type: "separator" },
+    {
+      label: trayText("exit"),
+      click: () => {
+        isQuitting = true;
+        app.quit();
+      },
+    },
+  ]));
+}
+
+function showMainWindowFromTray() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+}
+
+function createTray() {
+  if (tray) return;
+  const iconPath = path.join(__dirname, "renderer", "assets", "header-graffiti-m.png");
+  let icon = nativeImage.createFromPath(iconPath);
+  if (!icon.isEmpty()) icon = icon.resize({ width: 16, height: 16 });
+  tray = new Tray(icon);
+  tray.setToolTip("Match Session Overlay");
+  tray.on("double-click", () => showMainWindowFromTray());
+  refreshTrayMenu();
+}
+
 function createMainWindow() {
   const workAreaHeight = screen.getPrimaryDisplay().workAreaSize.height;
-  const initialHeight = Math.min(800, Math.max(720, workAreaHeight - 40));
-  const minimumHeight = Math.min(760, initialHeight);
+  // Keep the five-row recent-match preview visible on first launch.  Respect
+  // shorter work areas, while using the extra vertical space available on
+  // ordinary desktop displays instead of clipping the bottom of the panel.
+  const initialHeight = Math.max(720, Math.min(900, workAreaHeight - 40));
+  const minimumHeight = Math.min(860, initialHeight);
   mainWindow = new BrowserWindow({
     width: 1040,
     height: initialHeight,
@@ -1243,14 +1703,24 @@ function createMainWindow() {
   mainWindow.once("ready-to-show", () => {
     if (!backgroundMode) mainWindow.show();
   });
+  mainWindow.on("minimize", () => {
+    suppressStatsPresentation();
+  });
+  mainWindow.on("close", (event) => {
+    if (!isQuitting && tray) {
+      event.preventDefault();
+      suppressStatsPresentation();
+      mainWindow.hide();
+    }
+  });
   mainWindow.on("closed", () => {
     mainWindow = null;
-    if (!isQuitting) app.quit();
   });
 }
 
 function openStatsWindow() {
   ensureUpdateAllowed();
+  overlaySuppressed = false;
   if (statsWindow && !statsWindow.isDestroyed()) {
     if (displaySettings.mode === "overlay") {
       statsWindow.showInactive();
@@ -1258,6 +1728,7 @@ function openStatsWindow() {
       statsWindow.show();
       statsWindow.focus();
     }
+    sendTrackerState();
     sendDisplaySettings();
     return publicDisplaySettings();
   }
@@ -1307,6 +1778,16 @@ function openStatsWindow() {
   });
   // BrowserWindowの表示はready-to-show後だが、操作結果は先に表示状態へ反映する。
   return publicDisplaySettings({ statsWindowVisible: true });
+}
+
+function suppressStatsPresentation() {
+  overlaySuppressed = true;
+  statsWindowDrag = null;
+  if (statsWindow && !statsWindow.isDestroyed()) {
+    statsWindow.close();
+  }
+  sendTrackerState();
+  sendDisplaySettings();
 }
 
 function toggleStatsWindow() {
@@ -1408,12 +1889,16 @@ async function clearPrivateDataWithConfirmation() {
   if (loginWindow && !loginWindow.isDestroyed()) loginWindow.close();
   await sourceSession.clearData();
   await sourceSession.clearAuthCache();
-  matchHistoryRecords = [];
-  matchHistoryLastFetchedAt = 0;
-  matchHistoryLastFetchedProfileId = null;
+  matchHistoryStores.clear();
+  historyProfileLookupCache.clear();
+  stopHistoryViewPolling();
+  historyViewPlayer = null;
   matchHistoryFetchInFlight = null;
   authenticatedProfileId = null;
+  authenticatedPlayer = null;
   try {
+    fs.rmSync(matchHistoryDirectory, { recursive: true, force: true });
+    fs.mkdirSync(matchHistoryDirectory, { recursive: true });
     fs.rmSync(matchHistoryPath, { force: true });
   } catch {
     // Continue clearing the authenticated browser session even if the local
@@ -1576,6 +2061,7 @@ async function checkAuthentication() {
   try {
     const result = await authenticationInFlight;
     const player = result?.player;
+    authenticatedPlayer = player ?? null;
     authenticatedProfileId = player?.profileId ?? player?.userCode ?? null;
     authenticatedRatingType =
       player?.mr != null ? "MR" : player?.lp != null ? "LP" : "MR";
@@ -1643,23 +2129,44 @@ async function refreshTrackedPlayerForLocale() {
   return localeRefreshInFlight;
 }
 
-async function fetchRankedReplays(profileId) {
+async function fetchRankedReplaysPage(profileId, page = 1) {
   const data = await fetchServiceJson(
     `profile/${encodeURIComponent(profileId)}/battlelog.json`,
-    { page: 1 },
+    { page },
   );
-  return (data?.pageProps?.replay_list ?? [])
+  const rawReplays = Array.isArray(data?.pageProps?.replay_list)
+    ? data.pageProps.replay_list
+    : [];
+  return {
+    rawCount: rawReplays.length,
+    replays: rawReplays
     .map((replay) => normalizeReplay(replay, profileId))
-    .filter(Boolean);
+    .filter(Boolean),
+  };
+}
+
+async function fetchRankedReplays(profileId) {
+  return (await fetchRankedReplaysPage(profileId, 1)).replays;
+}
+
+async function fetchMatchHistoryPages(profileId) {
+  const replays = [];
+  for (let page = 1; page <= MATCH_HISTORY_MAX_PAGES; page += 1) {
+    const result = await fetchRankedReplaysPage(profileId, page);
+    replays.push(...result.replays);
+    if (result.rawCount < MATCH_HISTORY_PAGE_SIZE) break;
+  }
+  return replays;
 }
 
 async function fetchLocalMatchHistory() {
   ensureUpdateAllowed();
   if (matchHistoryFetchInFlight) return matchHistoryFetchInFlight;
   const now = Date.now();
-  const profileId = trackerState.player?.profileId ?? authenticatedProfileId;
-  const retryAfterMs = matchHistoryLastFetchedProfileId === profileId && matchHistoryLastFetchedAt
-    ? matchHistoryLastFetchedAt + MATCH_HISTORY_FETCH_COOLDOWN_MS - now
+  const profileId = activeHistoryProfileId();
+  const store = loadMatchHistoryStore(profileId);
+  const retryAfterMs = store.lastFetchedAt
+    ? store.lastFetchedAt + MATCH_HISTORY_FETCH_COOLDOWN_MS - now
     : 0;
   if (retryAfterMs > 0) {
     const error = new Error("HISTORY_COOLDOWN");
@@ -1668,16 +2175,36 @@ async function fetchLocalMatchHistory() {
   }
 
   matchHistoryFetchInFlight = (async () => {
-    const player = trackerState.player ?? (await checkAuthentication()).player;
+    const player =
+      historyViewPlayer ?? trackerState.player ?? (await checkAuthentication()).player;
     if (!player?.profileId) throw new Error("SERVICE_SELF_NOT_FOUND");
-    // battlelog.json is the single 100-entry source already used by the live
-    // tracker. This feature adds no extra endpoint or per-match requests.
-    const replays = await fetchRankedReplays(player.profileId);
+    // Manual imports walk the paginated battle log. Live tracking continues to
+    // use one page per poll, so enabling history does not multiply polling
+    // traffic.
+    const existing = loadMatchHistoryStore(player.profileId);
+    const previousReplayIds = new Set(
+      existing.records.map((record) => record.replayId),
+    );
+    const replays = await fetchMatchHistoryPages(player.profileId);
+    const newReplays = replays.filter(
+      (replay) => replay.replayId && !previousReplayIds.has(replay.replayId),
+    );
     mergeMatchHistory(replays, player.profileId);
-    matchHistoryLastFetchedAt = Date.now();
-    matchHistoryLastFetchedProfileId = player.profileId;
-    persistMatchHistory();
+    const fetchedStore = loadMatchHistoryStore(player.profileId);
+    fetchedStore.lastFetchedAt = Date.now();
+    persistMatchHistoryStore(player.profileId, fetchedStore);
+    if (
+      historyViewPlayer &&
+      historyViewPlayer.profileId === player.profileId &&
+      newReplays.length
+    ) {
+      historyViewLastNewMatchAt = Date.now();
+    }
+    if (historyViewPlayer && historyViewPlayer.profileId === player.profileId) {
+      startHistoryViewPolling({ resetActivity: false });
+    }
     sendHistoryState();
+    sendTrackerState();
     return publicHistoryState(player.profileId);
   })();
   try {
@@ -1685,6 +2212,51 @@ async function fetchLocalMatchHistory() {
   } finally {
     matchHistoryFetchInFlight = null;
   }
+}
+
+async function selectHistoryProfile(userCode) {
+  ensureUpdateAllowed();
+  const normalizedCode = normalizeHistoryProfileId(userCode);
+  if (!normalizedCode) throw new Error("INVALID_USER_CODE");
+  const ownPlayer =
+    authenticatedPlayer ?? trackerState.player ?? (await checkAuthentication()).player;
+  if (!ownPlayer?.profileId) throw new Error("SERVICE_SELF_NOT_FOUND");
+  let nextHistoryViewPlayer = null;
+  if (normalizedCode === normalizeHistoryProfileId(ownPlayer.profileId)) {
+    nextHistoryViewPlayer = null;
+  } else {
+    const locale = serviceLocale();
+    const cacheKey = `${locale}:${normalizedCode}`;
+    const cached = historyProfileLookupCache.get(cacheKey);
+    if (cached && Date.now() - cached.fetchedAt < HISTORY_PROFILE_LOOKUP_COOLDOWN_MS) {
+      nextHistoryViewPlayer = cached.player;
+    } else {
+      const player = await searchPlayer(normalizedCode);
+      historyProfileLookupCache.set(cacheKey, {
+        fetchedAt: Date.now(),
+        player,
+      });
+      nextHistoryViewPlayer = player;
+    }
+  }
+  stopHistoryViewPolling();
+  historyViewPlayer = nextHistoryViewPlayer;
+  if (historyViewPlayer) startHistoryViewPolling();
+  sendHistoryState();
+  sendTrackerState();
+  return {
+    player: historyViewPlayer ?? ownPlayer,
+    history: publicHistoryState(),
+  };
+}
+
+async function clearHistoryProfileSelection() {
+  ensureUpdateAllowed();
+  stopHistoryViewPolling();
+  historyViewPlayer = null;
+  sendHistoryState();
+  sendTrackerState();
+  return publicHistoryState();
 }
 
 function syncCurrentPlayerRating(state, player, hasNewRankedReplay = false) {
@@ -2085,6 +2657,14 @@ function registerIpcHandlers() {
     resultHandler(() => fetchLocalMatchHistory()),
   );
   ipcMain.handle(
+    "history:select-profile",
+    resultHandler(({ userCode }) => selectHistoryProfile(userCode)),
+  );
+  ipcMain.handle(
+    "history:clear-profile",
+    resultHandler(() => clearHistoryProfileSelection()),
+  );
+  ipcMain.handle(
     "display:open",
     resultHandler(async () => openStatsWindow()),
   );
@@ -2238,6 +2818,7 @@ app.whenReady().then(() => {
       updateRequired = requiredNow;
       if (becameRequired) {
         stopTracking();
+        stopHistoryViewPolling("update");
         statsWindowDrag = null;
         if (loginWindow && !loginWindow.isDestroyed()) {
           loginWindow.close();
@@ -2257,6 +2838,7 @@ app.whenReady().then(() => {
   });
   registerIpcHandlers();
   startOverlayServer();
+  createTray();
   createMainWindow();
   configureLaunchAtLogin();
   configureGameDetection();
@@ -2278,12 +2860,13 @@ app.on("second-instance", () => {
 });
 
 app.on("window-all-closed", () => {
-  app.quit();
+  if (!tray) app.quit();
 });
 
 app.on("before-quit", () => {
   isQuitting = true;
   stopPolling();
+  stopHistoryViewPolling();
   clearInterval(gameMonitorTimer);
   clearTimeout(displaySettingsWriteTimer);
   try {
@@ -2296,4 +2879,8 @@ app.on("before-quit", () => {
     // 終了時の設定保存に失敗しても、アプリ終了は妨げない。
   }
   if (overlayServer) overlayServer.close();
+  if (tray) {
+    tray.destroy();
+    tray = null;
+  }
 });
