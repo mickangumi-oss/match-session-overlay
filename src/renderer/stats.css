@@ -1158,3 +1158,47 @@ body.remote-overlay {
     background: rgba(3, 8, 15, 0.72);
   }
 }
+
+/* At 0% opacity the HUD must be a true transparent overlay: keep live text
+   and canvas-rendered chart lines, but remove artwork, panels, borders and
+   active-state fills that would otherwise leave a visible background.  This
+   block intentionally comes last so it wins over orientation-specific art. */
+.stats-window.transparent,
+.stats-window.overlay.transparent:not(.locked) {
+  border-color: transparent !important;
+  background: transparent !important;
+  background-image: none !important;
+  box-shadow: none !important;
+  clip-path: none;
+}
+
+.stats-window.transparent::before,
+.stats-window.transparent::after,
+.stats-window.transparent .header-graffiti,
+.stats-window.transparent .drag-strip::after,
+.stats-window.transparent .stats-chart > header::before,
+.stats-window.transparent .stats-chart > header::after {
+  display: none !important;
+}
+
+.stats-window.transparent .match-tabs button,
+.stats-window.transparent .summary > .record-group,
+.stats-window.transparent .summary > .metric-group,
+.stats-window.transparent .stats-chart,
+.stats-window.transparent .stats-chart > header,
+.stats-window.transparent .chart-label {
+  border-color: transparent !important;
+  background: transparent !important;
+  background-image: none !important;
+  box-shadow: none !important;
+  clip-path: none;
+}
+
+.stats-window.transparent .match-tabs button.active {
+  border-bottom-color: transparent !important;
+  background: transparent !important;
+}
+
+.stats-window.transparent .divider {
+  background: transparent !important;
+}

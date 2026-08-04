@@ -219,11 +219,13 @@ function drawStatsChart(history, matchCount) {
   areaPath.lineTo(xFor(values.length - 1), plotBottom);
   areaPath.lineTo(xFor(0), plotBottom);
   areaPath.closePath();
-  const areaGradient = context.createLinearGradient(0, top, 0, plotBottom);
-  areaGradient.addColorStop(0, "rgba(67,216,255,.32)");
-  areaGradient.addColorStop(1, "rgba(67,216,255,.025)");
-  context.fillStyle = areaGradient;
-  context.fill(areaPath);
+  if (Number(displaySettings?.backgroundOpacity) !== 0) {
+    const areaGradient = context.createLinearGradient(0, top, 0, plotBottom);
+    areaGradient.addColorStop(0, "rgba(67,216,255,.32)");
+    areaGradient.addColorStop(1, "rgba(67,216,255,.025)");
+    context.fillStyle = areaGradient;
+    context.fill(areaPath);
+  }
   context.strokeStyle = "#43d8ff";
   context.lineWidth = 2.6;
   context.lineJoin = "round";
