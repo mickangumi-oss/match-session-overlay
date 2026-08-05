@@ -207,11 +207,16 @@ function drawStatsChart(
   const chartLeft = (rect.width - chartWidth) / 2;
   const chartTop = (rect.height - chartHeight) / 2;
   context.translate(chartLeft, chartTop);
-  const values = history.filter(Number.isFinite);
+  const values = history.filter(
+    (value) => Number.isFinite(value) && (ratingType !== "LP" || value > 0),
+  );
   if (!values.length) return;
-  const potential = Number.isFinite(Number(potentialRating))
-    ? Number(potentialRating)
-    : null;
+  const potentialValue = Number(potentialRating);
+  const potential =
+    Number.isFinite(potentialValue) &&
+    (ratingType !== "LP" || potentialValue > 0)
+      ? potentialValue
+      : null;
   const labelScale = Math.min(
     2,
     Math.max(0.75, Number(displaySettings?.graphLabelScale ?? 1.3)),
@@ -220,8 +225,9 @@ function drawStatsChart(
   const axisValues = potential == null ? values : [...values, potential];
   const dataMinimum = Math.min(...axisValues);
   const dataMaximum = Math.max(...axisValues);
-  // LP charts always start at zero and use a fixed 1,000-point grid. MR keeps
-  // the adaptive step so its smaller scale remains legible.
+  // LP uses a fixed 1,000-point grid. When all recorded LP values are
+  // positive, the lower bound follows the smallest value instead of adding a
+  // misleading zero baseline. MR keeps the adaptive step.
   const isLp = ratingType === "LP";
   const axisFloor = isLp ? 0 : dataMinimum;
   const dataSpread = Math.max(10, dataMaximum - axisFloor);
@@ -242,10 +248,13 @@ function drawStatsChart(
           ? 5
           : 10) * magnitude;
   let minimum = isLp
-    ? 0
+    ? Math.max(0, Math.floor(Math.max(0, dataMinimum) / step) * step)
     : Math.floor((dataMinimum - step * 0.5) / step) * step;
   let maximum = isLp
-    ? Math.max(step, Math.ceil(Math.max(0, dataMaximum) / step) * step)
+    ? Math.max(
+        minimum + step,
+        Math.ceil(Math.max(0, dataMaximum) / step) * step,
+      )
     : Math.ceil((dataMaximum + step * 0.5) / step) * step;
   if (minimum === maximum) maximum += step;
   const fontStyle = FONT_STYLES.has(displaySettings?.fontStyle)
@@ -276,12 +285,7 @@ function drawStatsChart(
   context.textBaseline = "middle";
   context.fillStyle = `${displaySettings?.textColor ?? "#f7f8ff"}99`;
   context.lineWidth = 1;
-  const tickPixelHeight =
-    (chartHeight - top - bottom) / Math.max(1, ticks.length - 1);
-  const minimumLabelGap = Math.max(13, labelFontSize * 1.35);
-  const labelEvery = isLp
-    ? Math.max(1, Math.ceil(minimumLabelGap / Math.max(1, tickPixelHeight)))
-    : 1;
+  const firstLpLabelIndex = Math.max(0, ticks.length - 4);
   ticks.forEach((tick, tickIndex) => {
     const y = yFor(tick);
     context.strokeStyle = "rgba(255,255,255,.12)";
@@ -290,9 +294,7 @@ function drawStatsChart(
     context.lineTo(chartWidth - right, y);
     context.stroke();
     if (
-      !isLp ||
-      tickIndex % labelEvery === 0 ||
-      tickIndex === ticks.length - 1
+      !isLp || tickIndex >= firstLpLabelIndex
     ) {
       context.fillStyle = `${displaySettings?.textColor ?? "#f7f8ff"}99`;
       context.fillText(Math.round(tick).toLocaleString("ja-JP"), left - 8, y);
