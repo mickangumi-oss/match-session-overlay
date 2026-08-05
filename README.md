@@ -1,10 +1,10 @@
 # Match Session Overlay
 
-公開版: v1.0.9
+公開版: v1.0.11
 
 ## ダウンロード
 
-[最新版をダウンロード（GitHub Releases）](https://github.com/mickangumi-oss/match-session-overlay/releases/latest)
+[v1.0.11をダウンロード（GitHub Releases）](https://github.com/mickangumi-oss/match-session-overlay/releases/download/v1.0.11/Match-Session-Overlay-1.0.11-Setup.exe)
 
 開いたページの「Assets」から、`Match-Session-Overlay-x.x.x-Setup.exe`をダウンロードして実行してください。最新版以外のファイルや、配布元を確認できないファイルは使用しないでください。
 
@@ -95,7 +95,7 @@ Windowsへのサインイン後にアプリを自動起動する場合は、「�
 - ログイン中のプレイヤーとは別のUSER CODEを指定して、そのプレイヤーの戦績や履歴を表示（読み取り専用）
 - 対戦一覧の相手名から、相手のUSER CODEを設定して履歴を表示
 - Windowsへのサインイン時の自動起動を任意で設定
-- 管理画面を最小化または閉じると、戦績ウィンドウとOBS用オーバーレイを非表示にし、アプリは通知領域に常駐
+- 管理画面を最小化または閉じても、戦績ウィンドウとOBS用オーバーレイの表示を維持（アプリを終了するとすべて終了）
 - 14言語に対応（日本語、英語、ドイツ語、スペイン語（スペイン／米国）、フランス語、イタリア語、韓国語、中国語（簡体／繁体）、ポルトガル語（ブラジル）、ポーランド語、ロシア語、アラビア語）
 - アプリからログインセッション、Cookie、キャッシュを削除
 - アンインストール時にアプリ専用データを削除

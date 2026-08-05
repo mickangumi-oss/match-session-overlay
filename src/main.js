@@ -1779,13 +1779,11 @@ function createMainWindow() {
   mainWindow.once("ready-to-show", () => {
     if (!backgroundMode) mainWindow.show();
   });
-  mainWindow.on("minimize", () => {
-    suppressStatsPresentation();
-  });
   mainWindow.on("close", (event) => {
     if (!isQuitting && tray) {
       event.preventDefault();
-      suppressStatsPresentation();
+      // Closing the management window only hides it to the tray.  Do not
+      // close an active overlay/window presentation as a side effect.
       mainWindow.hide();
     }
   });
@@ -2355,12 +2353,19 @@ function syncCurrentPlayerRating(state, player, hasNewRankedReplay = false) {
     previousCharacterId !== player.characterId;
   resetRatingSeries(state, ratingType, characterChanged);
   const ranked = state.stats.ranked;
+  const existingInitialRating = Number(ranked.initialRating);
+  const hasPlaceholderLpBaseline =
+    ratingType === "LP" &&
+    Number.isFinite(existingInitialRating) &&
+    existingInitialRating <= 0 &&
+    currentRating > 0 &&
+    ranked.ratingHistory.every((value) => Number(value) <= 0);
   state.player = player;
   state.characterId = player.characterId ?? state.characterId;
   state.currentRating = currentRating;
   state.ratingType = ratingType;
   ranked.currentRating = currentRating;
-  if (ranked.initialRating == null) {
+  if (ranked.initialRating == null || hasPlaceholderLpBaseline) {
     ranked.initialRating = currentRating;
   }
   state.initialRating = ranked.initialRating;
