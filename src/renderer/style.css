@@ -1363,6 +1363,18 @@ body.update-required .cockpit .hud-panel .update-row * {
   font-size: 10px;
 }
 
+.graph-count-cell select {
+  width: 100%;
+  height: 27px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 1px;
+  outline: none;
+  background: #11151e;
+  color: var(--text);
+  font-size: 10px;
+}
+
 .poll-cell small {
   overflow: hidden;
   color: var(--muted);
