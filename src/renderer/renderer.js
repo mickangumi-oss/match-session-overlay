@@ -1753,6 +1753,11 @@ elements.languageInput?.addEventListener("change", async () => {
       }
     }
     showNotice(t("languageChanged", "表示言語を変更しました"), "success");
+    // Existing history rows contain normalized mode keys, but their labels are
+    // rendered through the active locale. Repaint them immediately so a
+    // locale switch cannot leave a mixture of the previous and current
+    // language in the management screen.
+    renderHistoryState(historyState);
   } catch (error) {
     showNotice(error.message, "error");
   }
