@@ -1,6 +1,6 @@
 # Match Session Overlay
 
-公開版: v1.0.8
+公開版: v1.0.9
 
 ウィンドウ表示の詳細（横／縦モードとグラフの動作）:
 [`docs/window-layout.md`](docs/window-layout.md)
