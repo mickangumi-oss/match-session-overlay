@@ -77,6 +77,7 @@ const elements = Object.fromEntries(
     "fontScaleValue",
     "graphLabelScaleInput",
     "graphLabelScaleValue",
+    "graphMatchCountInput",
     "opacityInput",
     "opacityValue",
     "fontFamilyInput",
@@ -722,7 +723,13 @@ function renderNextUpdate() {
   elements.nextUpdateInfo.textContent = `${t("nextUpdate", "次回更新")} ${minutes}:${seconds}`;
 }
 
-function drawManagementChart(history, matchCount, ratingType = "MR") {
+function drawManagementChart(
+  history,
+  matchCount,
+  ratingType = "MR",
+  potentialRating = null,
+  matchStart = 0,
+) {
   const canvas = elements.managementRatingChart;
   const rect = canvas.getBoundingClientRect();
   if (!rect.width || !rect.height) return;
@@ -755,13 +762,17 @@ function drawManagementChart(history, matchCount, ratingType = "MR") {
   const height = chartHeight;
   const values = history.filter(Number.isFinite);
   if (!values.length) return;
+  const potential = Number.isFinite(Number(potentialRating))
+    ? Number(potentialRating)
+    : null;
   const labelScale = Math.min(
     2,
     Math.max(0.75, Number(displaySettings.graphLabelScale ?? 1.3)),
   );
   const labelFontSize = 9 * labelScale;
-  const dataMinimum = Math.min(...values);
-  const dataMaximum = Math.max(...values);
+  const axisValues = potential == null ? values : [...values, potential];
+  const dataMinimum = Math.min(...axisValues);
+  const dataMaximum = Math.max(...axisValues);
   const dataSpread = Math.max(10, dataMaximum - dataMinimum);
   const roughStep = dataSpread / 4;
   const magnitude = 10 ** Math.floor(Math.log10(roughStep));
@@ -837,6 +848,32 @@ function drawManagementChart(history, matchCount, ratingType = "MR") {
   context.lineTo(left, plotBottom);
   context.stroke();
 
+  if (potential != null) {
+    const potentialY = yFor(potential);
+    context.save();
+    context.strokeStyle = "#ff2e69";
+    context.lineWidth = 1.5;
+    context.shadowBlur = 5;
+    context.shadowColor = "rgba(255,46,105,.65)";
+    context.beginPath();
+    context.moveTo(left, potentialY);
+    context.lineTo(width - right, potentialY);
+    context.stroke();
+    context.shadowBlur = 0;
+    context.font = `${fontStyle}${Math.max(8, labelFontSize - 1)}px ${fontStackFor(
+      displaySettings.fontFamily,
+    )}`;
+    context.fillStyle = "#ff6f97";
+    context.textAlign = "right";
+    context.textBaseline = "bottom";
+    context.fillText(
+      `${t("potential", "POTENTIAL")} ${ratingType} ${Math.round(potential).toLocaleString()}`,
+      width - right,
+      Math.max(top + labelFontSize, potentialY - 3),
+    );
+    context.restore();
+  }
+
   const xLabelIndices = [...new Set([
     0,
     Math.round((values.length - 1) * 0.33),
@@ -850,11 +887,14 @@ function drawManagementChart(history, matchCount, ratingType = "MR") {
   )}`;
   context.fillStyle = `${displaySettings.textColor ?? "#f7f8ff"}cc`;
   const safeMatchCount = Math.max(0, Math.trunc(Number(matchCount) || 0));
+  const safeMatchStart = Math.max(0, Math.trunc(Number(matchStart) || 0));
   const lastIndex = Math.max(1, values.length - 1);
   const shownLabels = new Set();
   for (const index of xLabelIndices) {
     const x = xFor(index);
-    const label = String(Math.round((index / lastIndex) * safeMatchCount));
+    const label = String(
+      safeMatchStart + Math.round((index / lastIndex) * safeMatchCount),
+    );
     if (shownLabels.has(label)) continue;
     shownLabels.add(label);
     const labelWidth = context.measureText(label).width;
@@ -905,6 +945,51 @@ function drawManagementChart(history, matchCount, ratingType = "MR") {
   context.stroke();
 }
 
+function graphSeriesForState(state, matchType = "ranked") {
+  const configuredLimit = [0, 20, 50, 100].includes(
+    Number(displaySettings.graphMatchCount),
+  )
+    ? Number(displaySettings.graphMatchCount)
+    : 20;
+  const supplied = state?.graphData?.[matchType];
+  const selected = state?.stats?.[matchType] ?? {};
+  const sourceHistory = Array.isArray(supplied?.values)
+    ? supplied.values.filter(Number.isFinite)
+    : historyForDisplay(
+        selected,
+        Number.isFinite(Number(selected.matchCount))
+          ? Math.max(0, Math.trunc(Number(selected.matchCount)))
+          : Number(selected.wins ?? 0) + Number(selected.losses ?? 0),
+      );
+  const sourceMatchCount = Number.isFinite(Number(supplied?.matchCount))
+    ? Math.max(0, Math.trunc(Number(supplied.matchCount)))
+    : Number.isFinite(Number(selected.matchCount))
+      ? Math.max(0, Math.trunc(Number(selected.matchCount)))
+      : Math.max(0, sourceHistory.length - 1);
+  const availableMatches = Math.min(
+    sourceMatchCount,
+    Math.max(0, sourceHistory.length - 1),
+  );
+  const matchCount = configuredLimit === 0
+    ? availableMatches
+    : Math.min(configuredLimit, availableMatches);
+  if (!matchCount) {
+    return {
+      history: sourceHistory,
+      matchCount: 0,
+      matchStart: 0,
+      ratingType: supplied?.ratingType || resolveRatingType(state),
+    };
+  }
+  const start = Math.max(0, sourceHistory.length - matchCount - 1);
+  return {
+    history: sourceHistory.slice(start, start + matchCount + 1),
+    matchCount,
+    matchStart: Math.max(0, sourceMatchCount - matchCount),
+    ratingType: supplied?.ratingType || resolveRatingType(state),
+  };
+}
+
 function resolveRatingType(state = trackerState) {
   if (
     state?.currentRating != null &&
@@ -942,15 +1027,10 @@ function renderManagementChart(state) {
   elements.managementChartPanel.classList.remove("hidden");
 
   const matchType = displaySettings.matchType ?? "ranked";
-  const ratingType = resolveRatingType(state);
-  const selected = state.stats?.[matchType] ?? {};
-  const total = Number.isFinite(Number(selected.matchCount))
-    ? Math.max(0, Math.trunc(Number(selected.matchCount)))
-    : Number(selected.wins ?? 0) + Number(selected.losses ?? 0);
-  const history = historyForDisplay(selected, total);
-  // matchCount is maintained per character and per mode by the main process;
-  // never substitute the all-character session total here.
-  const graphMatchCount = total;
+  const series = graphSeriesForState(state, matchType);
+  const ratingType = series.ratingType || resolveRatingType(state);
+  const history = series.history;
+  const graphMatchCount = series.matchCount;
   const hasGraphData =
     matchType === "ranked" && graphMatchCount > 0 && history.length >= 2;
   elements.managementRatingChart.classList.toggle("hidden", !hasGraphData);
@@ -966,7 +1046,15 @@ function renderManagementChart(state) {
       : t("rankedOnly", "ランクのみ");
   if (hasGraphData) {
     requestAnimationFrame(() =>
-      drawManagementChart(history, graphMatchCount, ratingType),
+      drawManagementChart(
+        history,
+        graphMatchCount,
+        ratingType,
+        state?.medianRatingType === ratingType && state?.medianRatingSampleCount >= 2
+          ? state.medianRating
+          : null,
+        series.matchStart,
+      ),
     );
   }
 }
@@ -1120,6 +1208,11 @@ function renderDisplaySettings(settings) {
   );
   elements.graphLabelScaleValue.textContent =
     `${elements.graphLabelScaleInput.value}%`;
+  elements.graphMatchCountInput.value = String(
+    [0, 20, 50, 100].includes(Number(settings.graphMatchCount))
+      ? settings.graphMatchCount
+      : 20,
+  );
   elements.opacityInput.value = String(
     Math.round(settings.backgroundOpacity * 100),
   );
@@ -1453,6 +1546,16 @@ elements.graphLabelScaleInput.addEventListener("input", async () => {
     await unwrap(
       api.updateDisplaySettings({
         graphLabelScale: Number(elements.graphLabelScaleInput.value) / 100,
+      }),
+    ),
+  );
+});
+
+elements.graphMatchCountInput.addEventListener("change", async () => {
+  renderDisplaySettings(
+    await unwrap(
+      api.updateDisplaySettings({
+        graphMatchCount: Number(elements.graphMatchCountInput.value),
       }),
     ),
   );
