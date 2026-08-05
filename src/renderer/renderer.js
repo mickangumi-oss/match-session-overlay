@@ -277,9 +277,11 @@ function drawHistoryResultChart(records) {
 
 function drawHistoryRatingChart(records, ratingType, canvas, emptyElement) {
   if (!canvas) return;
+  const isLp = ratingType === "LP";
   const orderedRecords = [...records]
     .filter((record) => String(record.ownRatingType || "").toUpperCase() === ratingType)
     .filter((record) => Number.isFinite(Number(record.ownRating)))
+    .filter((record) => !isLp || Number(record.ownRating) > 0)
     .sort((a, b) => Number(a.playedAt ?? a.uploadedAt) - Number(b.playedAt ?? b.uploadedAt));
   const points = orderedRecords.map((record, index) => ({
     match: index + 1,
@@ -304,7 +306,6 @@ function drawHistoryRatingChart(records, ratingType, canvas, emptyElement) {
   const values = points.map((point) => point.value);
   const rawMin = Math.min(...values);
   const rawMax = Math.max(...values);
-  const isLp = ratingType === "LP";
   const range = Math.max(1, rawMax - rawMin);
   const axisStep = isLp ? 1000 : null;
   const axisMin = isLp
@@ -332,18 +333,13 @@ function drawHistoryRatingChart(records, ratingType, canvas, emptyElement) {
         axisMin + (axisMax - axisMin) / 2,
         axisMin,
       ];
-  const tickPixelHeight =
-    plotHeight / Math.max(1, tickValues.length - 1);
-  const labelEvery = isLp
-    ? Math.max(1, Math.ceil(13 / Math.max(1, tickPixelHeight)))
-    : 1;
   tickValues.forEach((value, index) => {
     const y = padding.top + (plotHeight * index) / Math.max(1, tickValues.length - 1);
     context.beginPath();
     context.moveTo(padding.left, y);
     context.lineTo(width - padding.right, y);
     context.stroke();
-    if (!isLp || index % labelEvery === 0 || index === tickValues.length - 1) {
+    if (!isLp || index < 4) {
       context.fillText(formatValue(value), padding.left - 5, y);
     }
   });
