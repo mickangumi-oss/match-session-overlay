@@ -304,9 +304,15 @@ function drawHistoryRatingChart(records, ratingType, canvas, emptyElement) {
   const values = points.map((point) => point.value);
   const rawMin = Math.min(...values);
   const rawMax = Math.max(...values);
+  const isLp = ratingType === "LP";
   const range = Math.max(1, rawMax - rawMin);
-  const axisMin = Math.max(0, rawMin - Math.ceil(range * 0.12));
-  const axisMax = rawMax + Math.ceil(range * 0.12) || axisMin + 1;
+  const axisStep = isLp ? 1000 : null;
+  const axisMin = isLp
+    ? Math.max(0, Math.floor(rawMin / axisStep) * axisStep)
+    : Math.max(0, rawMin - Math.ceil(range * 0.12));
+  const axisMax = isLp
+    ? Math.max(axisMin + axisStep, Math.ceil(rawMax / axisStep) * axisStep)
+    : rawMax + Math.ceil(range * 0.12) || axisMin + 1;
   const color = ratingType === "MR" ? "#ff2e69" : "#43d8ff";
   const formatValue = (value) => Math.round(value).toLocaleString();
 
@@ -316,15 +322,31 @@ function drawHistoryRatingChart(records, ratingType, canvas, emptyElement) {
   context.fillStyle = "rgba(247,248,255,.62)";
   context.strokeStyle = "rgba(120, 190, 220, .16)";
   context.lineWidth = 1;
-  for (let step = 0; step <= 2; step += 1) {
-    const value = axisMin + ((axisMax - axisMin) * (2 - step)) / 2;
-    const y = padding.top + (plotHeight * step) / 2;
+  const tickValues = isLp
+    ? Array.from(
+        { length: Math.floor((axisMax - axisMin) / axisStep) + 1 },
+        (_, index) => axisMax - index * axisStep,
+      )
+    : [
+        axisMax,
+        axisMin + (axisMax - axisMin) / 2,
+        axisMin,
+      ];
+  const tickPixelHeight =
+    plotHeight / Math.max(1, tickValues.length - 1);
+  const labelEvery = isLp
+    ? Math.max(1, Math.ceil(13 / Math.max(1, tickPixelHeight)))
+    : 1;
+  tickValues.forEach((value, index) => {
+    const y = padding.top + (plotHeight * index) / Math.max(1, tickValues.length - 1);
     context.beginPath();
     context.moveTo(padding.left, y);
     context.lineTo(width - padding.right, y);
     context.stroke();
-    context.fillText(formatValue(value), padding.left - 5, y);
-  }
+    if (!isLp || index % labelEvery === 0 || index === tickValues.length - 1) {
+      context.fillText(formatValue(value), padding.left - 5, y);
+    }
+  });
 
   const xFor = (index) => padding.left + (points.length === 1 ? plotWidth / 2 : (index / (points.length - 1)) * plotWidth);
   const yFor = (value) => padding.top + plotHeight - ((value - axisMin) / (axisMax - axisMin)) * plotHeight;
