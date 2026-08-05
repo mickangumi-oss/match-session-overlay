@@ -104,6 +104,7 @@ const WINDOW_ORIENTATIONS = new Set(["horizontal", "vertical"]);
 const FONT_KEYS = new Set(["street", "condensed", "system", "japanese", "mono"]);
 const FONT_FAMILY_PATTERN = /^[\p{L}\p{M}\p{N}\p{Zs}._&'()\-+#@]{1,100}$/u;
 const POLL_INTERVAL_OPTIONS = new Set([120, 180, 300]);
+const GRAPH_MATCH_COUNT_OPTIONS = new Set([0, 20, 50, 100]);
 const SERVICE_FETCH_TIMEOUT_MS = 30_000;
 const MAX_SERVICE_RETRY_DELAY_MS = 24 * 60 * 60 * 1000;
 // Keep this allow-list in the main process so a malformed settings file
@@ -292,6 +293,7 @@ let displaySettings = {
   matchType: "ranked",
   fontScale: 1,
   graphLabelScale: 1.3,
+  graphMatchCount: 20,
   backgroundOpacity: 0.94,
   graphVisible: true,
   fontFamily: "street",
@@ -336,6 +338,9 @@ try {
       2,
       Math.max(0.75, Number(savedSettings.graphLabelScale)),
     );
+  }
+  if (GRAPH_MATCH_COUNT_OPTIONS.has(Number(savedSettings.graphMatchCount))) {
+    displaySettings.graphMatchCount = Number(savedSettings.graphMatchCount);
   }
   if (Number.isFinite(Number(savedSettings.backgroundOpacity))) {
     displaySettings.backgroundOpacity = Math.min(
@@ -924,6 +929,70 @@ function publicMedianRating(sourceState) {
   };
 }
 
+function publicGraphData(sourceState) {
+  const profileId = normalizeHistoryProfileId(
+    sourceState?.player?.profileId ?? authenticatedProfileId,
+  );
+  const characterId = Number(
+    sourceState?.characterId ?? sourceState?.player?.characterId,
+  ) || null;
+  const ratingType = sourceState?.ratingType === "LP" ? "LP" : "MR";
+  const localRecords = profileId
+    ? loadMatchHistoryStore(profileId).records
+        .filter(
+          (record) =>
+            record.matchType === "ranked" &&
+            record.ownRatingType === ratingType &&
+            Number.isFinite(Number(record.ownRating)) &&
+            (characterId == null || Number(record.characterId) === characterId),
+        )
+        .sort(
+          (a, b) => Number(a.playedAt ?? a.uploadedAt) - Number(b.playedAt ?? b.uploadedAt),
+        )
+    : [];
+  if (localRecords.length) {
+    const values = localRecords.map((record) => Number(record.ownRating));
+    // Keep the same visual convention as the live session graph: the first
+    // point is the baseline and each following point represents one match.
+    return {
+      ranked: {
+        values: [values[0], ...values],
+        matchCount: values.length,
+        ratingType,
+        source: "local",
+      },
+    };
+  }
+
+  const selected = sourceState?.stats?.ranked ?? {};
+  let values = Array.isArray(selected.ratingHistory)
+    ? selected.ratingHistory.filter(Number.isFinite)
+    : [];
+  const matchCount = Number.isFinite(Number(selected.matchCount))
+    ? Math.max(0, Math.trunc(Number(selected.matchCount)))
+    : Math.max(0, values.length - 1);
+  if (values.length < 2 && matchCount > 0) {
+    const initial = Number(selected.initialRating);
+    const current = Number(selected.currentRating);
+    if (
+      selected.initialRating != null &&
+      selected.currentRating != null &&
+      Number.isFinite(initial) &&
+      Number.isFinite(current)
+    ) {
+      values = [initial, current];
+    }
+  }
+  return {
+    ranked: {
+      values,
+      matchCount,
+      ratingType,
+      source: "session",
+    },
+  };
+}
+
 function publicTrackerState() {
   const viewState = historyViewTrackerState();
   const sourceState = viewState ?? trackerState;
@@ -935,6 +1004,7 @@ function publicTrackerState() {
   return {
     ...publicState,
     ...publicMedianRating(sourceState),
+    graphData: publicGraphData(sourceState),
     overlaySuppressed,
     selectedMatchType: displaySettings.matchType,
     displaySettings: publicDisplaySettings(),
@@ -945,6 +1015,7 @@ function publicOverlayState() {
   const viewState = historyViewTrackerState();
   const sourceState = viewState ?? trackerState;
   const median = publicMedianRating(sourceState);
+  const graphData = publicGraphData(sourceState);
   const liveOverlayBounds =
     displaySettings.mode === "overlay" &&
     statsWindow &&
@@ -983,6 +1054,7 @@ function publicOverlayState() {
     medianRating: median.medianRating,
     medianRatingType: median.medianRatingType,
     medianRatingSampleCount: median.medianRatingSampleCount,
+    graphData,
     ratingType: sourceState.ratingType || authenticatedRatingType,
     selectedMatchType: displaySettings.matchType,
     overlaySize: {
@@ -1000,6 +1072,7 @@ function publicOverlayState() {
       windowOrientation: displaySettings.windowOrientation,
       fontScale: displaySettings.fontScale,
       graphLabelScale: displaySettings.graphLabelScale,
+      graphMatchCount: displaySettings.graphMatchCount,
       backgroundOpacity: displaySettings.backgroundOpacity,
       graphVisible: displaySettings.graphVisible,
       fontFamily: displaySettings.fontFamily,
@@ -1297,6 +1370,9 @@ function updateDisplaySettings(
       2,
       Math.max(0.75, Number(nextSettings.graphLabelScale)),
     );
+  }
+  if (GRAPH_MATCH_COUNT_OPTIONS.has(Number(nextSettings.graphMatchCount))) {
+    displaySettings.graphMatchCount = Number(nextSettings.graphMatchCount);
   }
   if (Number.isFinite(Number(nextSettings.backgroundOpacity))) {
     displaySettings.backgroundOpacity = Math.min(
