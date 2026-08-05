@@ -1,7 +1,9 @@
 # Match Session Overlay
 
-公開版: v1.0.15
+ストリートファイター6の対戦データを取得して表示するツールです。
+勝敗、勝率、現在のMR、MR増減、潜在MR（MRの中央値）等のデータをウィンドウ、もしくはオーバーレイ表示できます。
 
+公開版: v1.0.15
 ## ダウンロード
 
 [v1.0.15をダウンロード（GitHub Releases）](https://github.com/mickangumi-oss/match-session-overlay/releases/download/v1.0.15/Match-Session-Overlay-1.0.15-Setup.exe)
