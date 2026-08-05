@@ -1276,7 +1276,16 @@ function renderDisplaySettings(settings) {
   elements.toggleStatsButton.textContent = settings.statsWindowVisible
     ? t("hideStats", "戦績ウィンドウを閉じる")
     : t("showStats", "戦績ウィンドウを表示");
-  if (trackerState) renderTracker(trackerState);
+  if (trackerState) {
+    renderTracker(trackerState);
+  } else {
+    // A settings change can arrive before the initial tracker-state IPC
+    // message. Fetch the current state so graph options take effect without
+    // waiting for the next polling cycle.
+    void unwrap(api.getState())
+      .then((state) => renderTracker(state))
+      .catch(() => {});
+  }
 }
 
 function renderUpdateMessage(state) {
@@ -1557,13 +1566,15 @@ elements.graphLabelScaleInput.addEventListener("input", async () => {
 });
 
 elements.graphMatchCountInput.addEventListener("change", async () => {
-  renderDisplaySettings(
-    await unwrap(
-      api.updateDisplaySettings({
-        graphMatchCount: Number(elements.graphMatchCountInput.value),
-      }),
-    ),
+  const settings = await unwrap(
+    api.updateDisplaySettings({
+      graphMatchCount: Number(elements.graphMatchCountInput.value),
+    }),
   );
+  renderDisplaySettings(settings);
+  // Refresh the current state immediately so the newly selected window is
+  // visible without waiting for the next scheduled service poll.
+  renderTracker(await unwrap(api.getState()));
 });
 
 elements.opacityInput.addEventListener("input", async () => {

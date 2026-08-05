@@ -569,8 +569,16 @@ function renderSettings(settings) {
   for (const tab of elements.matchTabs) {
     tab.classList.toggle("active", tab.dataset.matchType === settings.matchType);
   }
-  if (trackerState) renderTracker(trackerState);
-  else fitStatsValues();
+  if (trackerState) {
+    renderTracker(trackerState);
+  } else {
+    // Apply graph settings immediately even when the first tracker-state
+    // message has not arrived yet; do not wait for the next poll.
+    void api.getState()
+      .then(unwrap)
+      .then((state) => renderTracker(state))
+      .catch(() => fitStatsValues());
+  }
 }
 
 elements.hideButton.addEventListener("click", () => api.hideStatsWindow());
