@@ -65,6 +65,39 @@ function resetRatingSeries(state, nextRatingType, force = false) {
   return true;
 }
 
+function repairRatingBaseline(state) {
+  const ranked = state?.stats?.ranked;
+  if (!ranked) return state;
+  const ratingType =
+    state.ratingType === "LP" || ranked.currentRatingType === "LP"
+      ? "LP"
+      : "MR";
+  if (ratingType !== "LP") return state;
+
+  const currentRating = Number(ranked.currentRating ?? state.currentRating);
+  const initialRating = Number(ranked.initialRating);
+  if (
+    !Number.isFinite(currentRating) ||
+    currentRating <= 0 ||
+    (Number.isFinite(initialRating) && initialRating > 0)
+  ) {
+    return state;
+  }
+
+  const firstPositiveHistoryRating = (ranked.ratingHistory ?? []).find(
+    (value) => Number(value) > 0,
+  );
+  const baseline = firstPositiveHistoryRating ?? currentRating;
+  ranked.initialRating = baseline;
+  ranked.currentRating = currentRating;
+  ranked.ratingDelta = currentRating - baseline;
+  state.initialRating = baseline;
+  state.currentRating = currentRating;
+  state.ratingDelta = ranked.ratingDelta;
+  state.ratingType = "LP";
+  return state;
+}
+
 function snapshotCurrentCharacter(state) {
   if (state.characterId == null) return;
   state.characterStates ??= {};
@@ -348,6 +381,7 @@ module.exports = {
   createEmptyMatchStats,
   normalizeFighter,
   normalizeReplay,
+  repairRatingBaseline,
   parseBuildId,
   resetRatingSeries,
   snapshotCurrentCharacter,

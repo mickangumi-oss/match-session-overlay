@@ -24,6 +24,7 @@ const {
   createEmptyMatchStats,
   normalizeFighter,
   normalizeReplay,
+  repairRatingBaseline,
   parseBuildId,
   resetRatingSeries,
   snapshotCurrentCharacter,
@@ -996,6 +997,7 @@ function publicGraphData(sourceState) {
 function publicTrackerState() {
   const viewState = historyViewTrackerState();
   const sourceState = viewState ?? trackerState;
+  repairRatingBaseline(sourceState);
   const {
     seenReplayIds: _privateIds,
     characterStates: _privateCharacterStates,
@@ -1014,6 +1016,7 @@ function publicTrackerState() {
 function publicOverlayState() {
   const viewState = historyViewTrackerState();
   const sourceState = viewState ?? trackerState;
+  repairRatingBaseline(sourceState);
   const median = publicMedianRating(sourceState);
   const graphData = publicGraphData(sourceState);
   const liveOverlayBounds =
