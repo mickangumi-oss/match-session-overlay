@@ -1,14 +1,8 @@
-# Window layout
+# ウィンドウレイアウト
 
-`WINDOW MODE` supports two layouts:
+`WINDOW MODE`では、横向きと縦向きの2種類から選択できます。
 
-- `Horizontal` is the compact three-card layout. It intentionally hides the
-  MR/LP graph so it can sit beside the game without consuming vertical space.
-- `Vertical` stacks the cards and shows the MR/LP graph when ranked match data
-  contains at least two points. With zero matches, the graph area shows a
-  waiting message instead of a flat line.
+- `横`は、3つのカードを横に並べるコンパクトなレイアウトです。ゲーム画面の横に置いたときに縦のスペースを使わないよう、MR/LPグラフは表示しません。
+- `縦`は、カードを縦に並べるレイアウトです。ランクマッチのデータが2点以上ある場合はMR/LPグラフを表示します。試合数が0の場合は、平らな線ではなく待機メッセージを表示します。
 
-The orientation is saved independently for each layout. Switching back to a
-previous orientation restores its last size and position. The OBS browser
-source always uses the compact overlay layout and therefore does not show the
-management graph.
+横向き・縦向きの設定は、通常ウィンドウとオーバーレイごとに保存されます。以前の向きに戻すと、その向きで最後に使ったサイズと位置が復元されます。OBSのブラウザソースは常にコンパクトなオーバーレイレイアウトを使うため、管理画面のグラフは表示しません。
