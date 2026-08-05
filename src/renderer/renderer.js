@@ -795,27 +795,29 @@ function drawManagementChart(
   const axisValues = potential == null ? values : [...values, potential];
   const dataMinimum = Math.min(...axisValues);
   const dataMaximum = Math.max(...axisValues);
-  // LP charts always start at zero.  Calculate the tick size from that full
-  // axis range; using only the narrow observed LP range would produce tiny
-  // steps (for example 500) and then draw dozens of labels between 0 and
-  // 20,000+, causing the labels to overlap on the graph.
-  const axisFloor = ratingType === "LP" ? 0 : dataMinimum;
+  // LP uses a fixed 1,000-point grid. MR keeps the adaptive step so its
+  // smaller scale remains legible.
+  const isLp = ratingType === "LP";
+  const axisFloor = isLp ? 0 : dataMinimum;
   const dataSpread = Math.max(10, dataMaximum - axisFloor);
   const roughStep = dataSpread / 4;
   const magnitude = 10 ** Math.floor(Math.log10(roughStep));
   const normalizedStep = roughStep / magnitude;
-  const step =
-    (normalizedStep <= 1
+  const step = isLp
+    ? 1000
+    : (normalizedStep <= 1
       ? 1
       : normalizedStep <= 2
         ? 2
         : normalizedStep <= 5
           ? 5
           : 10) * magnitude;
-  let minimum = ratingType === "LP"
+  let minimum = isLp
     ? 0
     : Math.floor((dataMinimum - step * 0.5) / step) * step;
-  let maximum = Math.ceil((dataMaximum + step * 0.5) / step) * step;
+  let maximum = isLp
+    ? Math.max(step, Math.ceil(Math.max(0, dataMaximum) / step) * step)
+    : Math.ceil((dataMaximum + step * 0.5) / step) * step;
   if (minimum === maximum) maximum += step;
 
   const fontStyle = FONT_STYLE_VALUES.has(displaySettings.fontStyle)
@@ -824,13 +826,15 @@ function drawManagementChart(
   context.font = `${fontStyle}${labelFontSize}px ${fontStackFor(
     displaySettings.fontFamily,
   )}`;
-  const labels = [];
+  const ticks = [];
   for (let tick = minimum; tick <= maximum + step * 0.01; tick += step) {
-    labels.push(Math.round(tick).toLocaleString("ja-JP"));
+    ticks.push(tick);
   }
   const widestLabel = Math.max(
     0,
-    ...labels.map((label) => context.measureText(label).width),
+    ...ticks.map((tick) =>
+      context.measureText(Math.round(tick).toLocaleString("ja-JP")).width,
+    ),
   );
   const left = Math.max(43, Math.ceil(widestLabel + 10));
   const right = 8;
@@ -846,15 +850,28 @@ function drawManagementChart(
   context.textBaseline = "middle";
   context.fillStyle = `${displaySettings.textColor ?? "#f7f8ff"}99`;
   context.lineWidth = 1;
-  for (let tick = minimum; tick <= maximum + step * 0.01; tick += step) {
+  const tickPixelHeight =
+    (height - top - bottom) / Math.max(1, ticks.length - 1);
+  const minimumLabelGap = Math.max(13, labelFontSize * 1.35);
+  const labelEvery = isLp
+    ? Math.max(1, Math.ceil(minimumLabelGap / Math.max(1, tickPixelHeight)))
+    : 1;
+  ticks.forEach((tick, tickIndex) => {
     const y = yFor(tick);
-    context.fillText(Math.round(tick).toLocaleString("ja-JP"), left - 7, y);
     context.strokeStyle = "rgba(255,255,255,.1)";
     context.beginPath();
     context.moveTo(left, y);
     context.lineTo(width - right, y);
     context.stroke();
-  }
+    if (
+      !isLp ||
+      tickIndex % labelEvery === 0 ||
+      tickIndex === ticks.length - 1
+    ) {
+      context.fillStyle = `${displaySettings.textColor ?? "#f7f8ff"}99`;
+      context.fillText(Math.round(tick).toLocaleString("ja-JP"), left - 7, y);
+    }
+  });
   values.forEach((value, index) => {
     const x = xFor(index);
     context.strokeStyle = "rgba(255,255,255,.05)";
@@ -979,8 +996,9 @@ function graphSeriesForState(state, matchType = "ranked") {
     ? Number(displaySettings.graphMatchCount)
     : 20;
   const supplied = state?.graphData?.[matchType];
+  const ratingType = supplied?.ratingType || resolveRatingType(state);
   const selected = state?.stats?.[matchType] ?? {};
-  const sourceHistory = Array.isArray(supplied?.values)
+  const rawHistory = Array.isArray(supplied?.values)
     ? supplied.values.filter(Number.isFinite)
     : historyForDisplay(
         selected,
@@ -988,11 +1006,17 @@ function graphSeriesForState(state, matchType = "ranked") {
           ? Math.max(0, Math.trunc(Number(selected.matchCount)))
           : Number(selected.wins ?? 0) + Number(selected.losses ?? 0),
       );
-  const sourceMatchCount = Number.isFinite(Number(supplied?.matchCount))
+  const sourceHistory = ratingType === "LP"
+    ? rawHistory.filter((value) => value > 0)
+    : rawHistory;
+  const rawMatchCount = Number.isFinite(Number(supplied?.matchCount))
     ? Math.max(0, Math.trunc(Number(supplied.matchCount)))
     : Number.isFinite(Number(selected.matchCount))
       ? Math.max(0, Math.trunc(Number(selected.matchCount)))
       : Math.max(0, sourceHistory.length - 1);
+  const sourceMatchCount = ratingType === "LP"
+    ? Math.min(rawMatchCount, Math.max(0, sourceHistory.length - 1))
+    : rawMatchCount;
   const availableMatches = Math.min(
     sourceMatchCount,
     Math.max(0, sourceHistory.length - 1),
@@ -1005,7 +1029,7 @@ function graphSeriesForState(state, matchType = "ranked") {
       history: sourceHistory,
       matchCount: 0,
       matchStart: 0,
-      ratingType: supplied?.ratingType || resolveRatingType(state),
+      ratingType,
     };
   }
   const start = Math.max(0, sourceHistory.length - matchCount - 1);
@@ -1013,7 +1037,7 @@ function graphSeriesForState(state, matchType = "ranked") {
     history: sourceHistory.slice(start, start + matchCount + 1),
     matchCount,
     matchStart: Math.max(0, sourceMatchCount - matchCount),
-    ratingType: supplied?.ratingType || resolveRatingType(state),
+    ratingType,
   };
 }
 
