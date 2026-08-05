@@ -431,19 +431,20 @@ function renderStatsChart(state) {
     : 20;
   const selected = state.stats?.[matchType] ?? {};
   const supplied = state.graphData?.[matchType];
+  const ratingType = supplied?.ratingType || (state.ratingType === "LP" ? "LP" : "MR");
   const rawHistory = Array.isArray(supplied?.values)
     ? supplied.values.filter(Number.isFinite)
     : Array.isArray(selected.ratingHistory)
       ? selected.ratingHistory.filter(Number.isFinite)
       : [];
+  const initial = Number(selected.initialRating);
+  const current = Number(selected.currentRating);
   const total = Number.isFinite(Number(supplied?.matchCount))
     ? Math.max(0, Math.trunc(Number(supplied.matchCount)))
     : Number.isFinite(Number(selected.matchCount))
       ? Math.max(0, Math.trunc(Number(selected.matchCount)))
       : Math.max(0, rawHistory.length - 1);
-  const initial = Number(selected.initialRating);
-  const current = Number(selected.currentRating);
-  const history =
+  const historyWithPlaceholders =
     rawHistory.length >= 2 || total <= 0
       ? rawHistory
       : selected.initialRating != null &&
@@ -452,8 +453,15 @@ function renderStatsChart(state) {
           Number.isFinite(current)
         ? [initial, current]
         : rawHistory;
+  // LP=0 is a placeholder while the profile/rank data is being resolved. It
+  // must not become a plotted point or consume one of the graph's match slots.
+  const history = ratingType === "LP"
+    ? historyWithPlaceholders.filter((value) => value > 0)
+    : historyWithPlaceholders;
   const historyMatchCapacity = Math.max(0, history.length - 1);
-  const effectiveTotal = Math.max(total, historyMatchCapacity);
+  const effectiveTotal = ratingType === "LP"
+    ? Math.min(total, historyMatchCapacity)
+    : Math.max(total, historyMatchCapacity);
   const graphMatchCount = configuredLimit === 0
     ? Math.min(effectiveTotal, historyMatchCapacity)
     : Math.min(configuredLimit, effectiveTotal, historyMatchCapacity);
@@ -473,7 +481,6 @@ function renderStatsChart(state) {
     : matchType === "ranked"
       ? t("dataWaiting", "データ待機中")
       : t("rankedOnly", "ランクのみ");
-  const ratingType = supplied?.ratingType || (state.ratingType === "LP" ? "LP" : "MR");
   elements.statsChartLabel.textContent = `${ratingType} ${t("trend", "TREND")}`;
   elements.statsChartEmpty.textContent =
     matchType === "ranked"
