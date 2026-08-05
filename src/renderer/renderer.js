@@ -1610,15 +1610,21 @@ elements.graphLabelScaleInput.addEventListener("input", async () => {
 });
 
 elements.graphMatchCountInput.addEventListener("change", async () => {
+  const graphMatchCount = Number(elements.graphMatchCountInput.value);
+  if (![0, 20, 50, 100].includes(graphMatchCount)) return;
+
+  // Redraw the management graph from the already received tracker state
+  // before persisting the setting. This keeps the control responsive and does
+  // not request new match data.
+  displaySettings = { ...displaySettings, graphMatchCount };
+  if (trackerState) renderManagementChart(trackerState);
+
   const settings = await unwrap(
     api.updateDisplaySettings({
-      graphMatchCount: Number(elements.graphMatchCountInput.value),
+      graphMatchCount,
     }),
   );
   renderDisplaySettings(settings);
-  // Refresh the current state immediately so the newly selected window is
-  // visible without waiting for the next scheduled service poll.
-  renderTracker(await unwrap(api.getState()));
 });
 
 elements.opacityInput.addEventListener("input", async () => {
