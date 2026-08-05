@@ -911,6 +911,7 @@ function publicMedianRating(sourceState) {
     values = records
       .map((record) => Number(record.ownRating))
       .filter(Number.isFinite)
+      .filter((value) => ratingType !== "LP" || value > 0)
       .slice(-MEDIAN_RATING_SAMPLE_LIMIT);
   }
   if (values.length < 2) {
@@ -921,6 +922,7 @@ function publicMedianRating(sourceState) {
     values = fallback
       .map((value) => Number(value))
       .filter(Number.isFinite)
+      .filter((value) => ratingType !== "LP" || value > 0)
       .slice(-MEDIAN_RATING_SAMPLE_LIMIT);
   }
   return {
