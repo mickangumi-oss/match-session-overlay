@@ -32,6 +32,7 @@ let historyPanelOpen = false;
 const HISTORY_PAGE_SIZE = 10;
 const RECENT_HISTORY_PREVIEW_LIMIT = 5;
 let historyPage = 0;
+let managementChartRenderToken = 0;
 
 const elements = Object.fromEntries(
   [
@@ -1069,7 +1070,7 @@ function historyForDisplay(selected, total) {
   return history;
 }
 
-function renderManagementChart(state) {
+function renderManagementChart(state, { immediate = false } = {}) {
   // The graph option controls the compact stats window/overlay only. The
   // management screen is the dedicated graph workspace and always keeps it
   // visible for inspection.
@@ -1094,7 +1095,12 @@ function renderManagementChart(state) {
       ? t("dataWaiting", "データ待機中")
       : t("rankedOnly", "ランクのみ");
   if (hasGraphData) {
-    requestAnimationFrame(() =>
+    const renderToken = ++managementChartRenderToken;
+    const draw = () => {
+      // A state/settings event can queue another frame before this one runs.
+      // Ignore that stale frame so an older selection cannot overwrite the
+      // graph after the user has already selected a new match count.
+      if (renderToken !== managementChartRenderToken) return;
       drawManagementChart(
         history,
         graphMatchCount,
@@ -1103,8 +1109,10 @@ function renderManagementChart(state) {
           ? state.medianRating
           : null,
         series.matchStart,
-      ),
-    );
+      );
+    };
+    if (immediate) draw();
+    else requestAnimationFrame(draw);
   }
 }
 
@@ -1247,6 +1255,7 @@ function renderTracker(state) {
 }
 
 function renderDisplaySettings(settings) {
+  const previousGraphMatchCount = Number(displaySettings.graphMatchCount);
   displaySettings = settings;
   const windowOrientation = settings.windowOrientation ?? "horizontal";
   applyLocale(settings.locale || "ja-jp");
@@ -1322,6 +1331,13 @@ function renderDisplaySettings(settings) {
     : t("showStats", "戦績ウィンドウを表示");
   if (trackerState) {
     renderTracker(trackerState);
+    // Settings notifications can arrive after a queued state-render frame.
+    // Redraw synchronously when the graph-count setting changes so the
+    // management canvas cannot remain on the previous selection until the
+    // next tracker update.
+    if (previousGraphMatchCount !== Number(settings.graphMatchCount)) {
+      renderManagementChart(trackerState, { immediate: true });
+    }
   } else {
     // A settings change can arrive before the initial tracker-state IPC
     // message. Fetch the current state so graph options take effect without
@@ -1536,6 +1552,19 @@ function setOptionsOpen(open) {
   elements.optionsPanel.setAttribute("aria-hidden", String(!open));
   elements.optionsButton.setAttribute("aria-expanded", String(open));
   elements.optionsButton.classList.toggle("active", open);
+
+  if (!open && trackerState) {
+    // The management chart is display:none while the options drawer is open.
+    // A graph-count change made in that state cannot be painted because the
+    // canvas has a 0x0 layout box. Redraw on the first frame after restoring
+    // the panel so the selected range appears without waiting for the next
+    // service poll.
+    requestAnimationFrame(() => {
+      if (!elements.managementChartPanel.classList.contains("options-collapsed")) {
+        renderManagementChart(trackerState, { immediate: true });
+      }
+    });
+  }
 }
 
 elements.optionsButton.addEventListener("click", () => {
@@ -1609,16 +1638,60 @@ elements.graphLabelScaleInput.addEventListener("input", async () => {
   );
 });
 
-elements.graphMatchCountInput.addEventListener("change", async () => {
-  const settings = await unwrap(
-    api.updateDisplaySettings({
-      graphMatchCount: Number(elements.graphMatchCountInput.value),
-    }),
+let graphMatchCountRequestSerial = 0;
+let lastGraphMatchCountInput = { value: null, at: 0 };
+async function updateGraphMatchCountFromInput() {
+  const graphMatchCount = Number(elements.graphMatchCountInput.value);
+  if (![0, 20, 50, 100].includes(graphMatchCount)) return;
+
+  // `input` and `change` can both be emitted for a native select. Once the
+  // local value is applied, the second event is ignored for a short window so
+  // it cannot trigger a duplicate IPC write. A later event with the same
+  // value is still accepted, which also repairs a stale canvas after an
+  // overlapping settings notification.
+  const now = Date.now();
+  if (
+    lastGraphMatchCountInput.value === graphMatchCount &&
+    now - lastGraphMatchCountInput.at < 250
+  ) {
+    return;
+  }
+  lastGraphMatchCountInput = { value: graphMatchCount, at: now };
+
+  // Apply the value synchronously to the management canvas using the state
+  // already in memory. This intentionally does not request match data.
+  const requestSerial = ++graphMatchCountRequestSerial;
+  const settingChanged = Number(displaySettings.graphMatchCount) !== graphMatchCount;
+  displaySettings = { ...displaySettings, graphMatchCount };
+  if (trackerState) {
+    // Always redraw, including when the main process already has the selected
+    // value. The latter can happen when a prior overlapping event persisted
+    // the setting before the renderer painted its graph.
+    renderManagementChart(trackerState, { immediate: true });
+  }
+
+  if (!settingChanged) return;
+
+  const update = unwrap(api.updateDisplaySettings({ graphMatchCount }))
+    .then((settings) => {
+      if (requestSerial !== graphMatchCountRequestSerial) return;
+      renderDisplaySettings(settings);
+      // The IPC response is authoritative, but redraw immediately once more
+      // so the returned setting cannot wait for the next polling state event.
+      if (trackerState) renderManagementChart(trackerState, { immediate: true });
+    });
+  await update;
+}
+
+elements.graphMatchCountInput.addEventListener("input", () => {
+  void updateGraphMatchCountFromInput().catch((error) =>
+    showNotice(error.message, "error"),
   );
-  renderDisplaySettings(settings);
-  // Refresh the current state immediately so the newly selected window is
-  // visible without waiting for the next scheduled service poll.
-  renderTracker(await unwrap(api.getState()));
+});
+elements.graphMatchCountInput.addEventListener("change", () => {
+  void updateGraphMatchCountFromInput().catch((error) =>
+    showNotice(error.message, "error"),
+  );
 });
 
 elements.opacityInput.addEventListener("input", async () => {
@@ -1693,6 +1766,11 @@ elements.languageInput?.addEventListener("change", async () => {
       }
     }
     showNotice(t("languageChanged", "表示言語を変更しました"), "success");
+    // Existing history rows contain normalized mode keys, but their labels are
+    // rendered through the active locale. Repaint them immediately so a
+    // locale switch cannot leave a mixture of the previous and current
+    // language in the management screen.
+    renderHistoryState(historyState);
   } catch (error) {
     showNotice(error.message, "error");
   }

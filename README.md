@@ -1,10 +1,10 @@
 # Match Session Overlay
 
-公開版: v1.0.14
+公開版: v1.0.15
 
 ## ダウンロード
 
-[v1.0.14をダウンロード（GitHub Releases）](https://github.com/mickangumi-oss/match-session-overlay/releases/download/v1.0.14/Match-Session-Overlay-1.0.14-Setup.exe)
+[v1.0.15をダウンロード（GitHub Releases）](https://github.com/mickangumi-oss/match-session-overlay/releases/download/v1.0.15/Match-Session-Overlay-1.0.15-Setup.exe)
 
 開いたページの「Assets」から、`Match-Session-Overlay-x.x.x-Setup.exe`をダウンロードして実行してください。最新版以外のファイルや、配布元を確認できないファイルは使用しないでください。
 
