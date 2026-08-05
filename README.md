@@ -3,17 +3,6 @@
 ストリートファイター6の対戦データを取得して表示するツールです。
 勝敗、勝率、現在のMR、MR増減、潜在MR（MRの中央値）等のデータをウィンドウ、もしくはオーバーレイ表示できます。
 
-公開版: v1.0.15
-## ダウンロード
-
-[v1.0.15をダウンロード（GitHub Releases）](https://github.com/mickangumi-oss/match-session-overlay/releases/download/v1.0.15/Match-Session-Overlay-1.0.15-Setup.exe)
-
-開いたページの「Assets」から、`Match-Session-Overlay-x.x.x-Setup.exe`をダウンロードして実行してください。最新版以外のファイルや、配布元を確認できないファイルは使用しないでください。
-
-Match Session Overlayは、公式サイトから取得した対戦戦績を、ゲーム画面の横やゲーム画面の上に表示するWindows向けアプリです。ログイン中のプレイヤーだけでなく、ユーザーコード（USER CODE）を指定したプレイヤーの戦績も表示できます。OBSでの表示にも対応していますが、OBSを使わず通常のウィンドウだけで利用することもできます。
-
-詳しい操作手順は[`docs/usage.md`](docs/usage.md)をご覧ください。ウィンドウの種類とグラフの動作は[`docs/window-layout.md`](docs/window-layout.md)、フォント設定は[`docs/font-settings.md`](docs/font-settings.md)で説明しています。
-
 > [!IMPORTANT]
 > 非公式のツールです。公式サイトの仕様変更などにより、予告なく戦績を取得できなくなる場合があります。
 
@@ -24,6 +13,17 @@ Match Session Overlayは、公式サイトから取得した対戦戦績を、�
 - OBSで表示する場合のみ、OBS Studio（任意）
 
 OBSを使わない場合は、アプリの通常ウィンドウまたはオーバーレイだけで利用できます。
+
+公開版: v1.0.15
+## ダウンロード
+
+[v1.0.15をダウンロード（GitHub Releases）](https://github.com/mickangumi-oss/match-session-overlay/releases/download/v1.0.15/Match-Session-Overlay-1.0.15-Setup.exe)
+
+開いたページの「Assets」から、`Match-Session-Overlay-x.x.x-Setup.exe`をダウンロードして実行してください。最新版以外のファイルや、配布元を確認できないファイルは使用しないでください。
+
+Match Session Overlayは、公式サイトから取得した対戦戦績を、ゲーム画面の横やゲーム画面の上に表示するWindows向けアプリです。ログイン中のプレイヤーだけでなく、ユーザーコード（USER CODE）を指定したプレイヤーの戦績も表示できます。OBSでの表示にも対応していますが、OBSを使わず通常のウィンドウだけで利用することもできます。
+
+詳しい操作手順は[`docs/usage.md`](docs/usage.md)をご覧ください。ウィンドウの種類とグラフの動作は[`docs/window-layout.md`](docs/window-layout.md)、フォント設定は[`docs/font-settings.md`](docs/font-settings.md)で説明しています。
 
 ## 画面イメージ
 
