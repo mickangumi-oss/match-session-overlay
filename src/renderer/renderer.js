@@ -32,6 +32,7 @@ let historyPanelOpen = false;
 const HISTORY_PAGE_SIZE = 10;
 const RECENT_HISTORY_PREVIEW_LIMIT = 5;
 let historyPage = 0;
+let managementChartRenderToken = 0;
 
 const elements = Object.fromEntries(
   [
@@ -1069,7 +1070,7 @@ function historyForDisplay(selected, total) {
   return history;
 }
 
-function renderManagementChart(state) {
+function renderManagementChart(state, { immediate = false } = {}) {
   // The graph option controls the compact stats window/overlay only. The
   // management screen is the dedicated graph workspace and always keeps it
   // visible for inspection.
@@ -1094,7 +1095,12 @@ function renderManagementChart(state) {
       ? t("dataWaiting", "データ待機中")
       : t("rankedOnly", "ランクのみ");
   if (hasGraphData) {
-    requestAnimationFrame(() =>
+    const renderToken = ++managementChartRenderToken;
+    const draw = () => {
+      // A state/settings event can queue another frame before this one runs.
+      // Ignore that stale frame so an older selection cannot overwrite the
+      // graph after the user has already selected a new match count.
+      if (renderToken !== managementChartRenderToken) return;
       drawManagementChart(
         history,
         graphMatchCount,
@@ -1103,8 +1109,10 @@ function renderManagementChart(state) {
           ? state.medianRating
           : null,
         series.matchStart,
-      ),
-    );
+      );
+    };
+    if (immediate) draw();
+    else requestAnimationFrame(draw);
   }
 }
 
@@ -1609,22 +1617,42 @@ elements.graphLabelScaleInput.addEventListener("input", async () => {
   );
 });
 
-elements.graphMatchCountInput.addEventListener("change", async () => {
+let graphMatchCountRequestSerial = 0;
+async function updateGraphMatchCountFromInput() {
   const graphMatchCount = Number(elements.graphMatchCountInput.value);
   if (![0, 20, 50, 100].includes(graphMatchCount)) return;
 
-  // Redraw the management graph from the already received tracker state
-  // before persisting the setting. This keeps the control responsive and does
-  // not request new match data.
-  displaySettings = { ...displaySettings, graphMatchCount };
-  if (trackerState) renderManagementChart(trackerState);
+  // `input` and `change` can both be emitted for a native select. Once the
+  // local value is applied, the second event is a no-op and cannot trigger a
+  // duplicate IPC write.
+  if (Number(displaySettings.graphMatchCount) === graphMatchCount) return;
 
-  const settings = await unwrap(
-    api.updateDisplaySettings({
-      graphMatchCount,
-    }),
+  // Apply the value synchronously to the management canvas using the state
+  // already in memory. This intentionally does not request match data.
+  const requestSerial = ++graphMatchCountRequestSerial;
+  displaySettings = { ...displaySettings, graphMatchCount };
+  if (trackerState) renderManagementChart(trackerState, { immediate: true });
+
+  const update = unwrap(api.updateDisplaySettings({ graphMatchCount }))
+    .then((settings) => {
+      if (requestSerial !== graphMatchCountRequestSerial) return;
+      renderDisplaySettings(settings);
+      // The IPC response is authoritative, but redraw immediately once more
+      // so the returned setting cannot wait for the next polling state event.
+      if (trackerState) renderManagementChart(trackerState, { immediate: true });
+    });
+  await update;
+}
+
+elements.graphMatchCountInput.addEventListener("input", () => {
+  void updateGraphMatchCountFromInput().catch((error) =>
+    showNotice(error.message, "error"),
   );
-  renderDisplaySettings(settings);
+});
+elements.graphMatchCountInput.addEventListener("change", () => {
+  void updateGraphMatchCountFromInput().catch((error) =>
+    showNotice(error.message, "error"),
+  );
 });
 
 elements.opacityInput.addEventListener("input", async () => {
