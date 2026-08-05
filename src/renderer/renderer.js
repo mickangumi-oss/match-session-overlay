@@ -1255,6 +1255,7 @@ function renderTracker(state) {
 }
 
 function renderDisplaySettings(settings) {
+  const previousGraphMatchCount = Number(displaySettings.graphMatchCount);
   displaySettings = settings;
   const windowOrientation = settings.windowOrientation ?? "horizontal";
   applyLocale(settings.locale || "ja-jp");
@@ -1330,6 +1331,13 @@ function renderDisplaySettings(settings) {
     : t("showStats", "戦績ウィンドウを表示");
   if (trackerState) {
     renderTracker(trackerState);
+    // Settings notifications can arrive after a queued state-render frame.
+    // Redraw synchronously when the graph-count setting changes so the
+    // management canvas cannot remain on the previous selection until the
+    // next tracker update.
+    if (previousGraphMatchCount !== Number(settings.graphMatchCount)) {
+      renderManagementChart(trackerState, { immediate: true });
+    }
   } else {
     // A settings change can arrive before the initial tracker-state IPC
     // message. Fetch the current state so graph options take effect without
@@ -1618,20 +1626,38 @@ elements.graphLabelScaleInput.addEventListener("input", async () => {
 });
 
 let graphMatchCountRequestSerial = 0;
+let lastGraphMatchCountInput = { value: null, at: 0 };
 async function updateGraphMatchCountFromInput() {
   const graphMatchCount = Number(elements.graphMatchCountInput.value);
   if (![0, 20, 50, 100].includes(graphMatchCount)) return;
 
   // `input` and `change` can both be emitted for a native select. Once the
-  // local value is applied, the second event is a no-op and cannot trigger a
-  // duplicate IPC write.
-  if (Number(displaySettings.graphMatchCount) === graphMatchCount) return;
+  // local value is applied, the second event is ignored for a short window so
+  // it cannot trigger a duplicate IPC write. A later event with the same
+  // value is still accepted, which also repairs a stale canvas after an
+  // overlapping settings notification.
+  const now = Date.now();
+  if (
+    lastGraphMatchCountInput.value === graphMatchCount &&
+    now - lastGraphMatchCountInput.at < 250
+  ) {
+    return;
+  }
+  lastGraphMatchCountInput = { value: graphMatchCount, at: now };
 
   // Apply the value synchronously to the management canvas using the state
   // already in memory. This intentionally does not request match data.
   const requestSerial = ++graphMatchCountRequestSerial;
+  const settingChanged = Number(displaySettings.graphMatchCount) !== graphMatchCount;
   displaySettings = { ...displaySettings, graphMatchCount };
-  if (trackerState) renderManagementChart(trackerState, { immediate: true });
+  if (trackerState) {
+    // Always redraw, including when the main process already has the selected
+    // value. The latter can happen when a prior overlapping event persisted
+    // the setting before the renderer painted its graph.
+    renderManagementChart(trackerState, { immediate: true });
+  }
+
+  if (!settingChanged) return;
 
   const update = unwrap(api.updateDisplaySettings({ graphMatchCount }))
     .then((settings) => {
