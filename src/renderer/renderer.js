@@ -1552,6 +1552,19 @@ function setOptionsOpen(open) {
   elements.optionsPanel.setAttribute("aria-hidden", String(!open));
   elements.optionsButton.setAttribute("aria-expanded", String(open));
   elements.optionsButton.classList.toggle("active", open);
+
+  if (!open && trackerState) {
+    // The management chart is display:none while the options drawer is open.
+    // A graph-count change made in that state cannot be painted because the
+    // canvas has a 0x0 layout box. Redraw on the first frame after restoring
+    // the panel so the selected range appears without waiting for the next
+    // service poll.
+    requestAnimationFrame(() => {
+      if (!elements.managementChartPanel.classList.contains("options-collapsed")) {
+        renderManagementChart(trackerState, { immediate: true });
+      }
+    });
+  }
 }
 
 elements.optionsButton.addEventListener("click", () => {
