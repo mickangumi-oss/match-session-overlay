@@ -945,6 +945,7 @@ function publicGraphData(sourceState) {
             record.matchType === "ranked" &&
             record.ownRatingType === ratingType &&
             Number.isFinite(Number(record.ownRating)) &&
+            (ratingType !== "LP" || Number(record.ownRating) > 0) &&
             (characterId == null || Number(record.characterId) === characterId),
         )
         .sort(
@@ -969,10 +970,10 @@ function publicGraphData(sourceState) {
   let values = Array.isArray(selected.ratingHistory)
     ? selected.ratingHistory.filter(Number.isFinite)
     : [];
-  const matchCount = Number.isFinite(Number(selected.matchCount))
+  const rawMatchCount = Number.isFinite(Number(selected.matchCount))
     ? Math.max(0, Math.trunc(Number(selected.matchCount)))
     : Math.max(0, values.length - 1);
-  if (values.length < 2 && matchCount > 0) {
+  if (values.length < 2 && rawMatchCount > 0) {
     const initial = Number(selected.initialRating);
     const current = Number(selected.currentRating);
     if (
@@ -984,6 +985,10 @@ function publicGraphData(sourceState) {
       values = [initial, current];
     }
   }
+  if (ratingType === "LP") values = values.filter((value) => value > 0);
+  const matchCount = ratingType === "LP"
+    ? Math.min(rawMatchCount, Math.max(0, values.length - 1))
+    : rawMatchCount;
   return {
     ranked: {
       values,
