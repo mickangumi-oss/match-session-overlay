@@ -304,7 +304,16 @@ function applyNewReplays(state, replays) {
 
     if (matchType === "ranked" && replay.rating != null) {
       resetRatingSeries(next, replay.ratingType);
-      if (next.stats.ranked.initialRating == null) {
+      const existingInitialRating = Number(next.stats.ranked.initialRating);
+      const hasPlaceholderLpBaseline =
+        replay.ratingType === "LP" &&
+        Number.isFinite(existingInitialRating) &&
+        existingInitialRating <= 0 &&
+        Number(replay.rating) > 0 &&
+        next.stats.ranked.ratingHistory.every(
+          (value) => Number(value) <= 0,
+        );
+      if (next.stats.ranked.initialRating == null || hasPlaceholderLpBaseline) {
         next.stats.ranked.initialRating = replay.rating;
       }
       next.stats.ranked.currentRating = replay.rating;

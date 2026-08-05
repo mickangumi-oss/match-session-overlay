@@ -773,7 +773,12 @@ function drawManagementChart(
   const axisValues = potential == null ? values : [...values, potential];
   const dataMinimum = Math.min(...axisValues);
   const dataMaximum = Math.max(...axisValues);
-  const dataSpread = Math.max(10, dataMaximum - dataMinimum);
+  // LP charts always start at zero.  Calculate the tick size from that full
+  // axis range; using only the narrow observed LP range would produce tiny
+  // steps (for example 500) and then draw dozens of labels between 0 and
+  // 20,000+, causing the labels to overlap on the graph.
+  const axisFloor = ratingType === "LP" ? 0 : dataMinimum;
+  const dataSpread = Math.max(10, dataMaximum - axisFloor);
   const roughStep = dataSpread / 4;
   const magnitude = 10 ** Math.floor(Math.log10(roughStep));
   const normalizedStep = roughStep / magnitude;
