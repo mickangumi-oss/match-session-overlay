@@ -21,13 +21,20 @@ const {
 const {
   SERVICE_ORIGIN,
   applyNewReplays,
+  buildHistoryRatingState,
   createEmptyMatchStats,
   normalizeFighter,
+  normalizeProfilePlayer,
   normalizeReplay,
+  profileCacheLookup,
+  profileCardPath,
   repairRatingBaseline,
   parseBuildId,
+  parseNextData,
   resetRatingSeries,
+  shareInFlightRequest,
   snapshotCurrentCharacter,
+  syncCurrentPlayerRatingState,
 } = require("./source-client");
 const {
   MAX_CONSECUTIVE_FAILURES,
@@ -225,6 +232,10 @@ const MATCH_HISTORY_FETCH_COOLDOWN_MS = 10 * 60 * 1000;
 // lookup so repeated clicks or switching back and forth cannot create a
 // request burst against the official service.
 const HISTORY_PROFILE_LOOKUP_COOLDOWN_MS = 10 * 60 * 1000;
+// A profile request is made only after a new ranked replay (or on initial
+// selection). Keep a short cache so a retry or character switch cannot turn
+// one polling cycle into a request burst.
+const PROFILE_REFRESH_COOLDOWN_MS = 90 * 1000;
 fs.mkdirSync(userDataPath, { recursive: true });
 fs.mkdirSync(sessionDataPath, { recursive: true });
 fs.mkdirSync(matchHistoryDirectory, { recursive: true });
@@ -277,6 +288,8 @@ let statsWindowBounds = {
 let trackerState = createEmptyTrackerState();
 const matchHistoryStores = new Map();
 const historyProfileLookupCache = new Map();
+const profileRefreshCache = new Map();
+const profileRefreshInFlight = new Map();
 let matchHistoryFetchInFlight = null;
 let historyViewPlayer = null;
 let historyViewPollTimer = null;
@@ -313,6 +326,30 @@ function serviceLocale() {
 
 function serviceHome() {
   return `${SERVICE_ORIGIN}/6/buckler/${serviceLocale()}`;
+}
+
+function buildProfileRefreshHint(previousPlayer, characterId, characterDisplayName) {
+  const hint = {
+    ...previousPlayer,
+    characterId: characterId ?? previousPlayer?.characterId,
+    characterDisplayName:
+      characterDisplayName || previousPlayer?.characterDisplayName || "",
+  };
+  const previousCharacterId = Number(previousPlayer?.characterId) || null;
+  const nextCharacterId = Number(hint.characterId) || null;
+  if (
+    previousCharacterId != null &&
+    nextCharacterId != null &&
+    previousCharacterId !== nextCharacterId
+  ) {
+    // A failed profile request must not reuse the previous character's MR/LP.
+    // Leave the rating empty so the caller can fall back to this character's
+    // latest replay snapshot until the next profile refresh succeeds.
+    hint.mr = null;
+    hint.lp = null;
+    hint.ratingSource = "search";
+  }
+  return hint;
 }
 
 try {
@@ -734,16 +771,17 @@ async function runHistoryViewPoll(sessionId) {
       const newest = [...newReplays].sort(
         (a, b) => Number(b.uploadedAt) - Number(a.uploadedAt),
       )[0];
-      if (newest?.characterId != null) {
-        historyViewPlayer = {
-          ...historyViewPlayer,
-          characterId: newest.characterId,
-          characterDisplayName:
-            newest.ownCharacterName || historyViewPlayer.characterDisplayName,
-          mr: newest.ownRatingType === "MR" ? newest.ownRating : historyViewPlayer.mr,
-          lp: newest.ownRatingType === "LP" ? newest.ownRating : historyViewPlayer.lp,
-        };
-      }
+      // Battle-log ratings are snapshots taken at match time. Do not copy
+      // them into the player hint; the profile card is the only source for
+      // the current MR/LP shown in the monitor.
+      const playerHint = buildProfileRefreshHint(
+        historyViewPlayer,
+        newest?.characterId,
+        newest?.ownCharacterName,
+      );
+      historyViewPlayer = await refreshProfilePlayer(playerHint, {
+        force: true,
+      });
     }
     historyViewConsecutiveFailures = 0;
     if (shouldAutoStopForInactivity(historyViewLastNewMatchAt)) {
@@ -785,80 +823,29 @@ async function runHistoryViewPoll(sessionId) {
 function historyViewTrackerState() {
   if (!historyViewPlayer) return null;
   const records = loadMatchHistoryStore(historyViewPlayer.profileId).records;
-  const stats = createEmptyMatchStats();
-  const ordered = [...records].sort(
-    (a, b) => Number(a.playedAt ?? a.uploadedAt) - Number(b.playedAt ?? b.uploadedAt),
-  );
-  const currentCharacterId = Number(historyViewPlayer.characterId) || null;
-  const characterRecords = currentCharacterId == null
-    ? ordered
-    : ordered.filter((record) => Number(record.characterId) === currentCharacterId);
-  const ratingRecords = characterRecords.filter(
-    (record) =>
-      record.matchType === "ranked" &&
-      Number.isFinite(Number(record.ownRating)) &&
-      ["MR", "LP"].includes(record.ownRatingType),
-  );
-  const fallbackRating = historyViewPlayer.mr ?? historyViewPlayer.lp ?? null;
-  const ratingType =
-    ratingRecords.at(-1)?.ownRatingType ??
-    (historyViewPlayer.mr != null ? "MR" : historyViewPlayer.lp != null ? "LP" : "MR");
-  for (const record of characterRecords) {
-    const matchType = record.matchType;
-    if (!stats[matchType]) continue;
-    stats[matchType].matchCount += 1;
-    if (record.result === "win") stats[matchType].wins += 1;
-    if (record.result === "loss") stats[matchType].losses += 1;
-    if (
-      matchType === "ranked" &&
-      record.ownRatingType === ratingType &&
-      Number.isFinite(Number(record.ownRating))
-    ) {
-      const rating = Number(record.ownRating);
-      stats.ranked.ratingHistory.push(rating);
-      stats.ranked.currentRating = rating;
-      stats.ranked.currentRatingType = record.ownRatingType;
-    }
-  }
-  const firstRating = Number.isFinite(Number(ratingRecords[0]?.ownRating))
-    ? Number(ratingRecords[0].ownRating)
-    : fallbackRating;
-  const currentRating = Number.isFinite(Number(ratingRecords.at(-1)?.ownRating))
-    ? Number(ratingRecords.at(-1).ownRating)
-    : fallbackRating;
-  stats.ranked.initialRating = firstRating;
-  stats.ranked.currentRating = currentRating;
-  stats.ranked.ratingDelta =
-    firstRating != null && currentRating != null && ratingType === (ratingRecords[0]?.ownRatingType ?? ratingType)
-      ? currentRating - firstRating
-      : 0;
-  if (!stats.ranked.ratingHistory.length && firstRating != null) {
-    stats.ranked.ratingHistory = [firstRating];
-  }
-  const wins = stats.ranked.wins;
-  const losses = stats.ranked.losses;
+  const summary = buildHistoryRatingState(records, historyViewPlayer);
   return {
     ...createEmptyTrackerState(),
     active: historyViewPollingActive,
     readOnly: true,
     viewingOther: true,
     player: historyViewPlayer,
-    wins,
-    losses,
-    initialRating: firstRating,
-    currentRating,
-    ratingType,
+    wins: summary.wins,
+    losses: summary.losses,
+    initialRating: summary.initialRating,
+    currentRating: summary.currentRating,
+    ratingType: summary.ratingType,
     characterId: historyViewPlayer.characterId ?? null,
-    ratingDelta: stats.ranked.ratingDelta,
-    lastMatch: characterRecords.at(-1) ?? null,
+    ratingDelta: summary.ratingDelta,
+    lastMatch: summary.lastMatch,
     updatedAt: Date.now(),
     lastNewMatchAt: historyViewLastNewMatchAt,
     nextPollAt: historyViewNextPollAt,
     effectivePollIntervalSeconds: historyViewEffectivePollIntervalSeconds,
     consecutiveFailures: historyViewConsecutiveFailures,
     stopReason: historyViewStopReason,
-    seenReplayIds: characterRecords.map((record) => record.replayId).filter(Boolean),
-    stats,
+    seenReplayIds: summary.characterRecords.map((record) => record.replayId).filter(Boolean),
+    stats: summary.stats,
     status: "historyViewing",
   };
 }
@@ -1059,6 +1046,9 @@ function publicOverlayState() {
     fallbackOverlaySize;
   return {
     active: sourceState.active,
+    currentRating: sourceState.currentRating,
+    currentRatingType: sourceState.ratingType || authenticatedRatingType,
+    ratingDelta: sourceState.ratingDelta,
     stats: sourceState.stats,
     overlaySuppressed,
     medianRating: median.medianRating,
@@ -1413,6 +1403,7 @@ function updateDisplaySettings(
     buildId = null;
     buildIdLocale = null;
     buildIdInFlight = null;
+    profileRefreshCache.clear();
     if (trackerState.active && trackerState.player?.userCode) {
       void refreshTrackedPlayerForLocale();
     }
@@ -1975,6 +1966,8 @@ async function clearPrivateDataWithConfirmation() {
   await sourceSession.clearAuthCache();
   matchHistoryStores.clear();
   historyProfileLookupCache.clear();
+  profileRefreshCache.clear();
+  profileRefreshInFlight.clear();
   stopHistoryViewPolling();
   historyViewPlayer = null;
   matchHistoryFetchInFlight = null;
@@ -2116,6 +2109,48 @@ async function fetchServiceJson(relativePath, query = {}, retry = true) {
   return response.json();
 }
 
+async function fetchServicePageData(relativePath) {
+  const response = await fetchServiceWithRateLimit(
+    `${serviceHome()}/${relativePath}`,
+    {
+      credentials: "include",
+      redirect: "follow",
+      headers: { Accept: "text/html" },
+    },
+  );
+  if (
+    response.status === 401 ||
+    response.status === 403 ||
+    response.url.includes("/auth/loginep")
+  ) {
+    throw new Error("SERVICE_AUTH_REQUIRED");
+  }
+  if (!response.ok) throw new Error(`SERVICE_HTTP_${response.status}`);
+  return parseNextData(await response.text());
+}
+
+async function fetchProfileCard(profileId) {
+  const response = await fetchServiceWithRateLimit(
+    `${SERVICE_ORIGIN}${profileCardPath(serviceLocale(), profileId)}`,
+    {
+      credentials: "include",
+      redirect: "follow",
+      headers: { Accept: "application/json" },
+    },
+  );
+  if (
+    response.status === 401 ||
+    response.status === 403 ||
+    response.url.includes("/auth/loginep")
+  ) {
+    throw new Error("SERVICE_AUTH_REQUIRED");
+  }
+  if (!response.ok) throw new Error(`SERVICE_HTTP_${response.status}`);
+  const contentType = response.headers.get("content-type") || "";
+  if (!contentType.includes("json")) throw new Error("PROFILE_RATING_NOT_FOUND");
+  return response.json();
+}
+
 async function checkAuthenticationInternal() {
   const data = await fetchServiceJson("fighterslist/friend.json");
   if (!data?.pageProps) {
@@ -2135,6 +2170,7 @@ async function checkAuthenticationInternal() {
     }
     throw error;
   }
+  player = await refreshProfilePlayer(player);
   return { authenticated: true, player };
 }
 
@@ -2183,6 +2219,70 @@ async function searchPlayer(userCode) {
   return exact;
 }
 
+async function refreshProfilePlayer(player, { force = false } = {}) {
+  const profileId = normalizeHistoryProfileId(player?.profileId ?? player?.userCode);
+  if (!profileId) return player;
+  const characterId = Number(player?.characterId) || 0;
+  const cacheKey = `${serviceLocale()}:${profileId}:${characterId}`;
+  const now = Date.now();
+  const cacheResult = profileCacheLookup(
+    profileRefreshCache,
+    cacheKey,
+    now,
+    PROFILE_REFRESH_COOLDOWN_MS,
+    force,
+  );
+  if (cacheResult.hit) {
+    return cacheResult.player ?? player;
+  }
+
+  // Share an in-flight request for the same locale/profile/character. This
+  // covers simultaneous authentication, history-view, and polling refreshes;
+  // force refreshes also join an already-running request instead of creating
+  // a second request against the official service.
+  return shareInFlightRequest(profileRefreshInFlight, cacheKey, async () => {
+    try {
+      // This is the same locale-specific card endpoint used by the official
+      // profile page's OVERVIEW component. It contains the current character's
+      // live MR/LP, while a replay contains only the value at match time.
+      let data = null;
+      try {
+        data = await fetchProfileCard(profileId);
+      } catch (error) {
+        if (
+          !(error instanceof Error) ||
+          !["SERVICE_HTTP_404", "PROFILE_RATING_NOT_FOUND"].includes(error.message)
+        ) {
+          throw error;
+        }
+      }
+      let refreshed = normalizeProfilePlayer(data, player);
+      if (!refreshed) {
+        // Keep compatibility with a deployment that exposes the Next data route
+        // but not the card response. These fallbacks remain behind the same
+        // cache and request queue, and are not used during ordinary polling.
+        data = await fetchServiceJson(`profile/${encodeURIComponent(profileId)}.json`)
+          .catch(() => null);
+        refreshed = normalizeProfilePlayer(data, player);
+      }
+      if (!refreshed) {
+        data = await fetchServicePageData(`profile/${encodeURIComponent(profileId)}`)
+          .catch(() => null);
+        refreshed = normalizeProfilePlayer(data, player);
+      }
+      if (!refreshed) throw new Error("PROFILE_RATING_NOT_FOUND");
+      profileRefreshCache.set(cacheKey, { fetchedAt: now, player: refreshed });
+      return refreshed;
+    } catch {
+      // Never replace a known-good current value with a replay baseline when
+      // the optional profile request fails. Cache the failure briefly to
+      // preserve the site's request budget and retry on a later polling cycle.
+      profileRefreshCache.set(cacheKey, { fetchedAt: now, player });
+      return player;
+    }
+  });
+}
+
 async function refreshTrackedPlayerForLocale() {
   if (!trackerState.active || !trackerState.player?.userCode) return;
   if (localeRefreshInFlight) return localeRefreshInFlight;
@@ -2199,7 +2299,9 @@ async function refreshTrackedPlayerForLocale() {
       ) {
         return;
       }
-      trackerState.player = refreshedPlayer;
+      trackerState.player = await refreshProfilePlayer(refreshedPlayer, {
+        force: true,
+      });
       trackerState.updatedAt = Date.now();
       sendTrackerState();
     } catch {
@@ -2322,6 +2424,7 @@ async function selectHistoryProfile(userCode) {
       });
       nextHistoryViewPlayer = player;
     }
+    nextHistoryViewPlayer = await refreshProfilePlayer(nextHistoryViewPlayer);
   }
   stopHistoryViewPolling();
   historyViewPlayer = nextHistoryViewPlayer;
@@ -2343,67 +2446,8 @@ async function clearHistoryProfileSelection() {
   return publicHistoryState();
 }
 
-function syncCurrentPlayerRating(state, player, hasNewRankedReplay = false) {
-  const currentRating = player?.mr ?? player?.lp ?? null;
-  if (currentRating == null) return state;
-  if (
-    hasNewRankedReplay &&
-    state.characterId != null &&
-    player.characterId != null &&
-    state.characterId !== player.characterId
-  ) {
-    return state;
-  }
-
-  const ratingType = player.mr != null ? "MR" : "LP";
-  const previousCharacterId = state.characterId ?? state.player?.characterId;
-  const characterChanged =
-    previousCharacterId != null &&
-    player.characterId != null &&
-    previousCharacterId !== player.characterId;
-  resetRatingSeries(state, ratingType, characterChanged);
-  const ranked = state.stats.ranked;
-  const existingInitialRating = Number(ranked.initialRating);
-  const firstPositiveHistoryRating = ranked.ratingHistory.find(
-    (value) => Number(value) > 0,
-  );
-  const hasPlaceholderLpBaseline =
-    ratingType === "LP" &&
-    Number.isFinite(existingInitialRating) &&
-    existingInitialRating <= 0 &&
-    currentRating > 0;
-  state.player = player;
-  state.characterId = player.characterId ?? state.characterId;
-  state.currentRating = currentRating;
-  state.ratingType = ratingType;
-  ranked.currentRating = currentRating;
-  if (ranked.initialRating == null || hasPlaceholderLpBaseline) {
-    ranked.initialRating = firstPositiveHistoryRating ?? currentRating;
-  }
-  state.initialRating = ranked.initialRating;
-
-  const history = ranked.ratingHistory;
-  const lastHistoryIndex = history.length - 1;
-  if (lastHistoryIndex < 0) {
-    history.push(currentRating);
-  } else if (hasNewRankedReplay && history.length < 2) {
-    // Keep a flat two-point series when a ranked replay has no per-replay
-    // rating value (or when the rating did not change).
-    history.push(currentRating);
-  } else if (history[lastHistoryIndex] !== currentRating) {
-    // A battle-log entry may not include its rating. Keep the previous point
-    // and append the profile's current value so the graph still records the
-    // change. When the log already supplied the same value, the branch above
-    // avoids adding a duplicate point.
-    history.push(currentRating);
-  }
-
-  ranked.ratingDelta = currentRating - ranked.initialRating;
-  state.ratingDelta = ranked.ratingDelta;
-  return state;
-}
-
 async function startTrackingInternal(player) {
+  player = await refreshProfilePlayer(player);
   const resumable =
     !trackerState.active &&
     trackerState.stopReason === "idle" &&
@@ -2426,7 +2470,7 @@ async function startTrackingInternal(player) {
         !previousReplayIds.has(replay.replayId),
     );
     trackerState = applyNewReplays(trackerState, replays);
-    trackerState = syncCurrentPlayerRating(
+    trackerState = syncCurrentPlayerRatingState(
       trackerState,
       player,
       hasNewRankedReplay,
@@ -2443,7 +2487,9 @@ async function startTrackingInternal(player) {
       .filter((replay) => replay.matchType === "ranked")
       .sort((a, b) => b.uploadedAt - a.uploadedAt)[0];
     const initialRating =
-      player.mr ?? player.lp ?? newestRanked?.rating ?? null;
+      player.ratingSource === "profile"
+        ? player.mr ?? player.lp ?? newestRanked?.rating ?? null
+        : newestRanked?.rating ?? player.mr ?? player.lp ?? null;
     const stats = createEmptyMatchStats();
     stats.ranked.initialRating = initialRating;
     stats.ranked.currentRating = initialRating;
@@ -2596,19 +2642,28 @@ async function refreshTracking(sessionId = trackingSessionId) {
     trackerState.characterId != null &&
     previousCharacterId !== trackerState.characterId;
   if (hasNewRankedReplay || characterChanged) {
-    const refreshedPlayer = await searchPlayer(
-      trackerState.player.userCode,
-    ).catch(() => null);
+    const newestReplay = [...replays]
+      .filter((replay) => replay.replayId && !previousReplayIds.has(replay.replayId))
+      .sort((a, b) => Number(b.uploadedAt) - Number(a.uploadedAt))[0];
+    // Keep replay snapshots in the graph/history, but never use one as the
+    // current rating when the official profile request is unavailable.
+    const playerHint = buildProfileRefreshHint(
+      trackerState.player,
+      trackerState.characterId ?? newestReplay?.characterId,
+      newestReplay?.ownCharacterName,
+    );
+    const refreshedPlayer = await refreshProfilePlayer(playerHint, {
+      force: true,
+    });
     if (sessionId !== trackingSessionId || !trackerState.active) {
       return publicTrackerState();
     }
-    if (refreshedPlayer) {
-      trackerState = syncCurrentPlayerRating(
-        trackerState,
-        refreshedPlayer,
-        hasNewRankedReplay,
-      );
-    }
+    trackerState.player = refreshedPlayer;
+    trackerState = syncCurrentPlayerRatingState(
+      trackerState,
+      refreshedPlayer,
+      hasNewRankedReplay,
+    );
   }
   const now = Date.now();
   if (hasNewReplay) trackerState.lastNewMatchAt = now;
