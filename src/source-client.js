@@ -25,6 +25,7 @@ function createEmptyMatchStats() {
       matchCount: 0,
       initialRating: null,
       currentRating: null,
+      currentRatingType: null,
       ratingDelta: 0,
       ratingHistory: [],
     },
@@ -34,6 +35,7 @@ function createEmptyMatchStats() {
       matchCount: 0,
       initialRating: null,
       currentRating: null,
+      currentRatingType: null,
       ratingDelta: null,
       ratingHistory: [],
     },
@@ -43,6 +45,7 @@ function createEmptyMatchStats() {
       matchCount: 0,
       initialRating: null,
       currentRating: null,
+      currentRatingType: null,
       ratingDelta: null,
       ratingHistory: [],
     },
@@ -60,6 +63,7 @@ function resetRatingSeries(state, nextRatingType, force = false) {
   const ranked = state.stats.ranked;
   ranked.initialRating = null;
   ranked.currentRating = null;
+  ranked.currentRatingType = ratingType;
   ranked.ratingDelta = 0;
   ranked.ratingHistory = [];
   return true;
@@ -141,15 +145,19 @@ function switchCharacterState(state, characterId, replay) {
   state.characterId = characterId;
 }
 
-function parseBuildId(html) {
+function parseNextData(html) {
   const match = String(html).match(
     /<script[^>]*id=["']__NEXT_DATA__["'][^>]*>([\s\S]*?)<\/script>/i,
   );
   if (!match) {
-    throw new Error("SERVICE_BUILD_ID_NOT_FOUND");
+    throw new Error("SERVICE_NEXT_DATA_NOT_FOUND");
   }
 
-  const payload = JSON.parse(match[1]);
+  return JSON.parse(match[1]);
+}
+
+function parseBuildId(html) {
+  const payload = parseNextData(html);
   if (!payload.buildId || typeof payload.buildId !== "string") {
     throw new Error("SERVICE_BUILD_ID_NOT_FOUND");
   }
@@ -189,7 +197,292 @@ function normalizeFighter(raw) {
     characterDisplayName: String(characterDisplayName ?? "").trim(),
     mr: Number(league.master_rating ?? 0) || null,
     lp: Number(league.league_point ?? 0) || null,
+    ratingSource: "search",
     lastPlayedAt: Number(raw?.last_play_at ?? 0) || null,
+  };
+}
+
+function finitePositive(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : null;
+}
+
+function firstValue(object, keys) {
+  if (!object || typeof object !== "object") return null;
+  for (const key of keys) {
+    if (Object.prototype.hasOwnProperty.call(object, key) && object[key] != null) {
+      return object[key];
+    }
+  }
+  return null;
+}
+
+function profileCharacterId(object) {
+  const value = firstValue(object, [
+    "character_id",
+    "characterId",
+    "fighter_id",
+    "fighterId",
+    "playing_character_id",
+    "favorite_character_id",
+    "current_character_id",
+  ]);
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : null;
+}
+
+function profileCharacterName(object) {
+  return String(
+    firstValue(object, [
+      "character_display_name",
+      "characterDisplayName",
+      "character_name",
+      "characterName",
+      "playing_character_display_name",
+      "playing_character_name",
+      "favorite_character_display_name",
+      "favorite_character_name",
+      "name",
+    ]) ?? "",
+  ).trim();
+}
+
+function collectProfileRatingCandidates(value, path = "", result = [], depth = 0) {
+  if (value == null || result.length >= 300 || depth > 8) return result;
+  if (Array.isArray(value)) {
+    value.slice(0, 100).forEach((item, index) =>
+      collectProfileRatingCandidates(item, `${path}[${index}]`, result, depth + 1),
+    );
+    return result;
+  }
+  if (typeof value !== "object") return result;
+
+  const nestedLeague = value.league_info ?? value.leagueInfo ?? value.league ?? {};
+  const mr = finitePositive(
+    firstValue(value, ["master_rating", "masterRating", "mr"]) ??
+      firstValue(nestedLeague, ["master_rating", "masterRating", "mr"]),
+  );
+  const lp = finitePositive(
+    firstValue(value, ["league_point", "leaguePoint", "lp"]) ??
+      firstValue(nestedLeague, ["league_point", "leaguePoint", "lp"]),
+  );
+  if (mr != null || lp != null) {
+    const pathText = path.toLowerCase();
+    result.push({
+      mr,
+      lp,
+      characterId: profileCharacterId(value) ?? profileCharacterId(nestedLeague),
+      characterDisplayName: profileCharacterName(value),
+      preferred: /current|selected|favorite|playing|my_character/.test(pathText),
+      path,
+    });
+  }
+
+  for (const [key, child] of Object.entries(value)) {
+    collectProfileRatingCandidates(child, path ? `${path}.${key}` : key, result, depth + 1);
+  }
+  return result;
+}
+
+function normalizeProfilePlayer(data, fallbackPlayer = {}) {
+  const candidates = collectProfileRatingCandidates(data);
+  const desiredCharacterId = Number(fallbackPlayer.characterId) || null;
+  const matching = desiredCharacterId == null
+    ? []
+    : candidates.filter((candidate) => candidate.characterId === desiredCharacterId);
+  const candidate =
+    matching.find((item) => item.preferred) ??
+    matching[0] ??
+    candidates.find((item) => item.preferred) ??
+    candidates[0] ??
+    null;
+  if (!candidate) return null;
+
+  // A profile candidate with LP explicitly means the character is below
+  // Master; do not carry an unrelated MR from the search result into it (and
+  // vice versa). Only use the fallback value when the candidate has no value
+  // for either rating system.
+  const mr = candidate.mr != null
+    ? candidate.mr
+    : candidate.lp != null
+      ? null
+      : finitePositive(fallbackPlayer.mr);
+  const lp = candidate.lp != null
+    ? candidate.lp
+    : candidate.mr != null
+      ? null
+      : finitePositive(fallbackPlayer.lp);
+  return {
+    ...fallbackPlayer,
+    mr,
+    lp,
+    characterId: candidate.characterId ?? fallbackPlayer.characterId ?? null,
+    characterDisplayName:
+      candidate.characterDisplayName || fallbackPlayer.characterDisplayName || "",
+    ratingSource: "profile",
+  };
+}
+
+function playerRatingType(player) {
+  return player?.mr != null ? "MR" : player?.lp != null ? "LP" : null;
+}
+
+function profileCardPath(locale, profileId) {
+  return `/6/buckler/api/${encodeURIComponent(String(locale))}/card/${encodeURIComponent(String(profileId))}`;
+}
+
+function profileCacheLookup(cache, key, now, cooldownMs, force = false) {
+  const entry = cache?.get(key);
+  if (
+    !force &&
+    entry &&
+    Number.isFinite(Number(entry.fetchedAt)) &&
+    now - Number(entry.fetchedAt) < cooldownMs
+  ) {
+    return { hit: true, player: entry.player ?? null };
+  }
+  return { hit: false, player: null };
+}
+
+function shareInFlightRequest(inFlightMap, key, factory) {
+  const existing = inFlightMap?.get(key);
+  if (existing) return existing;
+  let promise;
+  promise = Promise.resolve()
+    .then(factory)
+    .finally(() => {
+      if (inFlightMap?.get(key) === promise) inFlightMap.delete(key);
+    });
+  inFlightMap?.set(key, promise);
+  return promise;
+}
+
+function syncCurrentPlayerRatingState(state, player, hasNewRankedReplay = false) {
+  const currentRating = player?.mr ?? player?.lp ?? null;
+  if (currentRating == null) return state;
+  if (
+    hasNewRankedReplay &&
+    state.characterId != null &&
+    player.characterId != null &&
+    state.characterId !== player.characterId
+  ) {
+    return state;
+  }
+
+  const ratingType = playerRatingType(player) ?? "MR";
+  const previousCharacterId = state.characterId ?? state.player?.characterId;
+  const characterChanged =
+    previousCharacterId != null &&
+    player.characterId != null &&
+    previousCharacterId !== player.characterId;
+  const recordedRatingType = state.stats.ranked.currentRatingType;
+  const ratingTypeChanged =
+    recordedRatingType != null && recordedRatingType !== ratingType;
+  resetRatingSeries(state, ratingType, characterChanged || ratingTypeChanged);
+  const ranked = state.stats.ranked;
+  const existingInitialRating = Number(ranked.initialRating);
+  const firstPositiveHistoryRating = ranked.ratingHistory.find(
+    (value) => Number(value) > 0,
+  );
+  const hasPlaceholderLpBaseline =
+    ratingType === "LP" &&
+    Number.isFinite(existingInitialRating) &&
+    existingInitialRating <= 0 &&
+    currentRating > 0;
+  state.player = player;
+  state.characterId = player.characterId ?? state.characterId;
+  state.currentRating = currentRating;
+  state.ratingType = ratingType;
+  ranked.currentRating = currentRating;
+  ranked.currentRatingType = ratingType;
+  if (ranked.initialRating == null || hasPlaceholderLpBaseline) {
+    ranked.initialRating = firstPositiveHistoryRating ?? currentRating;
+  }
+  state.initialRating = ranked.initialRating;
+
+  const history = ranked.ratingHistory;
+  const lastHistoryIndex = history.length - 1;
+  if (lastHistoryIndex < 0) {
+    history.push(currentRating);
+  } else if (hasNewRankedReplay && history.length < 2) {
+    history.push(currentRating);
+  } else if (history[lastHistoryIndex] !== currentRating) {
+    history.push(currentRating);
+  }
+
+  ranked.ratingDelta = currentRating - ranked.initialRating;
+  state.ratingDelta = ranked.ratingDelta;
+  return state;
+}
+
+function buildHistoryRatingState(records, player) {
+  const ordered = [...(Array.isArray(records) ? records : [])].sort(
+    (a, b) => Number(a.playedAt ?? a.uploadedAt) - Number(b.playedAt ?? b.uploadedAt),
+  );
+  const currentCharacterId = Number(player?.characterId) || null;
+  const characterRecords = currentCharacterId == null
+    ? ordered
+    : ordered.filter((record) => Number(record.characterId) === currentCharacterId);
+  const allRatingRecords = characterRecords.filter(
+    (record) =>
+      record.matchType === "ranked" &&
+      Number.isFinite(Number(record.ownRating)) &&
+      ["MR", "LP"].includes(record.ownRatingType) &&
+      (record.ownRatingType !== "LP" || Number(record.ownRating) > 0),
+  );
+  const ratingType =
+    playerRatingType(player) ?? allRatingRecords.at(-1)?.ownRatingType ?? "MR";
+  const ratingRecords = allRatingRecords.filter(
+    (record) => record.ownRatingType === ratingType,
+  );
+  const fallbackRating = ratingType === "LP" ? player?.lp : player?.mr;
+  const stats = createEmptyMatchStats();
+  for (const record of characterRecords) {
+    const matchType = record.matchType;
+    if (!stats[matchType]) continue;
+    stats[matchType].matchCount += 1;
+    if (record.result === "win") stats[matchType].wins += 1;
+    if (record.result === "loss") stats[matchType].losses += 1;
+    if (
+      matchType === "ranked" &&
+      record.ownRatingType === ratingType &&
+      Number.isFinite(Number(record.ownRating)) &&
+      (ratingType !== "LP" || Number(record.ownRating) > 0)
+    ) {
+      const rating = Number(record.ownRating);
+      stats.ranked.ratingHistory.push(rating);
+    }
+  }
+  const firstRating = Number.isFinite(Number(ratingRecords[0]?.ownRating))
+    ? Number(ratingRecords[0].ownRating)
+    : fallbackRating;
+  const currentRating = Number.isFinite(Number(fallbackRating))
+    ? Number(fallbackRating)
+    : Number.isFinite(Number(ratingRecords.at(-1)?.ownRating))
+      ? Number(ratingRecords.at(-1).ownRating)
+      : null;
+  stats.ranked.initialRating = firstRating;
+  stats.ranked.currentRating = currentRating;
+  stats.ranked.currentRatingType = ratingType;
+  stats.ranked.ratingDelta =
+    firstRating != null && currentRating != null &&
+    ratingType === (ratingRecords[0]?.ownRatingType ?? ratingType)
+      ? currentRating - firstRating
+      : 0;
+  if (!stats.ranked.ratingHistory.length && firstRating != null) {
+    stats.ranked.ratingHistory = [firstRating];
+  }
+  return {
+    ordered,
+    characterRecords,
+    stats,
+    wins: stats.ranked.wins,
+    losses: stats.ranked.losses,
+    initialRating: firstRating,
+    currentRating,
+    ratingType,
+    ratingDelta: stats.ranked.ratingDelta,
+    lastMatch: characterRecords.at(-1) ?? null,
   };
 }
 
@@ -351,6 +644,7 @@ function applyNewReplays(state, replays) {
           firstPositiveHistoryRating ?? replay.rating;
       }
       next.stats.ranked.currentRating = replay.rating;
+      next.stats.ranked.currentRatingType = replay.ratingType;
       next.stats.ranked.ratingHistory.push(replay.rating);
       next.currentRating = replay.rating;
       next.ratingType = replay.ratingType;
@@ -380,9 +674,17 @@ module.exports = {
   classifyBattleType,
   createEmptyMatchStats,
   normalizeFighter,
+  normalizeProfilePlayer,
   normalizeReplay,
+  buildHistoryRatingState,
+  profileCacheLookup,
+  profileCardPath,
+  playerRatingType,
   repairRatingBaseline,
+  shareInFlightRequest,
   parseBuildId,
+  parseNextData,
   resetRatingSeries,
   snapshotCurrentCharacter,
+  syncCurrentPlayerRatingState,
 };
