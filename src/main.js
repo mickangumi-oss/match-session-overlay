@@ -23,14 +23,13 @@ const {
   applyNewReplays,
   buildHistoryRatingState,
   createEmptyMatchStats,
+  findNewRankedReplays,
   normalizeFighter,
   normalizeProfilePlayer,
   normalizeReplay,
   profileCacheLookup,
-  profileCardPath,
   repairRatingBaseline,
   parseBuildId,
-  parseNextData,
   resetRatingSeries,
   shareInFlightRequest,
   snapshotCurrentCharacter,
@@ -2109,48 +2108,6 @@ async function fetchServiceJson(relativePath, query = {}, retry = true) {
   return response.json();
 }
 
-async function fetchServicePageData(relativePath) {
-  const response = await fetchServiceWithRateLimit(
-    `${serviceHome()}/${relativePath}`,
-    {
-      credentials: "include",
-      redirect: "follow",
-      headers: { Accept: "text/html" },
-    },
-  );
-  if (
-    response.status === 401 ||
-    response.status === 403 ||
-    response.url.includes("/auth/loginep")
-  ) {
-    throw new Error("SERVICE_AUTH_REQUIRED");
-  }
-  if (!response.ok) throw new Error(`SERVICE_HTTP_${response.status}`);
-  return parseNextData(await response.text());
-}
-
-async function fetchProfileCard(profileId) {
-  const response = await fetchServiceWithRateLimit(
-    `${SERVICE_ORIGIN}${profileCardPath(serviceLocale(), profileId)}`,
-    {
-      credentials: "include",
-      redirect: "follow",
-      headers: { Accept: "application/json" },
-    },
-  );
-  if (
-    response.status === 401 ||
-    response.status === 403 ||
-    response.url.includes("/auth/loginep")
-  ) {
-    throw new Error("SERVICE_AUTH_REQUIRED");
-  }
-  if (!response.ok) throw new Error(`SERVICE_HTTP_${response.status}`);
-  const contentType = response.headers.get("content-type") || "";
-  if (!contentType.includes("json")) throw new Error("PROFILE_RATING_NOT_FOUND");
-  return response.json();
-}
-
 async function checkAuthenticationInternal() {
   const data = await fetchServiceJson("fighterslist/friend.json");
   if (!data?.pageProps) {
@@ -2242,34 +2199,13 @@ async function refreshProfilePlayer(player, { force = false } = {}) {
   // a second request against the official service.
   return shareInFlightRequest(profileRefreshInFlight, cacheKey, async () => {
     try {
-      // This is the same locale-specific card endpoint used by the official
-      // profile page's OVERVIEW component. It contains the current character's
-      // live MR/LP, while a replay contains only the value at match time.
-      let data = null;
-      try {
-        data = await fetchProfileCard(profileId);
-      } catch (error) {
-        if (
-          !(error instanceof Error) ||
-          !["SERVICE_HTTP_404", "PROFILE_RATING_NOT_FOUND"].includes(error.message)
-        ) {
-          throw error;
-        }
-      }
-      let refreshed = normalizeProfilePlayer(data, player);
-      if (!refreshed) {
-        // Keep compatibility with a deployment that exposes the Next data route
-        // but not the card response. These fallbacks remain behind the same
-        // cache and request queue, and are not used during ordinary polling.
-        data = await fetchServiceJson(`profile/${encodeURIComponent(profileId)}.json`)
-          .catch(() => null);
-        refreshed = normalizeProfilePlayer(data, player);
-      }
-      if (!refreshed) {
-        data = await fetchServicePageData(`profile/${encodeURIComponent(profileId)}`)
-          .catch(() => null);
-        refreshed = normalizeProfilePlayer(data, player);
-      }
+      // The official profile page's locale-specific Next data is the source of
+      // the live CURRENT MR/LP. A replay contains only the value at match
+      // time, so it must never overwrite the current profile value.
+      const data = await fetchServiceJson(
+        `profile/${encodeURIComponent(profileId)}.json`,
+      );
+      const refreshed = normalizeProfilePlayer(data, player);
       if (!refreshed) throw new Error("PROFILE_RATING_NOT_FOUND");
       profileRefreshCache.set(cacheKey, { fetchedAt: now, player: refreshed });
       return refreshed;
@@ -2630,20 +2566,15 @@ async function refreshTracking(sessionId = trackingSessionId) {
       replay.matchType &&
       !previousReplayIds.has(replay.replayId),
   );
-  const hasNewRankedReplay = replays.some(
-    (replay) =>
-      replay.matchType === "ranked" &&
-      replay.replayId &&
-      !previousReplayIds.has(replay.replayId),
-  );
+  const newRankedReplays = findNewRankedReplays(replays, previousReplayIds);
+  const hasNewRankedReplay = newRankedReplays.length > 0;
   trackerState = applyNewReplays(trackerState, replays);
   const characterChanged =
     previousCharacterId != null &&
     trackerState.characterId != null &&
     previousCharacterId !== trackerState.characterId;
   if (hasNewRankedReplay || characterChanged) {
-    const newestReplay = [...replays]
-      .filter((replay) => replay.replayId && !previousReplayIds.has(replay.replayId))
+    const newestReplay = [...newRankedReplays]
       .sort((a, b) => Number(b.uploadedAt) - Number(a.uploadedAt))[0];
     // Keep replay snapshots in the graph/history, but never use one as the
     // current rating when the official profile request is unavailable.
