@@ -14,10 +14,10 @@
 
 OBSを使わない場合、アプリの通常ウィンドウまたはオーバーレイを表示しておくことも出来ます。
 
-公開版: v1.0.16
+公開版: v1.0.17
 ## ダウンロード
 
-[v1.0.16をダウンロード（GitHub Releases）](https://github.com/mickangumi-oss/match-session-overlay/releases/download/v1.0.16/Match-Session-Overlay-1.0.16-Setup.exe)
+[v1.0.17をダウンロード（GitHub Releases）](https://github.com/mickangumi-oss/match-session-overlay/releases/download/v1.0.17/Match-Session-Overlay-1.0.17-Setup.exe)
 
 開いたページの「Assets」から、`Match-Session-Overlay-x.x.x-Setup.exe`をダウンロードして実行してください。
 最新版以外のファイルや、配布元を確認できないファイルはアカウントハックの恐れがあるので使用しないでください。
@@ -33,7 +33,20 @@ Match Session Overlayは、公式サイトから取得した対戦戦績を、�
 
 画像は使用した時のイメージです。
 
-## v1.0.16の修正内容
+## v1.0.17の修正内容
+
+### 不具合修正
+
+- 対戦後もCURRENT MR／CURRENT LPが古いまま残り、MR DELTAやグラフの更新が遅れることがある問題を修正しました。
+- プロフィール情報に複数キャラクターのデータが含まれる場合、別キャラクターのMR／LPが表示されることがある問題を修正しました。
+
+### 機能追加・改善
+
+- 新しいランクマッチを検出した時だけ、選択中の言語に対応した公式プロフィールから現在のMR／LPを取得するようにしました。
+- 新しい対戦がない更新ではプロフィールを取得しないようにし、同じ更新での重複取得も防止しました。
+- 取得に失敗した場合は直前の正常なMR／LPを保持し、0や未定義値で上書きしないようにしました。
+
+## v1.0.16までの修正内容
 
 ### 不具合修正
 
