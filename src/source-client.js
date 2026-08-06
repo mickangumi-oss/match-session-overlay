@@ -17,6 +17,18 @@ function classifyBattleType(type, name = "") {
   return null;
 }
 
+function findNewRankedReplays(replays, previousReplayIds) {
+  const seen = previousReplayIds instanceof Set
+    ? previousReplayIds
+    : new Set(Array.isArray(previousReplayIds) ? previousReplayIds : []);
+  return (Array.isArray(replays) ? replays : []).filter(
+    (replay) =>
+      replay?.matchType === "ranked" &&
+      replay?.replayId &&
+      !seen.has(replay.replayId),
+  );
+}
+
 function createEmptyMatchStats() {
   return {
     ranked: {
@@ -290,11 +302,22 @@ function normalizeProfilePlayer(data, fallbackPlayer = {}) {
   const matching = desiredCharacterId == null
     ? []
     : candidates.filter((candidate) => candidate.characterId === desiredCharacterId);
+  // When the current character is known, never silently substitute another
+  // character's rating. The profile payload can contain every character's
+  // league entry (and the preferred entry is not always the character used in
+  // the last match). A candidate without a character id is still acceptable
+  // as a generic profile-level value; it is safer than mixing a known
+  // different character, and the caller keeps the last good value if none is
+  // available.
+  const hasScopedCandidates = candidates.some((candidate) => candidate.characterId != null);
+  const unscoped = desiredCharacterId == null || !hasScopedCandidates
+    ? candidates
+    : [];
   const candidate =
     matching.find((item) => item.preferred) ??
     matching[0] ??
-    candidates.find((item) => item.preferred) ??
-    candidates[0] ??
+    unscoped.find((item) => item.preferred) ??
+    unscoped[0] ??
     null;
   if (!candidate) return null;
 
@@ -325,10 +348,6 @@ function normalizeProfilePlayer(data, fallbackPlayer = {}) {
 
 function playerRatingType(player) {
   return player?.mr != null ? "MR" : player?.lp != null ? "LP" : null;
-}
-
-function profileCardPath(locale, profileId) {
-  return `/6/buckler/api/${encodeURIComponent(String(locale))}/card/${encodeURIComponent(String(profileId))}`;
 }
 
 function profileCacheLookup(cache, key, now, cooldownMs, force = false) {
@@ -673,12 +692,12 @@ module.exports = {
   applyNewReplays,
   classifyBattleType,
   createEmptyMatchStats,
+  findNewRankedReplays,
   normalizeFighter,
   normalizeProfilePlayer,
   normalizeReplay,
   buildHistoryRatingState,
   profileCacheLookup,
-  profileCardPath,
   playerRatingType,
   repairRatingBaseline,
   shareInFlightRequest,
