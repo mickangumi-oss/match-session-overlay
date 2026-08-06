@@ -14,10 +14,10 @@
 
 OBSを使わない場合、アプリの通常ウィンドウまたはオーバーレイを表示しておくことも出来ます。
 
-公開版: v1.0.15
+公開版: v1.0.16
 ## ダウンロード
 
-[v1.0.15をダウンロード（GitHub Releases）](https://github.com/mickangumi-oss/match-session-overlay/releases/download/v1.0.15/Match-Session-Overlay-1.0.15-Setup.exe)
+[v1.0.16をダウンロード（GitHub Releases）](https://github.com/mickangumi-oss/match-session-overlay/releases/download/v1.0.16/Match-Session-Overlay-1.0.16-Setup.exe)
 
 開いたページの「Assets」から、`Match-Session-Overlay-x.x.x-Setup.exe`をダウンロードして実行してください。
 最新版以外のファイルや、配布元を確認できないファイルはアカウントハックの恐れがあるので使用しないでください。
@@ -32,6 +32,21 @@ Match Session Overlayは、公式サイトから取得した対戦戦績を、�
 ## 画面イメージ
 
 画像は使用した時のイメージです。
+
+## v1.0.16の修正内容
+
+### 不具合修正
+
+- 他のプレイヤーの対戦履歴を表示したとき、MR DELTAの基準値に自分の戦績や別プレイヤーのデータが混ざることがある問題を修正しました。
+- 最後の試合を取得した直後に、CURRENT MR／CURRENT LPやMR DELTAが1試合分遅れて表示される問題を修正しました。
+- キャラクターを切り替えたとき、前のキャラクターのMR／LPやグラフが引き継がれる問題を修正しました。
+- 管理画面、通常ウィンドウ、オーバーレイで現在のMR／LPやMR DELTAが異なることがある問題を修正しました。
+
+### 機能追加・改善
+
+- CURRENT MR／CURRENT LPを、対戦時のスナップショットではなく、選択中の言語に対応した公式プロフィール情報から更新するようにしました。
+- MASTER系ランクはMR、それ以外のランクはLPとして、キャラクターごとに表示・集計するようにしました。
+- 同じプロフィールを短時間に重複取得しないよう、キャッシュと通信の共有を追加しました。通信間隔や自動停止など既存の負荷対策は維持しています。
 
 ![直近5件を表示した管理画面の例](docs/images/management-history-example.jpg)
 
