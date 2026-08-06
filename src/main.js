@@ -1046,6 +1046,9 @@ function publicOverlayState() {
     fallbackOverlaySize;
   return {
     active: sourceState.active,
+    currentRating: sourceState.currentRating,
+    currentRatingType: sourceState.ratingType || authenticatedRatingType,
+    ratingDelta: sourceState.ratingDelta,
     stats: sourceState.stats,
     overlaySuppressed,
     medianRating: median.medianRating,
