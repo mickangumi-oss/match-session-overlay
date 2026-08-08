@@ -53,6 +53,10 @@ const {
 } = require("./display-settings");
 const { buildPresentationState } = require("./presentation-model");
 const {
+  createSessionAchievementState,
+  updateSessionAchievements,
+} = require("./session-achievements");
+const {
   DEFAULT_RANKING_HOME,
   buildCharacterSlugCatalog,
   buildRankingHomeCatalog,
@@ -325,6 +329,8 @@ let statsWindowBounds = {
 };
 
 let trackerState = createEmptyTrackerState();
+let sessionAchievementState = createSessionAchievementState();
+let historySessionAchievementState = createSessionAchievementState();
 const matchHistoryStores = new Map();
 const historyProfileLookupCache = new Map();
 const profileRefreshCache = new Map();
@@ -1145,6 +1151,47 @@ function publicRankingState(sourceState = trackerState) {
   };
 }
 
+function buildCurrentPresentation({
+  sourceState,
+  player,
+  median,
+  ranking,
+  historyView = false,
+}) {
+  const basePresentation = buildPresentationState({
+    sourceState,
+    player,
+    matchType: displaySettings.matchType,
+    median,
+    ranking,
+  });
+  const previousAchievements = historyView
+    ? historySessionAchievementState
+    : sessionAchievementState;
+  const result = updateSessionAchievements(previousAchievements, {
+    profileId: player?.profileId ?? player?.userCode,
+    characterId: basePresentation.characterId,
+    ratingType: basePresentation.ratingType,
+    currentRating: basePresentation.currentRating,
+    homeKey: ranking.homeKey,
+    currentRank: basePresentation.mrRank,
+    rankingReady: ranking.status === "ready",
+  });
+  if (historyView) {
+    historySessionAchievementState = result.state;
+  } else {
+    sessionAchievementState = result.state;
+  }
+  return buildPresentationState({
+    sourceState,
+    player,
+    matchType: displaySettings.matchType,
+    median,
+    ranking,
+    achievements: result,
+  });
+}
+
 function publicTrackerState() {
   const viewState = historyViewTrackerState();
   const sourceState = viewState ?? trackerState;
@@ -1160,12 +1207,12 @@ function publicTrackerState() {
   return {
     ...publicState,
     ...median,
-    presentation: buildPresentationState({
+    presentation: buildCurrentPresentation({
       sourceState,
       player: presentationPlayer,
-      matchType: displaySettings.matchType,
       median,
       ranking,
+      historyView: Boolean(viewState),
     }),
     ranking,
     graphData: publicGraphData(sourceState),
@@ -1209,12 +1256,12 @@ function publicOverlayState() {
     fallbackOverlaySize;
   const presentationPlayer = sourceState.player ?? historyViewPlayer ?? authenticatedPlayer;
   const ranking = publicRankingState(sourceState);
-  const presentation = buildPresentationState({
+  const presentation = buildCurrentPresentation({
     sourceState,
     player: presentationPlayer,
-    matchType: displaySettings.matchType,
     median,
     ranking,
+    historyView: Boolean(viewState),
   });
   return {
     active: sourceState.active,
@@ -1428,7 +1475,9 @@ function statsWindowPresetFor(mode = displaySettings.mode) {
   }
 
   const preferredCardWidth = isOverlay ? 118 : 142;
-  const minimumCardWidth = isOverlay ? 76 : 88;
+  // Wide fonts still need to show 10,000,000 LP and six-digit ranks in full.
+  // Values shrink proportionally, but the window stops before clipping them.
+  const minimumCardWidth = 104;
   const preferredMetricWidth = metricCount
     ? metricCount * preferredCardWidth + Math.max(0, metricCount - 1) * 6 + 20
     : 0;
@@ -2310,6 +2359,8 @@ async function clearPrivateDataWithConfirmation() {
   rankingCatalogCache.clear();
   rankingCharacterSlugCache.clear();
   rankingInFlight.clear();
+  sessionAchievementState = createSessionAchievementState();
+  historySessionAchievementState = createSessionAchievementState();
   socialRefreshInFlight.clear();
   resetSocialSourcePages();
   rankingState = {
@@ -3286,6 +3337,7 @@ async function startTrackingInternal(player) {
     trackerState.stopReason = null;
     trackerState.status = "監視中";
   } else {
+    sessionAchievementState = createSessionAchievementState();
     const newestRanked = [...replays]
       .filter((replay) => replay.matchType === "ranked")
       .sort((a, b) => b.uploadedAt - a.uploadedAt)[0];
@@ -3516,6 +3568,7 @@ function stopTracking() {
   stopPolling();
   trackingSessionId += 1;
   trackerState = createEmptyTrackerState();
+  sessionAchievementState = createSessionAchievementState();
   sendTrackerState();
   return publicTrackerState();
 }
@@ -3541,6 +3594,7 @@ function resetTrackingStats() {
   stats.ranked.ratingHistory =
     trackerState.currentRating == null ? [] : [trackerState.currentRating];
   const resetAt = Date.now();
+  sessionAchievementState = createSessionAchievementState();
   trackerState = {
     ...trackerState,
     wins: 0,

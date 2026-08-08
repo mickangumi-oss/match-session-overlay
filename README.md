@@ -11,13 +11,13 @@
 - 公式サイトへのログインと戦績取得に必要なインターネット接続
 - OBSで表示する場合のみ、OBS Studio（任意）
 
-公開版: v1.1.0
+公開版: v1.1.1
 
 ## ダウンロード
 
-[v1.1.0をダウンロード（GitHub Releases）](https://github.com/mickangumi-oss/match-session-overlay/releases/download/v1.1.0/Match-Session-Overlay-1.1.0-Setup.exe)
+[v1.1.1をダウンロード（GitHub Releases）](https://github.com/mickangumi-oss/match-session-overlay/releases/download/v1.1.1/Match-Session-Overlay-1.1.1-Setup.exe)
 
-開いたページの「Assets」から、`Match-Session-Overlay-1.1.0-Setup.exe`をダウンロードして実行してください。最新版以外のファイルや、配布元を確認できないファイルは使用しないでください。
+開いたページの「Assets」から、`Match-Session-Overlay-1.1.1-Setup.exe`をダウンロードして実行してください。最新版以外のファイルや、配布元を確認できないファイルは使用しないでください。
 
 詳しい操作手順は[`docs/usage.md`](docs/usage.md)、表示レイアウトは[`docs/window-layout.md`](docs/window-layout.md)、対戦履歴は[`docs/match-history.md`](docs/match-history.md)、フォントは[`docs/font-settings.md`](docs/font-settings.md)をご覧ください。
 
@@ -54,6 +54,35 @@ MR RANKと現在のキャラクター、セッション戦績、FRIENDS／FOLLOW
 取得済みの対戦を絞り込み、勝敗、勝率、最大連勝、MR／LP推移、末尾7日間の勝敗グラフを確認できます。
 
 ![合成データを表示した対戦履歴画面](docs/images/match-history-example.png)
+
+## v1.1.1の変更内容
+
+### 追加・改善
+
+- 管理画面に、選択中のプレイヤー名、使用キャラクター、セッション開始・リセット後の最高MR／LP（SESSION PEAK）、MASTERランキング順位をまとめて表示するヘッダーを追加しました。
+- 通常ウィンドウ、オーバーレイ、OBSの表示項目に`SESSION PEAK MR／LP`を追加し、MR RANKにはセッション開始順位からの増減を表示するようにしました。
+- PLAYER STATUSをオンライン優先・最終ログイン順で並べ、FRIENDS／FOLLOWINGをそれぞれ1ページ10件でページ分割するようにしました。
+- PLAYER STATUSのランク名表示と、プレイヤー名から対象USER CODEの対戦履歴を取得する操作を改善しました。
+- 新しいバージョンがある場合、管理画面の「オプション」ボタンへ`UPDATE`バッジを表示するようにしました。
+- オプションのメンテナンスを最上段へ移動し、更新確認・更新・ローカルデータ削除をスクロールせず操作できるようにしました。
+- 更新確認中・ダウンロード中・更新準備完了の状態を明確にし、操作ボタンを読みやすい大きさへ統一しました。
+- 公式サイトへの通信を直列化し、アクセス間隔、混雑時の待機、重複リクエスト抑制を改善しました。
+
+### 表示調整
+
+- 横表示のカード数に応じて最小幅を調整し、大きなLPや6桁以上の順位も全桁を保ったまま自動縮小するようにしました。
+- 通常ウィンドウとオーバーレイでは、POTENTIALの試合数とMR RANKのHOME名を省き、カード内の数値領域を広げました。
+- MR RANKの順位増減をカード中央へ揃えました。
+- オプションの`BACKGROUND`と`FONT SIZE`スライダーを同じ高さへ揃えました。
+
+### 不具合修正
+
+- POTENTIAL MR／LP基準線をOFFにした際、`POTENTIAL MR 0`の線が表示される問題を修正しました。
+- PLAYER STATUSの公式ページ件数が変化した際、空ページや重複ページが残ることがある問題を修正しました。
+- ローカルデータ削除後に処理中だった通信結果が再保存される可能性を修正しました。
+- アカウント・表示言語の切り替え中に、古い取得結果が混ざる可能性を修正しました。
+
+過去の変更内容は[`docs/release-notes`](docs/release-notes)をご覧ください。
 
 ## v1.1.0の変更内容
 

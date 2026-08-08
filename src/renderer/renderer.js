@@ -57,7 +57,9 @@ const elements = Object.fromEntries(
     "recordWins",
     "recordLosses",
     "winRate",
+    "monitorPlayerName",
     "currentCharacter",
+    "sessionPeakRating",
     "currentMrRank",
     "currentMrRankHome",
     "currentRatingLabel",
@@ -730,7 +732,7 @@ function fitPlayerName() {
   });
 }
 
-function fitScoreValue(element) {
+function fitScoreValue(element, minimumSize = 10) {
   if (!element) return;
   element.style.fontSize = "";
 
@@ -738,7 +740,6 @@ function fitScoreValue(element) {
   // Keep the card width fixed and reduce only the value when it overflows.
   requestAnimationFrame(() => {
     const baseSize = Number.parseFloat(getComputedStyle(element).fontSize) || 16;
-    const minimumSize = 18;
     let size = baseSize;
     while (size > minimumSize && element.scrollWidth > element.clientWidth + 1) {
       size = Math.max(minimumSize, size - 0.5);
@@ -758,6 +759,8 @@ function fitManagementScoreValues() {
     elements.ratingDelta,
     elements.medianRating,
     elements.currentCharacter,
+    elements.sessionPeakRating,
+    elements.currentMrRank,
   ]) {
     fitScoreValue(element);
   }
@@ -820,10 +823,9 @@ function drawManagementChart(
     (value) => Number.isFinite(value) && (ratingType !== "LP" || value > 0),
   );
   if (!values.length) return;
-  const potentialValue = Number(potentialRating);
+  const potentialValue = potentialRating == null ? null : Number(potentialRating);
   const potential =
-    Number.isFinite(potentialValue) &&
-    (ratingType !== "LP" || potentialValue > 0)
+    Number.isFinite(potentialValue) && potentialValue > 0
       ? potentialValue
       : null;
   const labelScale = Math.min(
@@ -1223,19 +1225,49 @@ function renderCurrentCharacter(state = trackerState) {
   fitScoreValue(elements.currentCharacter);
 }
 
+function formatRatingValue(value, ratingType) {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number <= 0) return "—";
+  const locale = displaySettings.locale || "ja-jp";
+  return `${new Intl.NumberFormat(locale).format(Math.round(number))} ${ratingType === "LP" ? "LP" : "MR"}`;
+}
+
+function renderMonitorPlayer(state = trackerState) {
+  if (!elements.monitorPlayerName) return;
+  const playerName = String(
+    state?.presentation?.playerName ?? state?.player?.name ?? selectedPlayer?.name ?? "",
+  ).trim();
+  elements.monitorPlayerName.textContent = playerName || "—";
+  elements.monitorPlayerName.title = playerName;
+}
+
+function renderSessionPeak(state = trackerState) {
+  if (!elements.sessionPeakRating) return;
+  const presentation = state?.presentation ?? {};
+  elements.sessionPeakRating.textContent = formatRatingValue(
+    presentation.sessionPeakRating,
+    presentation.sessionPeakRatingType ?? presentation.ratingType,
+  );
+  fitScoreValue(elements.sessionPeakRating);
+}
+
 function renderCurrentMrRank(state = trackerState) {
   if (!elements.currentMrRank) return;
   const ranking = state?.ranking ?? {};
   const rank = Number(ranking.rank);
   const locale = displaySettings.locale || "ja-jp";
+  const rawDelta = state?.presentation?.mrRankDelta;
+  const delta = rawDelta == null ? null : Number(rawDelta);
+  const formattedDelta = Number.isFinite(delta)
+    ? `${delta > 0 ? "↑" : delta < 0 ? "↓" : "±"}${Math.abs(Math.trunc(delta))}`
+    : "—";
   elements.currentMrRank.textContent = Number.isFinite(rank) && rank > 0
-    ? locale === "ja-jp"
-      ? `${new Intl.NumberFormat(locale).format(rank)}位`
-      : `#${new Intl.NumberFormat(locale).format(rank)}`
+    ? `${locale === "ja-jp" ? `${new Intl.NumberFormat(locale).format(rank)}位` : `#${new Intl.NumberFormat(locale).format(rank)}`} ${formattedDelta}`
     : ranking.status === "loading"
       ? "…"
       : "—";
   elements.currentMrRankHome.textContent = String(ranking.homeLabel ?? "").trim();
+  fitScoreValue(elements.currentMrRank);
 }
 
 function formatSocialDate(timestamp) {
@@ -1313,7 +1345,9 @@ function applyAuthenticatedPlayer(player) {
   fitPlayerName();
   renderRatingLabels();
   renderCurrentRating();
+  renderMonitorPlayer();
   renderCurrentCharacter();
+  renderSessionPeak();
   renderCurrentMrRank();
   setStatus(elements.authStatus, t("loggedIn", "ログイン済み"), "ok");
   elements.startTrackingButton.disabled = false;
@@ -1339,7 +1373,9 @@ function renderTracker(state) {
   trackerState = state;
   renderRatingLabels(state);
   renderCurrentRating(state);
+  renderMonitorPlayer(state);
   renderCurrentCharacter(state);
+  renderSessionPeak(state);
   renderCurrentMrRank(state);
   const matchType = displaySettings.matchType ?? "ranked";
   const selected = state.stats?.[matchType] ?? {};
@@ -1380,7 +1416,7 @@ const DISPLAY_METRIC_KEYS = [
   "currentRating",
   "ratingDelta",
   "potentialRating",
-  "currentCharacter",
+  "sessionPeak",
   "mrRank",
 ];
 
@@ -1572,6 +1608,7 @@ function renderUpdate(state) {
     "hidden",
     state.status !== "ready",
   );
+  elements.installUpdateButton.disabled = state.status !== "ready";
   elements.installUpdateButton.textContent = required
     ? t("updateForce", "強制更新")
     : t("update", "更新");
@@ -1580,6 +1617,14 @@ function renderUpdate(state) {
   elements.checkUpdateButton.classList.toggle("hidden", hasUpdate);
   elements.checkUpdateButton.disabled =
     state.status === "checking" || state.status === "downloading";
+  elements.checkUpdateButton.textContent =
+    state.status === "checking"
+      ? t("checking", "確認中…")
+      : t("check", "確認");
+  updateRow.setAttribute(
+    "aria-busy",
+    String(state.status === "checking" || downloading),
+  );
   if (required) {
     setOptionsOpen(true);
     requestAnimationFrame(() =>
@@ -2202,17 +2247,28 @@ elements.clearDataButton.addEventListener("click", async () => {
 });
 
 elements.checkUpdateButton.addEventListener("click", async () => {
+  renderUpdate({
+    status: "checking",
+    required: false,
+    progress: 0,
+    messageKey: "updateChecking",
+    message: t("updateChecking", "GitHub Releasesの更新を確認しています…"),
+  });
   try {
     renderUpdate(await unwrap(api.checkForUpdates()));
   } catch (error) {
+    elements.checkUpdateButton.disabled = false;
+    elements.checkUpdateButton.textContent = t("check", "確認");
     showNotice(error.message, "error");
   }
 });
 
 elements.installUpdateButton.addEventListener("click", async () => {
+  elements.installUpdateButton.disabled = true;
   try {
     await unwrap(api.installUpdate());
   } catch (error) {
+    elements.installUpdateButton.disabled = false;
     showNotice(error.message, "error");
   }
 });

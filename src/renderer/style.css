@@ -581,6 +581,58 @@ h3 {
   gap: 4px;
 }
 
+.maintenance-card .utility-row {
+  min-width: 0;
+  gap: 8px;
+}
+
+.maintenance-card .update-copy {
+  min-width: 0;
+}
+
+.maintenance-actions {
+  min-width: 78px;
+}
+
+.maintenance-action-button {
+  flex: 0 0 auto;
+  min-width: 78px;
+  min-height: 34px;
+  padding: 0 13px;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.045);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  transition: background 120ms ease, border-color 120ms ease,
+    box-shadow 120ms ease, filter 120ms ease;
+}
+
+.maintenance-action-button:hover:not(:disabled) {
+  filter: brightness(1.14);
+}
+
+.maintenance-action-button:disabled {
+  cursor: wait;
+  opacity: 0.58;
+}
+
+.maintenance-action-button.accent {
+  border-color: rgba(183, 255, 66, 0.72);
+  background: rgba(183, 255, 66, 0.14);
+  color: var(--lime);
+  box-shadow: 0 0 12px rgba(183, 255, 66, 0.22);
+}
+
+.maintenance-action-button.danger {
+  border-color: rgba(255, 101, 125, 0.36);
+  background: rgba(255, 101, 125, 0.08);
+  color: #ff91a3;
+}
+
 .update-row .icon-button {
   min-width: 28px;
   padding-inline: 4px;
@@ -629,12 +681,13 @@ body.update-required .cockpit .hud-panel .update-row * {
 
 .update-copy > p:last-of-type {
   overflow: hidden;
-  max-width: 185px;
+  max-width: none;
   margin-top: 3px;
   color: var(--muted);
   font-size: 10px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .actions.compact {
@@ -1679,6 +1732,14 @@ footer {
   letter-spacing: 0.08em;
 }
 
+.design-options-card {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.design-options-card > h4 {
+  grid-column: 1 / -1;
+}
+
 .options-category-wide {
   grid-column: 1 / -1;
 }
@@ -1815,6 +1876,86 @@ footer {
   white-space: nowrap;
 }
 
+/* The live-session header reserves stable columns for the monitored player
+   and session achievements.  Labels get two fixed lines; values stay on one
+   line and shrink only when their own column is genuinely too narrow. */
+.monitor-heading {
+  display: grid;
+  grid-template-columns:
+    minmax(100px, 0.9fr)
+    minmax(148px, 1.3fr)
+    minmax(82px, 0.78fr)
+    minmax(88px, 0.82fr)
+    minmax(96px, 0.9fr)
+    auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.monitor-heading > :first-child {
+  min-width: 0;
+}
+
+.monitor-metric {
+  display: grid;
+  min-width: 0;
+  margin: 0;
+  grid-template-rows: 18px minmax(22px, auto) 10px;
+  gap: 2px;
+  text-align: center;
+}
+
+.monitor-metric .control-label {
+  display: flex;
+  min-height: 18px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  color: var(--cyan);
+  font-size: 8px;
+  letter-spacing: 0.1em;
+  line-height: 0.95;
+  white-space: nowrap;
+}
+
+.monitor-metric strong {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  max-width: none;
+  color: var(--text);
+  font-family: var(--stats-font-family);
+  font-size: clamp(13px, 1.35vw, 17px);
+  font-style: var(--stats-font-style);
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  text-overflow: clip;
+  text-transform: none;
+  white-space: nowrap;
+}
+
+.monitor-player strong {
+  font-family: "Bahnschrift Condensed", "Arial Narrow", sans-serif;
+  font-size: clamp(13px, 1.3vw, 17px);
+}
+
+.monitor-peak strong,
+.monitor-rank strong {
+  color: var(--lime);
+  font-size: clamp(12px, 1.25vw, 16px);
+}
+
+.monitor-metric small {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 8px;
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .social-panel {
   display: grid;
   min-height: 0;
@@ -1923,6 +2064,25 @@ footer {
 .options-category-card.force-update {
   border-color: rgba(255, 101, 125, 0.9);
   box-shadow: inset 3px 0 0 var(--red), 0 0 16px rgba(255, 101, 125, 0.2);
+}
+
+.options-category-card.force-update .maintenance-action-button.accent {
+  border-color: rgba(255, 101, 125, 0.92);
+  background: rgba(255, 101, 125, 0.18);
+  color: #ffd7dd;
+  box-shadow: 0 0 14px rgba(255, 101, 125, 0.3);
+}
+
+@media (max-width: 760px) {
+  .maintenance-actions,
+  .maintenance-action-button {
+    min-width: 68px;
+  }
+
+  .maintenance-action-button {
+    padding-inline: 9px;
+    font-size: 9px;
+  }
 }
 
 .option-button {
