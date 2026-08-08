@@ -14,7 +14,11 @@ const {
   rankingRequestQuery,
   shouldRefreshRanking,
 } = require("../src/ranking-model");
-const { normalizeSocialPage } = require("../src/social-model");
+const {
+  normalizeSocialPage,
+  paginateSocialPlayers,
+  socialSourcePagePlan,
+} = require("../src/social-model");
 const {
   DISPLAY_ITEM_KEYS,
   defaultDisplayItems,
@@ -53,14 +57,16 @@ function fixtureSocialEntry({
   status = "ONLINE",
   masterRating = 1600,
   battleHubServer = "007",
+  lastPlayedAt = 1_700_000_200,
+  lastLoginAt = null,
 } = {}) {
-  return {
+  const entry = {
     registered_at: 1_700_000_000,
     fighter_banner_info: {
       favorite_character_id: characterId,
       favorite_character_name: "Synthetic character",
       favorite_character_tool_name: "synthetic-character",
-      last_play_at: 1_700_000_200,
+      last_play_at: lastPlayedAt,
       personal_info: {
         short_id: profileId,
         fighter_id: name,
@@ -82,6 +88,10 @@ function fixtureSocialEntry({
       },
     },
   };
+  if (lastLoginAt != null) {
+    entry.fighter_banner_info.online_status_info.last_login_at = lastLoginAt;
+  }
+  return entry;
 }
 
 test("HOME catalog and official ranking query preserve grouped selections", () => {
@@ -261,7 +271,7 @@ test("friends and following normalize separately while preserving each page", ()
   assert.notEqual(friends.players[0].profileId, following.players[0].profileId);
 });
 
-test("social players sort online first, retain official order within each group, and hide zero-only hub servers", () => {
+test("social players sort online first then by latest official activity and hide zero-only hub servers", () => {
   const page = normalizeSocialPage({
     pageProps: {
       friend_list: [
@@ -271,6 +281,7 @@ test("social players sort online first, retain official order within each group,
           characterId: 101,
           status: "LOGOUT",
           battleHubServer: "0000",
+          lastPlayedAt: 1_700_000_400,
         }),
         fixtureSocialEntry({
           profileId: "synthetic-online-first",
@@ -278,31 +289,149 @@ test("social players sort online first, retain official order within each group,
           characterId: 102,
           status: "BATTLE_HUB",
           battleHubServer: "007",
+          lastPlayedAt: 1_700_000_300,
         }),
         fixtureSocialEntry({
           profileId: "synthetic-online-second",
           name: "Synthetic online second",
           characterId: 103,
           status: "MENU",
+          lastLoginAt: 1_700_000_500,
         }),
         fixtureSocialEntry({
           profileId: "synthetic-offline-second",
           name: "Synthetic offline second",
           characterId: 104,
           status: "OFFLINE",
+          lastPlayedAt: 1_700_000_100,
         }),
       ],
     },
   }, "friends");
 
   assert.deepEqual(page.players.map((player) => player.profileId), [
-    "synthetic-online-first",
     "synthetic-online-second",
+    "synthetic-online-first",
     "synthetic-offline-first",
     "synthetic-offline-second",
   ]);
-  assert.equal(page.players[0].battleHubServer, "007");
+  assert.equal(page.players[0].lastLoginAt, 1_700_000_500_000);
+  assert.equal(page.players[1].battleHubServer, "007");
   assert.equal(page.players[2].battleHubServer, "");
+});
+
+test("social activity sorting falls back to last play and remains stable on ties", () => {
+  const page = normalizeSocialPage({
+    pageProps: {
+      followed_fighter_banner_list: [
+        fixtureSocialEntry({
+          profileId: "synthetic-tie-first",
+          name: "Synthetic tie first",
+          characterId: 105,
+          status: "LOGOUT",
+          lastPlayedAt: 1_700_000_200,
+        }),
+        fixtureSocialEntry({
+          profileId: "synthetic-newest",
+          name: "Synthetic newest",
+          characterId: 106,
+          status: "LOGOUT",
+          lastPlayedAt: 1_700_000_900,
+        }),
+        fixtureSocialEntry({
+          profileId: "synthetic-tie-second",
+          name: "Synthetic tie second",
+          characterId: 107,
+          status: "LOGOUT",
+          lastPlayedAt: 1_700_000_200,
+        }),
+      ],
+    },
+  }, "following");
+
+  assert.deepEqual(page.players.map((player) => player.profileId), [
+    "synthetic-newest",
+    "synthetic-tie-first",
+    "synthetic-tie-second",
+  ]);
+});
+
+test("social display pagination keeps at most ten synthetic players per page", () => {
+  const players = Array.from({ length: 25 }, (_, index) => ({
+    profileId: `synthetic-page-${String(index + 1).padStart(2, "0")}`,
+  }));
+  const first = paginateSocialPlayers(players, 1);
+  const second = paginateSocialPlayers(players, 2);
+  const third = paginateSocialPlayers(players, 3);
+
+  assert.equal(first.players.length, 10);
+  assert.equal(second.players.length, 10);
+  assert.equal(third.players.length, 5);
+  assert.equal(first.totalPages, 3);
+  assert.equal(second.players[0].profileId, "synthetic-page-11");
+  assert.equal(third.players.at(-1).profileId, "synthetic-page-25");
+  assert.equal(Math.max(first.pageSize, second.pageSize, third.pageSize), 10);
+  for (const [count, pages] of [[0, 1], [1, 1], [10, 1], [11, 2], [20, 2], [21, 3]]) {
+    const synthetic = Array.from({ length: count }, (_, index) => ({ profileId: `case-${count}-${index}` }));
+    assert.equal(paginateSocialPlayers(synthetic, 999).totalPages, pages);
+    assert.ok(paginateSocialPlayers(synthetic, 999).players.length <= 10);
+  }
+});
+
+test("social app pages preserve overflow entries from each official source page", () => {
+  const secondOfTwentyFive = socialSourcePagePlan({
+    appPage: 2,
+    sourcePageSize: 25,
+    sourceTotalPages: 1,
+    lastSourceCount: 25,
+  });
+  assert.deepEqual(secondOfTwentyFive, {
+    appPage: 2,
+    totalPages: 3,
+    chunksPerSourcePage: 3,
+    sourcePage: 1,
+    sourceOffset: 10,
+  });
+
+  const lastRemotePage = socialSourcePagePlan({
+    appPage: 3,
+    sourcePageSize: 20,
+    sourceTotalPages: 2,
+    lastSourceCount: 5,
+  });
+  assert.equal(lastRemotePage.totalPages, 3);
+  assert.equal(lastRemotePage.sourcePage, 2);
+  assert.equal(lastRemotePage.sourceOffset, 0);
+
+  const unknownLastPage = socialSourcePagePlan({
+    appPage: 99,
+    sourcePageSize: 20,
+    sourceTotalPages: 2,
+  });
+  assert.equal(unknownLastPage.totalPages, 3);
+  assert.equal(unknownLastPage.appPage, 3);
+  assert.equal(unknownLastPage.sourcePage, 2);
+});
+
+test("social normalization distinguishes a requested page from an official clamp", () => {
+  const missingPage = normalizeSocialPage({
+    pageProps: { total_pages: 2, friend_list: [] },
+  }, "friends", 2);
+  assert.equal(missingPage.page, 2);
+
+  const clampedPage = normalizeSocialPage({
+    pageProps: { page: 1, total_pages: 1, friend_list: [] },
+  }, "friends", 2);
+  assert.equal(clampedPage.page, 1);
+  assert.equal(clampedPage.totalPages, 1);
+  const reducedListPlan = socialSourcePagePlan({
+    appPage: 3,
+    sourcePageSize: 20,
+    sourceTotalPages: clampedPage.totalPages,
+    lastSourceCount: 11,
+  });
+  assert.equal(reducedListPlan.appPage, 2);
+  assert.equal(reducedListPlan.totalPages, 2);
 });
 
 test("social rank keeps an official name, rejects numeric IDs, and falls back to MASTER only for MR", () => {

@@ -624,7 +624,7 @@ function renderDisplayItemVisibility(settings) {
   elements.root.classList.toggle("no-chart", displayItems.graph === false);
 }
 
-function renderSettings(settings) {
+function renderSettings(settings, { skipTrackerRender = false } = {}) {
   displaySettings = settings;
   renderDisplayItemVisibility(settings);
   localeApi?.applyTranslations?.(document, settings.locale || "ja-jp");
@@ -667,9 +667,9 @@ function renderSettings(settings) {
     settings.overlayInteractionLocked === true,
   );
   animateBackgroundOpacity(settings.backgroundOpacity);
-  if (trackerState) {
+  if (trackerState && !skipTrackerRender) {
     renderTracker(trackerState);
-  } else {
+  } else if (!trackerState && !skipTrackerRender) {
     // Apply graph settings immediately even when the first tracker-state
     // message has not arrived yet; do not wait for the next poll.
     void api.getState()
@@ -715,17 +715,21 @@ elements.root.addEventListener("pointercancel", finishWindowDrag);
 api.onState(renderTracker);
 api.onDisplaySettings(renderSettings);
 
-if (typeof ResizeObserver === "function") {
-  const statsResizeObserver = new ResizeObserver(() => {
+let statsResizeFrame = 0;
+function scheduleStatsResizeRender() {
+  if (statsResizeFrame) return;
+  statsResizeFrame = requestAnimationFrame(() => {
+    statsResizeFrame = 0;
     fitStatsValues();
     redrawStatsChart();
   });
+}
+
+if (typeof ResizeObserver === "function") {
+  const statsResizeObserver = new ResizeObserver(scheduleStatsResizeRender);
   statsResizeObserver.observe(elements.root);
 }
-window.addEventListener("resize", () => {
-  fitStatsValues();
-  redrawStatsChart();
-});
+window.addEventListener("resize", scheduleStatsResizeRender);
 
 if (remoteOverlay) {
   document.body.classList.add("remote-overlay");
@@ -742,8 +746,10 @@ if (remoteOverlay) {
       document.body.style.width = `${width}px`;
       document.body.style.height = `${height}px`;
     }
+    for (const callback of remoteDisplaySettingsListeners) {
+      callback(settings, { skipTrackerRender: true });
+    }
     for (const callback of remoteStateListeners) callback(payload);
-    for (const callback of remoteDisplaySettingsListeners) callback(settings);
   };
   const refreshRemoteOverlay = async () => {
     try {
@@ -755,8 +761,9 @@ if (remoteOverlay) {
     }
   };
   refreshRemoteOverlay();
+  let overlayEvents = null;
   if (typeof EventSource === "function") {
-    const overlayEvents = new EventSource("/events");
+    overlayEvents = new EventSource("/events");
     overlayEvents.addEventListener("state", (event) => {
       try {
         dispatchRemoteOverlay(JSON.parse(event.data));
@@ -766,12 +773,18 @@ if (remoteOverlay) {
       }
     });
   }
-  window.setInterval(refreshRemoteOverlay, 2000);
+  window.setInterval(() => {
+    if (!overlayEvents || overlayEvents.readyState !== EventSource.OPEN) {
+      refreshRemoteOverlay();
+    }
+  }, 2000);
 }
 
-Promise.all([api.getState(), api.getDisplaySettings()])
-  .then(([stateResult, settingsResult]) => {
-    renderSettings(unwrap(settingsResult));
-    renderTracker(unwrap(stateResult));
-  })
-  .catch(() => {});
+if (!remoteOverlay) {
+  Promise.all([api.getState(), api.getDisplaySettings()])
+    .then(([stateResult, settingsResult]) => {
+      trackerState = unwrap(stateResult);
+      renderSettings(unwrap(settingsResult));
+    })
+    .catch(() => {});
+}

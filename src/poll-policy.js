@@ -50,6 +50,19 @@ function errorBackoffMs(consecutiveFailures) {
   return ERROR_BACKOFF_MS[index];
 }
 
+function retryAfterMilliseconds(value, now = Date.now(), maximum = Infinity) {
+  const normalized = String(value ?? "").trim();
+  if (!normalized) return 0;
+  const seconds = Number(normalized);
+  const date = Number.isFinite(seconds) ? NaN : Date.parse(normalized);
+  const milliseconds = Number.isFinite(seconds)
+    ? Math.max(0, seconds * 1000)
+    : Number.isFinite(date)
+      ? Math.max(0, date - Number(now))
+      : 0;
+  return Math.min(Math.max(0, Number(maximum) || 0), milliseconds);
+}
+
 module.exports = {
   ERROR_BACKOFF_MS,
   IDLE_AUTO_STOP_AFTER_MS,
@@ -61,6 +74,7 @@ module.exports = {
   SERVICE_REQUEST_MIN_GAP_MS,
   errorBackoffMs,
   inactivityMs,
+  retryAfterMilliseconds,
   shouldAutoStopForInactivity,
   successfulPollDelayMs,
 };

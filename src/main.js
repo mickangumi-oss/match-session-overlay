@@ -40,6 +40,7 @@ const {
   POLL_JITTER_MAX_MS,
   SERVICE_REQUEST_MIN_GAP_MS,
   errorBackoffMs,
+  retryAfterMilliseconds,
   shouldAutoStopForInactivity,
   successfulPollDelayMs,
 } = require("./poll-policy");
@@ -63,7 +64,11 @@ const {
   sanitizeRankingHomeKey,
   shouldRefreshRanking,
 } = require("./ranking-model");
-const { normalizeSocialPage } = require("./social-model");
+const {
+  normalizeSocialPage,
+  paginateSocialPlayers,
+  socialSourcePagePlan,
+} = require("./social-model");
 const { createUpdater } = require("./updater");
 
 const APP_NAME = "MatchSessionOverlay";
@@ -291,8 +296,13 @@ let localeRefreshInFlight = null;
 let trackingSessionId = 0;
 let serviceRequestQueue = Promise.resolve();
 let lastServiceRequestAt = 0;
+let serviceRetryBlockedUntil = 0;
+let privateDataGeneration = 0;
+let privateDataClearing = false;
+const serviceAbortControllers = new Set();
 let displaySettingsWriteTimer;
 let gameMonitorTimer;
+let startupUpdateTimer;
 let gameWasRunning = false;
 let autoGameSessionActive = false;
 let overlaySuppressed = false;
@@ -349,11 +359,32 @@ let rankingState = {
 };
 let socialRefreshTimer = null;
 const socialRefreshInFlight = new Map();
-let socialState = {
-  friends: { status: "idle", page: 1, totalPages: 1, pageSize: 0, players: [] },
-  following: { status: "idle", page: 1, totalPages: 1, pageSize: 0, players: [] },
-  updatedAt: null,
+const SOCIAL_PAGE_SIZE = 10;
+const socialSourcePages = {
+  friends: new Map(),
+  following: new Map(),
 };
+const socialSourceMeta = {
+  friends: { pageSize: SOCIAL_PAGE_SIZE, totalPages: 1 },
+  following: { pageSize: SOCIAL_PAGE_SIZE, totalPages: 1 },
+};
+
+function emptySocialState() {
+  return {
+    friends: { status: "idle", page: 1, totalPages: 1, pageSize: 0, players: [] },
+    following: { status: "idle", page: 1, totalPages: 1, pageSize: 0, players: [] },
+    updatedAt: null,
+  };
+}
+
+function resetSocialSourcePages() {
+  for (const kind of ["friends", "following"]) {
+    socialSourcePages[kind].clear();
+    socialSourceMeta[kind] = { pageSize: SOCIAL_PAGE_SIZE, totalPages: 1 };
+  }
+}
+
+let socialState = emptySocialState();
 let displaySettings = {
   mode: "window",
   windowOrientation: "horizontal",
@@ -873,6 +904,7 @@ async function runHistoryViewPoll(sessionId) {
     }
     historyViewConsecutiveFailures += 1;
     if (error instanceof Error && error.message === "SERVICE_AUTH_REQUIRED") {
+      invalidateAuthenticationState();
       stopHistoryViewPolling("authentication");
     } else if (historyViewConsecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
       stopHistoryViewPolling("network");
@@ -1245,11 +1277,12 @@ function broadcastOverlayState() {
 }
 
 function sendTrackerState() {
+  const state = publicTrackerState();
   if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send("tracker:state", publicTrackerState());
+    mainWindow.webContents.send("tracker:state", state);
   }
   if (statsWindow && !statsWindow.isDestroyed()) {
-    statsWindow.webContents.send("tracker:state", publicTrackerState());
+    statsWindow.webContents.send("tracker:state", state);
   }
   broadcastOverlayState();
 }
@@ -1446,9 +1479,10 @@ function currentStatsWindowPreset() {
 }
 
 function sendDisplaySettings() {
+  const settings = publicDisplaySettings();
   for (const target of [mainWindow, statsWindow]) {
     if (target && !target.isDestroyed()) {
-      target.webContents.send("display:settings", publicDisplaySettings());
+      target.webContents.send("display:settings", settings);
     }
   }
   broadcastOverlayState();
@@ -2247,10 +2281,26 @@ async function clearPrivateDataWithConfirmation() {
   }
   if (response !== 0) return { cleared: false };
 
+  privateDataClearing = true;
+  privateDataGeneration += 1;
+  for (const controller of serviceAbortControllers) controller.abort();
+  serviceAbortControllers.clear();
   stopTracking();
+  stopHistoryViewPolling();
+  stopSocialRefresh();
+  matchHistoryFetchInFlight = null;
+  matchHistoryFetchProgress = null;
+  authenticationInFlight = null;
+  localeRefreshInFlight = null;
+  buildIdInFlight = null;
   if (loginWindow && !loginWindow.isDestroyed()) loginWindow.close();
-  await sourceSession.clearData();
-  await sourceSession.clearAuthCache();
+  try {
+    await sourceSession.clearData();
+    await sourceSession.clearAuthCache();
+  } catch (error) {
+    privateDataClearing = false;
+    throw error;
+  }
   matchHistoryStores.clear();
   historyProfileLookupCache.clear();
   profileRefreshCache.clear();
@@ -2260,8 +2310,8 @@ async function clearPrivateDataWithConfirmation() {
   rankingCatalogCache.clear();
   rankingCharacterSlugCache.clear();
   rankingInFlight.clear();
-  stopSocialRefresh();
   socialRefreshInFlight.clear();
+  resetSocialSourcePages();
   rankingState = {
     status: "idle",
     rank: null,
@@ -2273,15 +2323,8 @@ async function clearPrivateDataWithConfirmation() {
     homeLabel: "All",
     updatedAt: null,
   };
-  socialState = {
-    friends: { status: "idle", page: 1, totalPages: 1, pageSize: 0, players: [] },
-    following: { status: "idle", page: 1, totalPages: 1, pageSize: 0, players: [] },
-    updatedAt: null,
-  };
-  stopHistoryViewPolling();
+  socialState = emptySocialState();
   historyViewPlayer = null;
-  matchHistoryFetchInFlight = null;
-  matchHistoryFetchProgress = null;
   authenticatedProfileId = null;
   authenticatedPlayer = null;
   authenticatedRatingType = "MR";
@@ -2297,6 +2340,7 @@ async function clearPrivateDataWithConfirmation() {
   sendHistoryState();
   buildId = null;
   buildIdLocale = null;
+  privateDataClearing = false;
   sendTrackerState();
   sendDisplaySettings();
   return { cleared: true };
@@ -2306,28 +2350,66 @@ function wait(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
+function assertPrivateDataGeneration(generation) {
+  if (privateDataClearing || generation !== privateDataGeneration) {
+    throw new Error("PRIVATE_DATA_CLEARED");
+  }
+}
+
+function serviceRateLimitError(retryAfterHeader = null) {
+  const retryAfterMs = retryAfterHeader == null
+    ? Math.max(0, serviceRetryBlockedUntil - Date.now())
+    : retryAfterMilliseconds(
+        retryAfterHeader,
+        Date.now(),
+        MAX_SERVICE_RETRY_DELAY_MS,
+      );
+  if (retryAfterMs > 0) {
+    serviceRetryBlockedUntil = Math.max(
+      serviceRetryBlockedUntil,
+      Date.now() + retryAfterMs,
+    );
+  }
+  const error = new Error("SERVICE_RATE_LIMITED");
+  error.retryAfterMs = Math.max(0, serviceRetryBlockedUntil - Date.now());
+  return error;
+}
+
 function fetchServiceWithRateLimit(url, options) {
+  const generation = privateDataGeneration;
   const request = serviceRequestQueue
     .catch(() => {})
     .then(async () => {
+      assertPrivateDataGeneration(generation);
+      if (Date.now() < serviceRetryBlockedUntil) {
+        throw serviceRateLimitError();
+      }
       const remainingDelay = Math.max(
         0,
         lastServiceRequestAt + SERVICE_REQUEST_MIN_GAP_MS - Date.now(),
       );
       if (remainingDelay > 0) await wait(remainingDelay);
+      assertPrivateDataGeneration(generation);
+      if (Date.now() < serviceRetryBlockedUntil) {
+        throw serviceRateLimitError();
+      }
       lastServiceRequestAt = Date.now();
       const controller = new AbortController();
+      serviceAbortControllers.add(controller);
       const timeout = setTimeout(
         () => controller.abort(),
         SERVICE_FETCH_TIMEOUT_MS,
       );
       try {
-        return await sourceSession.fetch(url, {
+        const response = await sourceSession.fetch(url, {
           ...options,
           signal: controller.signal,
         });
+        assertPrivateDataGeneration(generation);
+        return response;
       } finally {
         clearTimeout(timeout);
+        serviceAbortControllers.delete(controller);
       }
     });
   serviceRequestQueue = request.then(
@@ -2338,10 +2420,11 @@ function fetchServiceWithRateLimit(url, options) {
 }
 
 async function loadBuildId(force = false) {
+  const generation = privateDataGeneration;
   const requestedLocale = serviceLocale();
   if (buildId && buildIdLocale === requestedLocale && !force) return buildId;
-  if (buildIdInFlight) return buildIdInFlight;
-  buildIdInFlight = (async () => {
+  if (buildIdInFlight?.locale === requestedLocale) return buildIdInFlight.promise;
+  const request = (async () => {
     const response = await fetchServiceWithRateLimit(
       `${SERVICE_ORIGIN}/6/buckler/${requestedLocale}`,
       {
@@ -2351,19 +2434,26 @@ async function loadBuildId(force = false) {
       },
     );
     if (!response.ok) {
+      if (response.status === 429) {
+        throw serviceRateLimitError(response.headers.get("retry-after"));
+      }
       throw new Error(`SERVICE_HTTP_${response.status}`);
     }
-    const nextBuildId = parseBuildId(await response.text());
+    const html = await response.text();
+    assertPrivateDataGeneration(generation);
+    const nextBuildId = parseBuildId(html);
     if (serviceLocale() === requestedLocale) {
       buildId = nextBuildId;
       buildIdLocale = requestedLocale;
     }
     return nextBuildId;
   })();
+  const inFlight = { locale: requestedLocale, promise: request };
+  buildIdInFlight = inFlight;
   try {
-    return await buildIdInFlight;
+    return await request;
   } finally {
-    buildIdInFlight = null;
+    if (buildIdInFlight === inFlight) buildIdInFlight = null;
   }
 }
 
@@ -2386,19 +2476,7 @@ async function fetchServiceJson(relativePath, query = {}, retry = true) {
   });
 
   if (response.status === 429) {
-    const retryAfter = response.headers.get("retry-after");
-    const retryAfterSeconds = Number(retryAfter);
-    const retryAfterDate = Number.isNaN(retryAfterSeconds)
-      ? Date.parse(retryAfter)
-      : NaN;
-    const retryAfterMs = Number.isFinite(retryAfterSeconds)
-      ? Math.max(0, retryAfterSeconds * 1000)
-      : Number.isFinite(retryAfterDate)
-        ? Math.max(0, retryAfterDate - Date.now())
-        : 0;
-    const error = new Error("SERVICE_RATE_LIMITED");
-    error.retryAfterMs = Math.min(MAX_SERVICE_RETRY_DELAY_MS, retryAfterMs);
-    throw error;
+    throw serviceRateLimitError(response.headers.get("retry-after"));
   }
 
   if (response.status === 404 && retry) {
@@ -2433,6 +2511,7 @@ function openSocialProfile(profileId) {
 }
 
 async function ensureRankingMetadata() {
+  const generation = privateDataGeneration;
   const locale = serviceLocale();
   const cachedCatalog = rankingCatalogCache.get(locale);
   const cachedCharacters = rankingCharacterSlugCache.get(locale);
@@ -2446,6 +2525,7 @@ async function ensureRankingMetadata() {
       page: 1,
       season_type: 1,
     });
+    assertPrivateDataGeneration(generation);
     const catalog = buildRankingHomeCatalog(data);
     const characters = buildCharacterSlugCatalog(data);
     rankingCatalogCache.set(locale, catalog);
@@ -2595,11 +2675,78 @@ function sendSocialState() {
   }
 }
 
+function invalidateAuthenticationState() {
+  authenticatedProfileId = null;
+  authenticatedPlayer = null;
+  authenticatedRatingType = "MR";
+  stopSocialRefresh();
+  socialRefreshInFlight.clear();
+  resetSocialSourcePages();
+  socialState = emptySocialState();
+  sendSocialState();
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send("auth:player", null);
+  }
+}
+
+function cacheSocialSourcePage(kind, normalized) {
+  const sourcePage = Math.max(1, Math.trunc(Number(normalized?.page) || 1));
+  const players = Array.isArray(normalized?.players) ? normalized.players : [];
+  // A fresh official page can move players across page boundaries as their
+  // activity changes. Keep only that fresh source page so another app page is
+  // fetched again instead of showing a stale duplicate.
+  socialSourcePages[kind].clear();
+  socialSourcePages[kind].set(sourcePage, { ...normalized, players: [...players] });
+  const meta = socialSourceMeta[kind];
+  meta.pageSize = Math.max(SOCIAL_PAGE_SIZE, meta.pageSize, players.length);
+  meta.totalPages = Math.max(sourcePage, Number(normalized?.totalPages) || sourcePage);
+}
+
+function socialPageLocation(kind, appPage) {
+  const meta = socialSourceMeta[kind];
+  return socialSourcePagePlan({
+    appPage,
+    sourcePageSize: meta.pageSize,
+    sourceTotalPages: meta.totalPages,
+    displayPageSize: SOCIAL_PAGE_SIZE,
+  });
+}
+
+function buildSocialAppPage(kind, appPage, status = "ready") {
+  const meta = socialSourceMeta[kind];
+  const lastSourcePage = socialSourcePages[kind].get(meta.totalPages);
+  const location = socialSourcePagePlan({
+    appPage,
+    sourcePageSize: meta.pageSize,
+    sourceTotalPages: meta.totalPages,
+    lastSourceCount: lastSourcePage?.players.length ?? null,
+    displayPageSize: SOCIAL_PAGE_SIZE,
+  });
+  const source = socialSourcePages[kind].get(location.sourcePage);
+  const sourceChunkPage = Math.floor(location.sourceOffset / SOCIAL_PAGE_SIZE) + 1;
+  const localPage = paginateSocialPlayers(
+    source?.players ?? [],
+    sourceChunkPage,
+    SOCIAL_PAGE_SIZE,
+  );
+  const players = localPage.players;
+  return {
+    kind,
+    status,
+    page: location.appPage,
+    totalPages: location.totalPages,
+    pageSize: players.length,
+    players,
+  };
+}
+
 async function refreshSocialKind(kind, page = socialState[kind]?.page ?? 1) {
   if (!["friends", "following"].includes(kind)) throw new Error("SOCIAL_KIND_INVALID");
   const requestedPage = Math.max(1, Math.trunc(Number(page) || 1));
+  const location = socialPageLocation(kind, requestedPage);
   const profileIdAtRequest = String(authenticatedProfileId ?? "");
-  const requestKey = `${kind}:${requestedPage}:${serviceLocale()}`;
+  const generation = privateDataGeneration;
+  const requestKey = `${profileIdAtRequest}:${kind}:${location.sourcePage}:${serviceLocale()}`;
   if (socialRefreshInFlight.has(requestKey)) return socialRefreshInFlight.get(requestKey);
   const previous = socialState[kind];
   socialState[kind] = { ...previous, status: "loading" };
@@ -2609,23 +2756,50 @@ async function refreshSocialKind(kind, page = socialState[kind]?.page ?? 1) {
       const relativePath = kind === "following"
         ? "fighterslist/follow.json"
         : "fighterslist/friend.json";
-      const data = await fetchServiceJson(relativePath, { page: requestedPage });
+      const data = await fetchServiceJson(relativePath, {
+        page: location.sourcePage,
+        order_type: "last_play",
+        order_order: 0,
+      });
+      assertPrivateDataGeneration(generation);
       if (String(authenticatedProfileId ?? "") !== profileIdAtRequest) {
         return publicSocialState();
       }
-      const normalized = normalizeSocialPage(data, kind);
-      socialState[kind] = { ...normalized, status: "ready" };
+      const normalized = normalizeSocialPage(data, kind, location.sourcePage);
+      cacheSocialSourcePage(kind, normalized);
+      socialState[kind] = buildSocialAppPage(kind, requestedPage);
       socialState.updatedAt = Date.now();
     } catch (error) {
-      socialState[kind] = { ...previous, status: "error" };
+      if (
+        generation === privateDataGeneration &&
+        String(authenticatedProfileId ?? "") === profileIdAtRequest
+      ) {
+        socialState[kind] = { ...previous, status: "error" };
+      }
       throw error;
     } finally {
       sendSocialState();
     }
     return publicSocialState();
-  })().finally(() => socialRefreshInFlight.delete(requestKey));
+  })().finally(() => {
+    if (socialRefreshInFlight.get(requestKey) === request) {
+      socialRefreshInFlight.delete(requestKey);
+    }
+  });
   socialRefreshInFlight.set(requestKey, request);
   return request;
+}
+
+async function changeSocialPage(kind, page) {
+  if (!["friends", "following"].includes(kind)) throw new Error("SOCIAL_KIND_INVALID");
+  const requestedPage = Math.max(1, Math.trunc(Number(page) || 1));
+  const location = socialPageLocation(kind, requestedPage);
+  if (!socialSourcePages[kind].has(location.sourcePage)) {
+    return refreshSocialKind(kind, requestedPage);
+  }
+  socialState[kind] = buildSocialAppPage(kind, requestedPage);
+  sendSocialState();
+  return publicSocialState();
 }
 
 async function refreshSocialLists() {
@@ -2659,8 +2833,13 @@ function scheduleSocialRefresh({ immediate = false } = {}) {
   socialRefreshTimer = setTimeout(run, delay);
 }
 
-async function checkAuthenticationInternal() {
-  const data = await fetchServiceJson("fighterslist/friend.json");
+async function checkAuthenticationInternal(generation) {
+  const data = await fetchServiceJson("fighterslist/friend.json", {
+    page: 1,
+    order_type: "last_play",
+    order_order: 0,
+  });
+  assertPrivateDataGeneration(generation);
   if (!data?.pageProps) {
     throw new Error("SERVICE_AUTH_REQUIRED");
   }
@@ -2672,6 +2851,7 @@ async function checkAuthenticationInternal() {
   let player;
   try {
     player = await searchPlayer(userCode);
+    assertPrivateDataGeneration(generation);
   } catch (error) {
     if (error.message === "PLAYER_NOT_FOUND") {
       throw new Error("SERVICE_SELF_NOT_FOUND");
@@ -2679,22 +2859,32 @@ async function checkAuthenticationInternal() {
     throw error;
   }
   player = await refreshProfilePlayer(player);
+  assertPrivateDataGeneration(generation);
   return { authenticated: true, player, friendPage: normalizeSocialPage(data, "friends") };
 }
 
 async function checkAuthentication() {
   ensureUpdateAllowed();
   if (authenticationInFlight) return authenticationInFlight;
-  authenticationInFlight = checkAuthenticationInternal();
+  const generation = privateDataGeneration;
+  const request = checkAuthenticationInternal(generation);
+  authenticationInFlight = request;
   try {
-    const result = await authenticationInFlight;
+    const result = await request;
+    assertPrivateDataGeneration(generation);
     const player = result?.player;
+    const nextProfileId = player?.profileId ?? player?.userCode ?? null;
+    if (String(authenticatedProfileId ?? "") !== String(nextProfileId ?? "")) {
+      resetSocialSourcePages();
+      socialState = emptySocialState();
+    }
     authenticatedPlayer = player ?? null;
-    authenticatedProfileId = player?.profileId ?? player?.userCode ?? null;
+    authenticatedProfileId = nextProfileId;
     authenticatedRatingType =
       player?.mr != null ? "MR" : player?.lp != null ? "LP" : "MR";
     if (result.friendPage) {
-      socialState.friends = { ...result.friendPage, status: "ready" };
+      cacheSocialSourcePage("friends", result.friendPage);
+      socialState.friends = buildSocialAppPage("friends", 1);
       socialState.updatedAt = Date.now();
       sendSocialState();
     }
@@ -2705,11 +2895,16 @@ async function checkAuthentication() {
     }
     await Promise.allSettled([
       refreshMasterRanking({ player, characterId: player?.characterId }),
-      refreshSocialKind("following", socialState.following.page),
+      refreshSocialKind("following", 1),
     ]);
     return result;
+  } catch (error) {
+    if (["SERVICE_AUTH_REQUIRED", "SERVICE_SELF_NOT_FOUND"].includes(error?.message)) {
+      invalidateAuthenticationState();
+    }
+    throw error;
   } finally {
-    authenticationInFlight = null;
+    if (authenticationInFlight === request) authenticationInFlight = null;
   }
 }
 
@@ -2737,6 +2932,7 @@ async function searchPlayer(userCode) {
 }
 
 async function refreshProfilePlayer(player, { force = false } = {}) {
+  const generation = privateDataGeneration;
   const profileId = normalizeHistoryProfileId(player?.profileId ?? player?.userCode);
   if (!profileId) return player;
   const characterId = Number(player?.characterId) || 0;
@@ -2775,6 +2971,7 @@ async function refreshProfilePlayer(player, { force = false } = {}) {
       const data = await fetchServiceJson(
         `profile/${encodeURIComponent(profileId)}.json`,
       );
+      assertPrivateDataGeneration(generation);
       if (requestedLocale !== serviceLocale()) return player;
       const refreshed = normalizeProfilePlayer(data, player);
       if (!refreshed) throw new Error("PROFILE_RATING_NOT_FOUND");
@@ -2793,7 +2990,8 @@ async function refreshProfilePlayer(player, { force = false } = {}) {
       };
       profileRefreshCache.set(cacheKey, { fetchedAt: now, player: nextPlayer });
       return nextPlayer;
-    } catch {
+    } catch (error) {
+      if (error?.message === "PRIVATE_DATA_CLEARED") throw error;
       // Never replace a known-good current value with a replay baseline when
       // the optional profile request fails. Cache the failure briefly to
       // preserve the site's request budget and retry on a later polling cycle.
@@ -2820,7 +3018,7 @@ async function refreshTrackedPlayerForLocale() {
     normalizeHistoryProfileId(current?.profileId ?? current?.userCode) ===
       normalizeHistoryProfileId(previous?.profileId ?? previous?.userCode) &&
     (Number(current?.characterId) || 0) === (Number(previous?.characterId) || 0);
-  localeRefreshInFlight = (async () => {
+  const request = (async () => {
     try {
       const [nextTrackerPlayer, nextHistoryPlayer, nextAuthenticatedPlayer] =
         await Promise.all([
@@ -2867,9 +3065,10 @@ async function refreshTrackedPlayerForLocale() {
       // rate-limited path.
     }
   })().finally(() => {
-    localeRefreshInFlight = null;
+    if (localeRefreshInFlight === request) localeRefreshInFlight = null;
   });
-  return localeRefreshInFlight;
+  localeRefreshInFlight = request;
+  return request;
 }
 
 async function fetchRankedReplaysPage(profileId, page = 1) {
@@ -2908,6 +3107,7 @@ async function fetchMatchHistoryPages(profileId, onPage = null) {
 async function fetchLocalMatchHistory() {
   ensureUpdateAllowed();
   if (matchHistoryFetchInFlight) return matchHistoryFetchInFlight;
+  const generation = privateDataGeneration;
   const now = Date.now();
   const profileId = activeHistoryProfileId();
   const store = loadMatchHistoryStore(profileId);
@@ -2920,9 +3120,10 @@ async function fetchLocalMatchHistory() {
     throw error;
   }
 
-  matchHistoryFetchInFlight = (async () => {
+  const request = (async () => {
     const player =
       historyViewPlayer ?? trackerState.player ?? (await checkAuthentication()).player;
+    assertPrivateDataGeneration(generation);
     if (!player?.profileId) throw new Error("SERVICE_SELF_NOT_FOUND");
     // Manual imports walk the paginated battle log. Live tracking continues to
     // use one page per poll, so enabling history does not multiply polling
@@ -2941,6 +3142,7 @@ async function fetchLocalMatchHistory() {
     };
     sendHistoryState();
     await fetchMatchHistoryPages(player.profileId, async ({ page, replays }) => {
+      assertPrivateDataGeneration(generation);
       fetchedCount += replays.length;
       for (const replay of replays) {
         if (replay.replayId && !previousReplayIds.has(replay.replayId)) {
@@ -2960,6 +3162,7 @@ async function fetchLocalMatchHistory() {
       if (!changed) sendHistoryState();
       sendTrackerState();
     });
+    assertPrivateDataGeneration(generation);
     const fetchedStore = loadMatchHistoryStore(player.profileId);
     fetchedStore.lastFetchedAt = Date.now();
     persistMatchHistoryStore(player.profileId, fetchedStore);
@@ -2977,21 +3180,26 @@ async function fetchLocalMatchHistory() {
     sendTrackerState();
     return publicHistoryState(player.profileId);
   })();
+  matchHistoryFetchInFlight = request;
   try {
-    return await matchHistoryFetchInFlight;
+    return await request;
   } finally {
-    matchHistoryFetchInFlight = null;
-    matchHistoryFetchProgress = null;
-    sendHistoryState();
+    if (matchHistoryFetchInFlight === request) {
+      matchHistoryFetchInFlight = null;
+      matchHistoryFetchProgress = null;
+      sendHistoryState();
+    }
   }
 }
 
 async function selectHistoryProfile(userCode) {
   ensureUpdateAllowed();
+  const generation = privateDataGeneration;
   const normalizedCode = normalizeHistoryProfileId(userCode);
   if (!normalizedCode) throw new Error("INVALID_USER_CODE");
   const ownPlayer =
     authenticatedPlayer ?? trackerState.player ?? (await checkAuthentication()).player;
+  assertPrivateDataGeneration(generation);
   if (!ownPlayer?.profileId) throw new Error("SERVICE_SELF_NOT_FOUND");
   let nextHistoryViewPlayer = null;
   if (normalizedCode === normalizeHistoryProfileId(ownPlayer.profileId)) {
@@ -3004,6 +3212,7 @@ async function selectHistoryProfile(userCode) {
       nextHistoryViewPlayer = cached.player;
     } else {
       const player = await searchPlayer(normalizedCode);
+      assertPrivateDataGeneration(generation);
       historyProfileLookupCache.set(cacheKey, {
         fetchedAt: Date.now(),
         player,
@@ -3017,7 +3226,9 @@ async function selectHistoryProfile(userCode) {
     nextHistoryViewPlayer = await refreshProfilePlayer(nextHistoryViewPlayer, {
       force: true,
     });
+    assertPrivateDataGeneration(generation);
   }
+  assertPrivateDataGeneration(generation);
   stopHistoryViewPolling();
   historyViewPlayer = nextHistoryViewPlayer;
   if (historyViewPlayer) startHistoryViewPolling();
@@ -3179,6 +3390,7 @@ async function runScheduledPoll(sessionId) {
     trackerState.updatedAt = Date.now();
     trackerState.consecutiveFailures += 1;
     if (error instanceof Error && error.message === "SERVICE_AUTH_REQUIRED") {
+      invalidateAuthenticationState();
       autoStopTracking(
         "authentication",
         "ログインの有効期限が切れたため自動停止しました",
@@ -3432,7 +3644,7 @@ function registerIpcHandlers() {
   );
   ipcMain.handle(
     "social:page",
-    resultHandler(({ kind, page }) => refreshSocialKind(kind, page)),
+    resultHandler(({ kind, page }) => changeSocialPage(kind, page)),
   );
   ipcMain.handle(
     "social:open-profile",
@@ -3629,7 +3841,10 @@ app.whenReady().then(() => {
   configureGameDetection();
 
   if (app.isPackaged) {
-    setTimeout(() => updater.check().catch(() => {}), 750);
+    startupUpdateTimer = setTimeout(() => {
+      startupUpdateTimer = null;
+      updater.check().catch(() => {});
+    }, 750);
   }
 });
 
@@ -3650,6 +3865,9 @@ app.on("window-all-closed", () => {
 
 app.on("before-quit", () => {
   isQuitting = true;
+  updater?.cancel?.();
+  clearTimeout(startupUpdateTimer);
+  startupUpdateTimer = null;
   stopPolling();
   stopHistoryViewPolling();
   stopSocialRefresh();

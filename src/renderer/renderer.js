@@ -33,6 +33,7 @@ const HISTORY_PAGE_SIZE = 10;
 const RECENT_HISTORY_PREVIEW_LIMIT = 5;
 let historyPage = 0;
 let managementChartRenderToken = 0;
+let managementResizeFrame = 0;
 let socialState = {
   friends: { status: "idle", page: 1, totalPages: 1, players: [] },
   following: { status: "idle", page: 1, totalPages: 1, players: [] },
@@ -219,6 +220,7 @@ function drawHistoryResultChart(records) {
   const canvas = elements.historyResultChart;
   if (!canvas) return;
   const rect = canvas.getBoundingClientRect();
+  if (rect.width <= 0 || rect.height <= 0) return;
   const width = Math.max(1, rect.width);
   const height = Math.max(1, rect.height);
   const ratio = window.devicePixelRatio || 1;
@@ -304,6 +306,7 @@ function drawHistoryRatingChart(records, ratingType, canvas, emptyElement) {
   if (emptyElement) emptyElement.classList.toggle("hidden", points.length > 0);
 
   const rect = canvas.getBoundingClientRect();
+  if (rect.width <= 0 || rect.height <= 0) return;
   const width = Math.max(1, rect.width);
   const height = Math.max(1, rect.height);
   const ratio = window.devicePixelRatio || 1;
@@ -533,6 +536,39 @@ function selectHistoryPotentialRating(records, player = historyState.player) {
   return { ratingType, value: Math.round(value), sampleCount: values.length };
 }
 
+function renderHistoryFetchStatus() {
+  const nextAllowedAt = Number(historyState.nextAllowedAt) || 0;
+  const cooldown = nextAllowedAt
+    ? Math.max(0, Math.ceil((nextAllowedAt - Date.now()) / 1000))
+    : Math.max(0, Number(historyState.cooldownSeconds) || 0);
+  const canFetch = Boolean(historyState.authenticated) &&
+    !historyState.fetching &&
+    (nextAllowedAt ? cooldown <= 0 : Boolean(historyState.canFetch));
+  elements.fetchHistoryButton.disabled = !canFetch;
+  elements.fetchHistoryButton.textContent = historyState.fetching
+    ? t("historyFetching", "Loading…")
+    : t("fetchHistory", "Import 100 matches");
+  elements.historyFetchState.classList.toggle("loading", Boolean(historyState.fetching));
+  elements.historyFetchState.textContent = historyState.fetching
+    ? t("historyFetchProgress", "Loading page {page}/{max} · {count} fetched")
+      .replace("{page}", String(historyState.fetchPage || 1))
+      .replace("{max}", String(historyState.fetchMaxPages || 10))
+      .replace("{count}", String(historyState.fetchedCount || 0))
+    : historyState.viewingOther && historyState.polling
+      ? t("historyAutoUpdating", "Automatic update: every {seconds}s").replace(
+        "{seconds}",
+        String(historyState.pollIntervalSeconds ?? "--"),
+      )
+      : historyState.viewingOther && historyState.pollStopReason
+        ? t("historyAutoStopped", "Automatic update stopped after inactivity")
+        : !historyState.authenticated
+          ? t("historyFetchUnavailable", "Log in to import match history")
+          : canFetch
+            ? t("historyFetchReady", "Ready (one request per 10 minutes)")
+            : t("historyFetchCooldown", "Available again in {seconds}s")
+              .replace("{seconds}", String(cooldown));
+}
+
 function renderHistoryState(nextState = historyState) {
   historyState = nextState || { records: [], canFetch: false, authenticated: false, cooldownSeconds: 0 };
   const allRecords = Array.isArray(historyState.records) ? historyState.records : [];
@@ -602,29 +638,7 @@ function renderHistoryState(nextState = historyState) {
   if (elements.historyNextButton) {
     elements.historyNextButton.disabled = !totalPages || historyPage >= totalPages - 1;
   }
-  const cooldown = Number(historyState.cooldownSeconds || 0);
-  elements.fetchHistoryButton.disabled = historyState.fetching || !historyState.canFetch;
-  elements.fetchHistoryButton.textContent = historyState.fetching
-    ? t("historyFetching", "Loading…")
-    : t("fetchHistory", "Import 100 matches");
-  elements.historyFetchState.classList.toggle("loading", Boolean(historyState.fetching));
-  elements.historyFetchState.textContent = historyState.fetching
-    ? t("historyFetchProgress", "Loading page {page}/{max} · {count} fetched")
-      .replace("{page}", String(historyState.fetchPage || 1))
-      .replace("{max}", String(historyState.fetchMaxPages || 10))
-      .replace("{count}", String(historyState.fetchedCount || 0))
-    : historyState.viewingOther && historyState.polling
-    ? t("historyAutoUpdating", "Automatic update: every {seconds}s").replace(
-      "{seconds}",
-      String(historyState.pollIntervalSeconds ?? "--"),
-    )
-    : historyState.viewingOther && historyState.pollStopReason
-      ? t("historyAutoStopped", "Automatic update stopped after inactivity")
-      : !historyState.authenticated
-        ? t("historyFetchUnavailable", "Log in to import match history")
-        : historyState.canFetch
-          ? t("historyFetchReady", "Ready (one request per 10 minutes)")
-          : t("historyFetchCooldown", "Available again in {seconds}s").replace("{seconds}", String(cooldown));
+  renderHistoryFetchStatus();
 }
 
 function setHistoryPanelOpen(open) {
@@ -1246,7 +1260,7 @@ function renderSocialState(state = socialState) {
     button?.setAttribute("aria-selected", String(active));
   }
   elements.socialList.replaceChildren();
-  for (const player of tabState.players ?? []) {
+  for (const player of (tabState.players ?? []).slice(0, 10)) {
     const row = document.createElement("div");
     row.className = "social-player";
     row.tabIndex = 0;
@@ -1548,6 +1562,7 @@ function renderUpdate(state) {
   document.body.classList.toggle("update-required", required);
   elements.updateBadge.classList.toggle("hidden", !hasUpdate);
   elements.optionsUpdateBadge?.classList.toggle("hidden", !hasUpdate);
+  elements.optionsButton?.classList.toggle("has-update", hasUpdate);
   updateRow.classList.toggle("has-update", hasUpdate);
   updateRow.classList.toggle("force-update", required);
   elements.maintenanceSettingsCard?.classList.toggle("force-update", required);
@@ -2149,17 +2164,21 @@ elements.gameDetectionInput.addEventListener("change", async () => {
   );
 });
 
-window.addEventListener("resize", () => {
-  fitManagementScoreValues();
-  if (trackerState) {
-    renderManagementChart(trackerState);
-  }
-  if (historyPanelOpen) renderHistoryState();
-});
+function scheduleManagementResizeRender() {
+  if (managementResizeFrame) return;
+  managementResizeFrame = requestAnimationFrame(() => {
+    managementResizeFrame = 0;
+    fitManagementScoreValues();
+    if (trackerState) renderManagementChart(trackerState);
+    if (historyPanelOpen) renderHistoryState();
+  });
+}
+
+window.addEventListener("resize", scheduleManagementResizeRender);
 
 setInterval(renderNextUpdate, 1000);
 setInterval(() => {
-  if (historyPanelOpen) renderHistoryState();
+  if (historyPanelOpen) renderHistoryFetchStatus();
 }, 1000);
 
 elements.copyOverlayButton.addEventListener("click", async () => {
@@ -2207,6 +2226,13 @@ api.onSocialState?.(renderSocialState);
 api.onUpdateState(renderUpdate);
 api.onDisplaySettings(renderDisplaySettings);
 api.onAuthenticatedPlayer((player) => {
+  if (!player) {
+    selectedPlayer = null;
+    elements.playerPanel.classList.add("hidden");
+    setStatus(elements.authStatus, t("unverified", "未確認"));
+    elements.startTrackingButton.disabled = true;
+    return;
+  }
   applyAuthenticatedPlayer(player);
   showNotice(t("autoPlayerConfigured", "ログイン中のプレイヤーを自動設定しました"), "success");
 });
