@@ -293,7 +293,7 @@ const JA = {
   deleteLogin: "ログイン情報を削除",
   clear: "消去",
   appUpdate: "APP UPDATE",
-  updateAvailable: "更新",
+  updateAvailable: "UPDATE",
   githubUpdateNote: "GitHub Releasesから更新を確認できます",
   location: "場所",
   check: "確認",

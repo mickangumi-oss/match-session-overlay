@@ -7,6 +7,7 @@ const https = require("node:https");
 const { URL } = require("node:url");
 const { spawn } = require("node:child_process");
 const { app } = require("electron");
+const { retryAfterMilliseconds } = require("./poll-policy");
 
 // The release manifest is a static GitHub Release asset.  The application
 // never sends credentials, cookies, or player data to GitHub.
@@ -25,6 +26,7 @@ const MAX_MANIFEST_BYTES = 64 * 1024;
 const MAX_INSTALLER_BYTES = 250 * 1024 * 1024;
 const REQUEST_TIMEOUT_MS = 30_000;
 const REMOTE_CHECK_MIN_INTERVAL_MS = 5 * 60 * 1000;
+const MAX_UPDATE_RETRY_DELAY_MS = 24 * 60 * 60 * 1000;
 
 function isReleaseVersion(value) {
   return typeof value === "string" && /^\d+\.\d+\.\d+$/.test(value);
@@ -83,7 +85,7 @@ function validateRemoteUrl(rawUrl) {
   return url;
 }
 
-function requestBuffer(rawUrl, { maxBytes, onProgress } = {}, redirectCount = 0) {
+function requestBuffer(rawUrl, { maxBytes, onProgress, signal } = {}, redirectCount = 0) {
   if (redirectCount > 5) return Promise.reject(new Error("UPDATE_TOO_MANY_REDIRECTS"));
   const byteLimit = Number.isFinite(maxBytes) ? maxBytes : MAX_MANIFEST_BYTES;
   const url = validateRemoteUrl(rawUrl);
@@ -91,6 +93,7 @@ function requestBuffer(rawUrl, { maxBytes, onProgress } = {}, redirectCount = 0)
     const request = https.get(
       url,
       {
+        signal,
         headers: {
           Accept: "application/octet-stream, application/json",
           "User-Agent": `Match-Session-Overlay/${app.getVersion()}`,
@@ -101,13 +104,21 @@ function requestBuffer(rawUrl, { maxBytes, onProgress } = {}, redirectCount = 0)
         if (status >= 300 && status < 400 && response.headers.location) {
           const nextUrl = new URL(response.headers.location, url).toString();
           response.resume();
-          requestBuffer(nextUrl, { maxBytes, onProgress }, redirectCount + 1)
+          requestBuffer(nextUrl, { maxBytes, onProgress, signal }, redirectCount + 1)
             .then(resolve, reject);
           return;
         }
         if (status < 200 || status >= 300) {
           response.resume();
-          reject(new Error(`UPDATE_HTTP_${status}`));
+          const error = new Error(`UPDATE_HTTP_${status}`);
+          if (status === 429) {
+            error.retryAfterMs = retryAfterMilliseconds(
+              response.headers["retry-after"],
+              Date.now(),
+              MAX_UPDATE_RETRY_DELAY_MS,
+            );
+          }
+          reject(error);
           return;
         }
         const total = Number.parseInt(response.headers["content-length"] ?? "", 10);
@@ -140,7 +151,13 @@ function requestBuffer(rawUrl, { maxBytes, onProgress } = {}, redirectCount = 0)
   });
 }
 
-function downloadToFile(rawUrl, destinationPath, onProgress, redirectCount = 0) {
+function downloadToFile(
+  rawUrl,
+  destinationPath,
+  onProgress,
+  redirectCount = 0,
+  signal = null,
+) {
   if (redirectCount > 5) return Promise.reject(new Error("UPDATE_TOO_MANY_REDIRECTS"));
   const url = validateRemoteUrl(rawUrl);
   return new Promise((resolve, reject) => {
@@ -157,6 +174,7 @@ function downloadToFile(rawUrl, destinationPath, onProgress, redirectCount = 0) 
     const request = https.get(
       url,
       {
+        signal,
         headers: {
           Accept: "application/octet-stream",
           "User-Agent": `Match-Session-Overlay/${app.getVersion()}`,
@@ -169,7 +187,7 @@ function downloadToFile(rawUrl, destinationPath, onProgress, redirectCount = 0) 
           response.resume();
           output.close(() => {
             try { fs.rmSync(destinationPath, { force: true }); } catch { /* best effort */ }
-            downloadToFile(nextUrl, destinationPath, onProgress, redirectCount + 1)
+            downloadToFile(nextUrl, destinationPath, onProgress, redirectCount + 1, signal)
               .then(resolve, reject);
           });
           return;
@@ -222,9 +240,10 @@ function sha256File(filePath) {
   });
 }
 
-async function fetchRemoteManifest() {
+async function fetchRemoteManifest({ signal } = {}) {
   const buffer = await requestBuffer(REMOTE_MANIFEST_URL, {
     maxBytes: MAX_MANIFEST_BYTES,
+    signal,
   });
   let manifest;
   try {
@@ -245,7 +264,10 @@ async function fetchRemoteManifest() {
 
 function createUpdater({ onState }) {
   let pendingUpdate = null;
+  let checkInFlight = null;
   let remoteCache = { checkedAt: 0, manifest: null, error: null };
+  let nextCheckAllowedAt = 0;
+  const networkController = new AbortController();
   let state = {
     status: "idle",
     currentVersion: app.getVersion(),
@@ -278,23 +300,33 @@ function createUpdater({ onState }) {
 
   const getManifest = async () => {
     const now = Date.now();
+    if (now < nextCheckAllowedAt) {
+      const error = remoteCache.error ?? new Error("UPDATE_RATE_LIMITED");
+      error.retryAfterMs = nextCheckAllowedAt - now;
+      throw error;
+    }
     if (now - remoteCache.checkedAt < REMOTE_CHECK_MIN_INTERVAL_MS) {
       if (remoteCache.error) throw remoteCache.error;
       return remoteCache.manifest;
     }
     try {
-      const manifest = await fetchRemoteManifest();
+      const manifest = await fetchRemoteManifest({ signal: networkController.signal });
       remoteCache = { checkedAt: Date.now(), manifest, error: null };
+      nextCheckAllowedAt = 0;
       return manifest;
     } catch (error) {
       remoteCache = { checkedAt: Date.now(), manifest: null, error };
+      if (Number(error?.retryAfterMs) > 0) {
+        nextCheckAllowedAt = Math.max(
+          nextCheckAllowedAt,
+          Date.now() + Number(error.retryAfterMs),
+        );
+      }
       throw error;
     }
   };
 
-  return {
-    getState: () => state,
-    async check() {
+  const check = async () => {
       pendingUpdate = null;
       publish({
         status: "checking",
@@ -345,6 +377,21 @@ function createUpdater({ onState }) {
           ? `セキュリティ更新が必要です（バージョン ${manifest.version}）`
           : `バージョン ${manifest.version} に更新できます`,
       });
+  };
+
+  return {
+    getState: () => state,
+    cancel() {
+      networkController.abort();
+    },
+    check() {
+      if (checkInFlight) return checkInFlight;
+      const request = check();
+      const wrapped = request.finally(() => {
+        if (checkInFlight === wrapped) checkInFlight = null;
+      });
+      checkInFlight = wrapped;
+      return wrapped;
     },
     async install() {
       if (!pendingUpdate || state.status !== "ready") {
@@ -370,6 +417,8 @@ function createUpdater({ onState }) {
           pendingUpdate.installerUrl,
           temporaryPath,
           (progress) => publish({ progress }),
+          0,
+          networkController.signal,
         );
         const actualHash = await sha256File(temporaryPath);
         if (actualHash !== pendingUpdate.sha256) {
