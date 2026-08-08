@@ -180,6 +180,9 @@ FRIENDS／FOLLOWINGは管理画面を表示している間、設定した戦績�
 
 公式サイトのログイン状態、表示設定、対戦履歴は、このPCのアプリ専用フォルダーへ保存されます。IDやパスワードを保存することはありません。
 
+> [!IMPORTANT]
+> 本アプリは、公式ログイン画面へ入力したIDやパスワード、PC内に保存されたログイン状態、表示設定、対戦履歴を、開発者が管理するサーバーや広告・解析などの第三者サービスへ送信しません。戦績の取得は利用者のPCからストリートファイター6公式サイトへ、アプリの更新確認はGitHub Releasesへ直接通信して行います。OBSブラウザソースとの連携も同じPC内のローカル通信です。
+
 - 表示設定: `%LOCALAPPDATA%\MatchSessionOverlay\user-data\display-settings.json`
 - 対戦履歴: `%LOCALAPPDATA%\MatchSessionOverlay\user-data\match-history\<USER CODE>.json`
 - ログイン状態と一時ファイル: `%LOCALAPPDATA%\MatchSessionOverlay\session-data\`
