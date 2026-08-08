@@ -21,6 +21,12 @@
 
 詳しい操作手順は[`docs/usage.md`](docs/usage.md)、表示レイアウトは[`docs/window-layout.md`](docs/window-layout.md)、対戦履歴は[`docs/match-history.md`](docs/match-history.md)、フォントは[`docs/font-settings.md`](docs/font-settings.md)をご覧ください。
 
+### 配布ファイルのセキュリティチェック
+
+正式な配布インストーラーは、公開前にMicrosoft DefenderおよびVirusTotalでセキュリティチェックを実施します。検査結果は公開時点のものであり、完全な安全性を保証するものではありません。インストーラーは必ずこのリポジトリの公式GitHub Releaseから取得し、各リリースノートに記載されたSHA-256と一致することを確認してください。
+
+`v1.1.1`はMicrosoft Defenderで検出なし、VirusTotalで`0 / 68`でした。検査対象のSHA-256は`ABE8F944B248BAEF079EEC3109C3ED1843A9645D29ADD1BE12D4CA29F1ED1ABA`です。[VirusTotalの公開レポート](https://www.virustotal.com/gui/file/abe8f944b248baef079eec3109c3ed1843a9645d29add1be12d4ca29f1ed1aba/detection)も確認できます。
+
 ## 画面イメージ
 
 以下はすべて、実在しないプレイヤー名・USER CODE・戦績を使った合成データの画面です。
