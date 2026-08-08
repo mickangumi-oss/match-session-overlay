@@ -66,7 +66,7 @@ const METRIC_ITEM_KEYS = [
   "currentRating",
   "ratingDelta",
   "potentialRating",
-  "currentCharacter",
+  "sessionPeak",
   "mrRank",
 ];
 
@@ -87,12 +87,11 @@ const elements = {
   ratingDelta: document.getElementById("ratingDelta"),
   currentRatingLabel: document.getElementById("currentRatingLabel"),
   currentRating: document.getElementById("currentRating"),
-  currentCharacter: document.getElementById("currentCharacter"),
+  sessionPeakRating: document.getElementById("sessionPeakRating"),
   mrRank: document.getElementById("mrRank"),
-  mrRankHome: document.getElementById("mrRankHome"),
+  mrRankDelta: document.getElementById("mrRankDelta"),
   medianRatingLabel: document.getElementById("medianRatingLabel"),
   medianRating: document.getElementById("medianRating"),
-  medianRatingSample: document.getElementById("medianRatingSample"),
   statsChartPanel: document.getElementById("statsChartPanel"),
   statsRatingChart: document.getElementById("statsRatingChart"),
   statsChartEmpty: document.getElementById("statsChartEmpty"),
@@ -154,14 +153,13 @@ function unwrap(result) {
   return result.data;
 }
 
-function fitStatsValue(element) {
+function fitStatsValue(element, minimumSize = 10) {
   if (!element) return;
   element.style.fontSize = "";
   requestAnimationFrame(() => {
     if (!element.isConnected || element.clientWidth <= 0) return;
     const computedSize = Number.parseFloat(getComputedStyle(element).fontSize);
     const baseSize = Number.isFinite(computedSize) ? computedSize : 16;
-    const minimumSize = 18;
     let size = baseSize;
     // Width is the reliable overflow signal for these metric cards.  A grid
     // item's scrollHeight includes its line box and made vertical cards shrink
@@ -180,7 +178,9 @@ function fitStatsValues() {
     elements.currentRating,
     elements.ratingDelta,
     elements.medianRating,
-    elements.currentCharacter,
+    elements.sessionPeakRating,
+    elements.mrRank,
+    elements.mrRankDelta,
   ]) {
     fitStatsValue(element);
   }
@@ -227,10 +227,9 @@ function drawStatsChart(
     (value) => Number.isFinite(value) && (ratingType !== "LP" || value > 0),
   );
   if (!values.length) return;
-  const potentialValue = Number(potentialRating);
+  const potentialValue = potentialRating == null ? null : Number(potentialRating);
   const potential =
-    Number.isFinite(potentialValue) &&
-    (ratingType !== "LP" || potentialValue > 0)
+    Number.isFinite(potentialValue) && potentialValue > 0
       ? potentialValue
       : null;
   const labelScale = Math.min(
@@ -550,8 +549,11 @@ function renderTracker(state) {
   elements.ratingTypeLabel.textContent = `${ratingType} ${t("delta", "DELTA")}`;
   elements.ratingDelta.textContent =
     delta == null ? "—" : `${delta > 0 ? "+" : delta < 0 ? "" : "±"}${delta}`;
-  elements.currentCharacter.textContent =
-    String(presentation.currentCharacter ?? state?.player?.characterDisplayName ?? "").trim() || "—";
+  const peakRating = Number(presentation.sessionPeakRating);
+  const peakType = presentation.sessionPeakRatingType === "LP" ? "LP" : "MR";
+  elements.sessionPeakRating.textContent = Number.isFinite(peakRating) && peakRating > 0
+    ? `${new Intl.NumberFormat(displaySettings?.locale || "ja-jp").format(Math.round(peakRating))} ${peakType}`
+    : "—";
   const mrRank = Number(presentation.mrRank ?? state?.ranking?.rank);
   const locale = displaySettings?.locale || "ja-jp";
   elements.mrRank.textContent = Number.isFinite(mrRank) && mrRank > 0
@@ -561,9 +563,11 @@ function renderTracker(state) {
     : (presentation.mrRankLoading ?? state?.ranking?.status === "loading")
       ? "…"
       : "—";
-  elements.mrRankHome.textContent = String(
-    presentation.mrRankHome ?? state?.ranking?.homeLabel ?? "",
-  ).trim();
+  const rawRankDelta = presentation.mrRankDelta;
+  const rankDelta = rawRankDelta == null ? null : Number(rawRankDelta);
+  elements.mrRankDelta.textContent = Number.isFinite(rankDelta)
+    ? `${rankDelta > 0 ? "↑" : rankDelta < 0 ? "↓" : "±"}${Math.abs(Math.trunc(rankDelta))}`
+    : "—";
   renderMedianRating(state);
   fitStatsValues();
   renderStatsChart(state);
@@ -582,11 +586,6 @@ function renderMedianRating(state) {
     Number.isFinite(median) && sampleCount >= 2
       ? formatted
       : "—";
-  if (elements.medianRatingSample) {
-    elements.medianRatingSample.textContent = sampleCount
-      ? `(${sampleCount} ${t("matchUnit", "Match")})`
-      : "";
-  }
 }
 
 function normalizedDisplayItems(settings = {}) {

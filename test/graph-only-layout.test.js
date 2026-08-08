@@ -66,4 +66,5 @@ test("horizontal cards with a graph cannot shrink below a readable size", () => 
     mainSource,
     /horizontalGraphWithMetrics\s*\? HORIZONTAL_GRAPH_WITH_METRICS_MINIMUM_SIZE\.height/,
   );
+  assert.match(mainSource, /const minimumCardWidth = 104/);
 });

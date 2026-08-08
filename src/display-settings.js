@@ -6,7 +6,7 @@ const DISPLAY_ITEM_KEYS = [
   "currentRating",
   "ratingDelta",
   "potentialRating",
-  "currentCharacter",
+  "sessionPeak",
   "mrRank",
   "graph",
 ];

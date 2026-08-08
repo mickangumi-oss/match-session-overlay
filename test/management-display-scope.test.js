@@ -27,10 +27,13 @@ test("metric visibility switches apply to output surfaces but not management", (
   assert.match(statsSource, /displayItems\[card\.dataset\.displayCard\]/);
   assert.match(
     managementHtml,
-    /class="monitor-character"[\s\S]*?id="currentCharacter"/,
+    /class="monitor-metric monitor-character"[\s\S]*?id="currentCharacter"/,
   );
   assert.doesNotMatch(
     managementHtml,
     /data-display-card="currentCharacter"/,
   );
+  assert.match(managementHtml, /id="monitorPlayerName"/);
+  assert.match(managementHtml, /id="sessionPeakRating"/);
+  assert.doesNotMatch(managementHtml, /data-display-card="sessionPeak"/);
 });
