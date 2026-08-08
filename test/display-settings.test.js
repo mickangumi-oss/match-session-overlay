@@ -13,7 +13,8 @@ test("legacy graph setting migrates into the shared item map", () => {
   const items = sanitizeDisplayItems(null, { legacyGraphVisible: false });
   assert.equal(items.graph, false);
   assert.equal(items.currentRating, true);
-  assert.equal(items.currentCharacter, true);
+  assert.equal(items.sessionPeak, true);
+  assert.equal(items.currentCharacter, undefined);
 });
 
 test("at least one display item is always retained", () => {
@@ -32,7 +33,7 @@ test("at least one display item is always retained", () => {
 test("window mode and orientation never create separate item selections", () => {
   const shared = applyDisplayItemUpdate(defaultDisplayItems(), {
     winRate: false,
-    currentCharacter: false,
+    sessionPeak: false,
   });
   const windowItems = { ...shared };
   const overlayItems = { ...shared };

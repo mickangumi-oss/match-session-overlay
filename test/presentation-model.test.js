@@ -13,12 +13,17 @@ test("all presentation surfaces receive the same synthetic values", () => {
         ranked: { wins: 7, losses: 5, ratingDelta: 27 },
       },
     },
-    player: { characterId: 26, characterDisplayName: "AKUMA", mr: 1527 },
+    player: { name: "SYNTHETIC PLAYER", characterId: 26, characterDisplayName: "AKUMA", mr: 1527 },
     matchType: "ranked",
     median: {
       medianRating: 1526,
       medianRatingType: "MR",
       medianRatingSampleCount: 12,
+    },
+    achievements: {
+      sessionPeakRating: 1560,
+      sessionPeakRatingType: "MR",
+      rankDelta: 286,
     },
   };
   const management = buildPresentationState(input);
@@ -27,6 +32,9 @@ test("all presentation surfaces receive the same synthetic values", () => {
   assert.deepEqual(management, windowView);
   assert.deepEqual(management, overlay);
   assert.equal(management.currentCharacter, "AKUMA");
+  assert.equal(management.playerName, "SYNTHETIC PLAYER");
+  assert.equal(management.sessionPeakRating, 1560);
+  assert.equal(management.mrRankDelta, 286);
   assert.equal(management.winRate.toFixed(1), "58.3");
 });
 

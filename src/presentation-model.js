@@ -11,6 +11,7 @@ function buildPresentationState({
   matchType = "ranked",
   median = {},
   ranking = {},
+  achievements = {},
 } = {}) {
   const selected = sourceState.stats?.[matchType] ?? {};
   const wins = Math.max(0, Math.trunc(finiteNumber(selected.wins) ?? 0));
@@ -48,6 +49,7 @@ function buildPresentationState({
     potentialRating: medianRating,
     potentialRatingType: median.medianRatingType || ratingType,
     potentialSampleCount: medianSampleCount,
+    playerName: String(player?.name ?? "").trim(),
     currentCharacter: String(player?.characterDisplayName ?? "").trim(),
     characterId: Number(player?.characterId) || null,
     mrRank: ranking.rank != null &&
@@ -57,6 +59,10 @@ function buildPresentationState({
       : null,
     mrRankHome: String(ranking.homeLabel ?? "").trim(),
     mrRankLoading: ranking.status === "loading",
+    sessionPeakRating: finiteNumber(achievements.sessionPeakRating),
+    sessionPeakRatingType:
+      achievements.sessionPeakRatingType === "LP" ? "LP" : ratingType,
+    mrRankDelta: finiteNumber(achievements.rankDelta),
   };
 }
 

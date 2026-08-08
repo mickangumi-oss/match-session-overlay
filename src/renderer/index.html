@@ -88,14 +88,22 @@
                 <p class="kicker" data-i18n="liveStep">STEP 02 / LIVE SESSION</p>
                 <h2 data-i18n="statsMonitor">戦績モニター</h2>
               </div>
-              <div class="monitor-rank" aria-live="polite">
-                <span class="control-label" data-i18n="mrRank">MR RANK</span>
+              <div class="monitor-metric monitor-player" aria-live="polite">
+                <span class="control-label"><span>PLAYER</span></span>
+                <strong id="monitorPlayerName">—</strong>
+              </div>
+              <div class="monitor-metric monitor-character" aria-live="polite">
+                <span class="control-label"><span>CURRENT</span><span>CHARACTER</span></span>
+                <strong id="currentCharacter">—</strong>
+              </div>
+              <div class="monitor-metric monitor-peak" aria-live="polite">
+                <span class="control-label"><span>SESSION</span><span>PEAK</span></span>
+                <strong id="sessionPeakRating">—</strong>
+              </div>
+              <div class="monitor-metric monitor-rank" aria-live="polite">
+                <span class="control-label"><span>MR</span><span>RANK</span></span>
                 <strong id="currentMrRank">—</strong>
                 <small id="currentMrRankHome"></small>
-              </div>
-              <div class="monitor-character" aria-live="polite">
-                <span class="control-label" data-i18n="currentCharacter">CURRENT CHARACTER</span>
-                <strong id="currentCharacter">—</strong>
               </div>
               <span class="status neutral" id="trackerStatus" data-i18n="stopped">停止中</span>
             </header>
@@ -181,6 +189,23 @@
                 <button class="icon-button" id="closeOptionsButton" data-i18n-title="closeOptions" title="オプションを閉じる">×</button>
               </header>
               <div class="options-category-grid">
+                <section class="options-category-card maintenance-card" id="maintenanceSettingsCard">
+                  <h4 data-i18n="categoryMaintenance">メンテナンス</h4>
+                  <div class="utility-row update-row">
+                    <div class="update-copy">
+                      <div class="update-title"><span class="control-label" data-i18n="appUpdate">APP UPDATE</span><span class="update-badge hidden" id="updateBadge" data-i18n="updateAvailable">UPDATE</span></div>
+                      <p id="updateMessage" data-i18n="githubUpdateNote">GitHub Releasesから更新を確認できます</p>
+                      <div class="progress hidden" id="updateProgress"><div id="updateProgressBar"></div></div>
+                    </div>
+                    <div class="actions compact maintenance-actions"><button class="maintenance-action-button" id="checkUpdateButton" data-i18n="check">確認</button><button class="maintenance-action-button accent hidden" id="installUpdateButton" data-i18n="update">更新</button></div>
+                  </div>
+                  <div class="utility-divider"></div>
+                  <div class="utility-row local-data-row">
+                    <div><span class="control-label" data-i18n="localData">ローカルデータ</span></div>
+                    <button class="maintenance-action-button danger" id="clearDataButton" data-i18n="clear">消去</button>
+                  </div>
+                </section>
+
                 <section class="options-category-card">
                   <h4 data-i18n="categoryDisplayContent">表示内容</h4>
                   <div class="category-control">
@@ -198,7 +223,7 @@
                     <label><input type="checkbox" data-display-item="currentRating" /> <span>CURRENT MR / LP</span></label>
                     <label><input type="checkbox" data-display-item="ratingDelta" /> <span>MR / LP DELTA</span></label>
                     <label><input type="checkbox" data-display-item="potentialRating" /> <span>POTENTIAL MR / LP</span></label>
-                    <label><input type="checkbox" data-display-item="currentCharacter" /> <span data-i18n="currentCharacter">CURRENT CHARACTER</span></label>
+                    <label><input type="checkbox" data-display-item="sessionPeak" /> <span data-i18n="sessionPeakRating">SESSION PEAK MR / LP</span></label>
                     <label><input type="checkbox" data-display-item="mrRank" /> <span data-i18n="mrRank">MR RANK</span></label>
                   </fieldset>
                   <label class="category-control">
@@ -256,7 +281,7 @@
                   </div>
                 </section>
 
-                <section class="options-category-card">
+                <section class="options-category-card design-options-card">
                   <h4 data-i18n="categoryDesign">デザイン</h4>
                   <label class="category-control range-cell">
                     <span class="control-label"><span data-i18n="background">BACKGROUND</span> <output id="opacityValue">94%</output></span>
@@ -310,22 +335,6 @@
                   <div class="game-picker"><span id="gameExecutableName" data-i18n="gameNotSelected">ゲーム未選択</span><button class="icon-button" id="chooseGameButton" data-i18n="chooseExecutable">実行ファイルを選択</button></div>
                 </section>
 
-                <section class="options-category-card" id="maintenanceSettingsCard">
-                  <h4 data-i18n="categoryMaintenance">メンテナンス</h4>
-                  <div class="utility-row">
-                    <div><span class="control-label" data-i18n="localData">ローカルデータ</span></div>
-                    <button class="icon-button danger" id="clearDataButton" data-i18n="clear">消去</button>
-                  </div>
-                  <div class="utility-divider"></div>
-                  <div class="utility-row update-row">
-                    <div class="update-copy">
-                      <div class="update-title"><span class="control-label" data-i18n="appUpdate">APP UPDATE</span><span class="update-badge hidden" id="updateBadge" data-i18n="updateAvailable">UPDATE</span></div>
-                      <p id="updateMessage" data-i18n="githubUpdateNote">GitHub Releasesから更新を確認できます</p>
-                      <div class="progress hidden" id="updateProgress"><div id="updateProgressBar"></div></div>
-                    </div>
-                    <div class="actions compact"><button class="icon-button" id="checkUpdateButton" data-i18n="check">確認</button><button class="icon-button accent hidden" id="installUpdateButton" data-i18n="update">更新</button></div>
-                  </div>
-                </section>
               </div>
             </section>
 

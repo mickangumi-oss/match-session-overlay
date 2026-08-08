@@ -1014,6 +1014,10 @@ body.remote-overlay {
    records instead of reserving a large empty fractional column. */
 .stats-window .record-labels,
 .stats-window .record-values {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
   grid-template-columns: max-content max-content max-content;
   justify-content: center;
   column-gap: 0.32ch;
@@ -1488,6 +1492,13 @@ body.remote-overlay {
   display: none !important;
 }
 
+.stats-window .metric-group > strong {
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
+  text-align: center;
+}
+
 .stats-window .stats-chart,
 .stats-window.horizontal .stats-chart,
 .stats-window.vertical .stats-chart {
@@ -1538,10 +1549,10 @@ body.remote-overlay {
   font: 8px/1 "Cascadia Mono", Consolas, monospace;
 }
 
-.stats-window .character-group strong {
+.stats-window .peak-group strong {
   max-width: 100%;
   overflow: hidden;
-  font-size: min(calc(22px * var(--stats-value-scale)), 5.2vw) !important;
+  font-size: min(calc(22px * var(--stats-value-scale)), 5.2vw);
   line-height: 1;
   text-overflow: clip;
   text-transform: none;
@@ -1550,8 +1561,27 @@ body.remote-overlay {
 
 .stats-window .rank-group strong {
   color: var(--accent);
-  font-size: min(calc(22px * var(--stats-value-scale)), 5.2vw) !important;
+  font-size: min(calc(22px * var(--stats-value-scale)), 5.2vw);
   line-height: 1;
+  white-space: nowrap;
+}
+
+.stats-window .rank-group {
+  row-gap: 1px;
+}
+
+.stats-window .rank-delta {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  max-width: 100%;
+  color: var(--accent);
+  font: 800 min(calc(10px * var(--font-scale)), 2.5vw)/1
+    var(--stats-value-font-family);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  text-overflow: clip;
   white-space: nowrap;
 }
 
@@ -1560,15 +1590,15 @@ body.remote-overlay {
     calc(25px * var(--stats-value-scale)),
     calc(7vw * var(--stats-value-scale)),
     calc(44px * var(--stats-value-scale))
-  ) !important;
+  );
 }
 
-.stats-window.vertical .character-group strong {
+.stats-window.vertical .peak-group strong {
   font-size: clamp(
     calc(25px * var(--stats-value-scale)),
     calc(7vw * var(--stats-value-scale)),
     calc(44px * var(--stats-value-scale))
-  ) !important;
+  );
 }
 
 .stats-window > .floating-window-actions {
