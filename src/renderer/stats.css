@@ -13,6 +13,7 @@
   --accent: var(--text);
   --pink: #ff3d8d;
   --blue: #43a8ff;
+  --line: rgba(67, 168, 255, 0.24);
 }
 
 * {
@@ -1410,4 +1411,194 @@ body.remote-overlay {
 .stats-window.vertical.no-chart .summary {
   min-height: 360px;
   height: 360px;
+}
+
+/* Unified selectable-card layout. The title strip and match tabs are no
+   longer part of this document; all available space belongs to cards and the
+   optional graph. These final rules intentionally supersede the legacy
+   orientation-specific grid definitions above. */
+.stats-window.horizontal,
+.stats-window.vertical,
+.stats-window.overlay.horizontal,
+.stats-window.overlay.vertical {
+  display: grid !important;
+  min-height: 0;
+  grid-template-columns: minmax(0, 1fr) !important;
+  grid-template-rows: auto minmax(70px, 1fr) !important;
+  gap: 7px !important;
+  padding: 8px !important;
+}
+
+.stats-window.no-chart {
+  grid-template-rows: minmax(0, 1fr) !important;
+}
+
+.stats-window.no-metrics {
+  grid-template-rows: minmax(0, 1fr) !important;
+  gap: 0 !important;
+  padding: 4px !important;
+}
+
+.stats-window.no-metrics .summary {
+  display: none !important;
+}
+
+.stats-window .summary,
+.stats-window.horizontal .summary,
+.stats-window.vertical .summary,
+.stats-window.overlay .summary,
+.stats-window.vertical.overlay .summary {
+  grid-column: 1 !important;
+  grid-row: 1 !important;
+  display: grid;
+  width: 100%;
+  height: auto !important;
+  min-height: 0 !important;
+  grid-template-columns: repeat(var(--visible-card-count, 1), minmax(0, 1fr)) !important;
+  grid-template-rows: minmax(54px, 1fr) !important;
+  align-items: stretch;
+  gap: 6px !important;
+  padding: 0 !important;
+}
+
+.stats-window.vertical .summary,
+.stats-window.vertical.overlay .summary {
+  grid-template-columns: minmax(0, 1fr) !important;
+  grid-template-rows: repeat(var(--visible-card-count, 1), minmax(68px, auto)) !important;
+  align-content: start;
+  gap: 8px !important;
+}
+
+.stats-window .summary > .record-group,
+.stats-window .summary > .metric-group,
+.stats-window.vertical .summary > .record-group,
+.stats-window.vertical .summary > .metric-group {
+  width: 100%;
+  height: 100% !important;
+  min-height: 54px !important;
+  padding: 7px 9px !important;
+}
+
+.stats-window.vertical .summary > .record-group,
+.stats-window.vertical .summary > .metric-group {
+  min-height: 68px !important;
+}
+
+.stats-window .summary > .divider {
+  display: none !important;
+}
+
+.stats-window .stats-chart,
+.stats-window.horizontal .stats-chart,
+.stats-window.vertical .stats-chart {
+  grid-column: 1;
+  grid-row: 2;
+  display: grid;
+  min-width: 0;
+  min-height: 70px;
+  overflow: hidden;
+  border: 1px solid rgba(67, 168, 255, 0.28);
+  background:
+    linear-gradient(90deg, rgba(67, 168, 255, 0.08), transparent 45%),
+    rgba(4, 7, 12, 0.82);
+  grid-template-rows: 27px minmax(0, 1fr);
+  clip-path: polygon(0 7px, 7px 0, calc(100% - 10px) 0, 100% 9px, 100% 100%, 9px 100%, 0 calc(100% - 8px));
+}
+
+.stats-window.no-metrics > .stats-chart {
+  position: absolute !important;
+  inset: 4px;
+  grid-column: auto !important;
+  grid-row: auto !important;
+  width: auto;
+  height: auto !important;
+  min-height: 0;
+}
+
+.stats-window.no-chart .stats-chart {
+  display: none !important;
+}
+
+.stats-window .stats-chart > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 9px;
+  border-bottom: 1px solid var(--line);
+}
+
+.stats-window .chart-label {
+  color: var(--blue);
+  font: 800 9px/1 var(--stats-label-font-family);
+  letter-spacing: 0.1em;
+}
+
+.stats-window .chart-state {
+  color: var(--blue);
+  font: 8px/1 "Cascadia Mono", Consolas, monospace;
+}
+
+.stats-window .character-group strong {
+  max-width: 100%;
+  overflow: hidden;
+  font-size: min(calc(22px * var(--stats-value-scale)), 5.2vw) !important;
+  line-height: 1;
+  text-overflow: clip;
+  text-transform: none;
+  white-space: nowrap;
+}
+
+.stats-window .rank-group strong {
+  color: var(--accent);
+  font-size: min(calc(22px * var(--stats-value-scale)), 5.2vw) !important;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.stats-window.vertical .rank-group strong {
+  font-size: clamp(
+    calc(25px * var(--stats-value-scale)),
+    calc(7vw * var(--stats-value-scale)),
+    calc(44px * var(--stats-value-scale))
+  ) !important;
+}
+
+.stats-window.vertical .character-group strong {
+  font-size: clamp(
+    calc(25px * var(--stats-value-scale)),
+    calc(7vw * var(--stats-value-scale)),
+    calc(44px * var(--stats-value-scale))
+  ) !important;
+}
+
+.stats-window > .floating-window-actions {
+  position: absolute;
+  z-index: 8;
+  top: 3px;
+  right: 3px;
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.stats-window:hover .floating-window-actions,
+.stats-window:focus-within .floating-window-actions {
+  opacity: 0.82;
+}
+
+.floating-window-actions button {
+  width: 21px;
+  height: 21px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(3, 8, 15, 0.82);
+  color: #fff;
+  cursor: pointer;
+  font: 15px/1 system-ui, sans-serif;
+}
+
+.remote-overlay .floating-window-actions,
+.stats-window.overlay.locked .floating-window-actions {
+  display: none !important;
 }

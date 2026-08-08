@@ -6,12 +6,19 @@ const path = require("node:path");
 const { MANIFEST_NAME } = require("../src/updater");
 
 const root = path.resolve(__dirname, "..");
+const outputDirectory = String(
+  process.env.MATCH_SESSION_OVERLAY_DIST_DIR ?? "dist",
+).trim();
+if (!/^[a-zA-Z0-9._-]+$/.test(outputDirectory)) {
+  throw new Error("MATCH_SESSION_OVERLAY_DIST_DIR must be a repository-local directory name");
+}
+const distPath = path.join(root, outputDirectory);
 const packageJson = JSON.parse(
   fs.readFileSync(path.join(root, "package.json"), "utf8"),
 );
 const file = `Match-Session-Overlay-${packageJson.version}-Setup.exe`;
-const installerPath = path.join(root, "dist", file);
-const manifestPath = path.join(root, "dist", MANIFEST_NAME);
+const installerPath = path.join(distPath, file);
+const manifestPath = path.join(distPath, MANIFEST_NAME);
 
 if (!fs.existsSync(installerPath)) {
   throw new Error(`Installer not found: ${installerPath}`);
@@ -59,18 +66,18 @@ for (const generatedFile of [
   "latest.yml",
   `${file}.blockmap`,
 ]) {
-  const generatedPath = path.join(root, "dist", generatedFile);
+  const generatedPath = path.join(distPath, generatedFile);
   if (fs.existsSync(generatedPath)) fs.unlinkSync(generatedPath);
 }
 
-for (const generatedFile of fs.readdirSync(path.join(root, "dist"))) {
+for (const generatedFile of fs.readdirSync(distPath)) {
   if (
     generatedFile !== file &&
     /^Match-Session-Overlay-\d+\.\d+\.\d+-Setup\.exe(?:\.blockmap)?$/.test(
       generatedFile,
     )
   ) {
-    fs.unlinkSync(path.join(root, "dist", generatedFile));
+    fs.unlinkSync(path.join(distPath, generatedFile));
   }
 }
 

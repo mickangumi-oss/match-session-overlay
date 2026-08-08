@@ -13,47 +13,49 @@
   <body>
     <main class="stats-window no-chart" id="statsWindow">
       <div class="hud-background" aria-hidden="true"></div>
-      <div class="drag-strip">
-        <img
-          class="header-graffiti"
-          src="./assets/header-graffiti-m.png"
-          alt=""
-          aria-hidden="true"
-        />
-        <span data-i18n="matchSession">MATCH SESSION</span>
-        <div class="window-actions">
-          <button id="resetButton" data-i18n-aria-label="resetStats" data-i18n-title="resetStats" aria-label="戦績をリセット" title="戦績をリセット">↻</button>
-          <button id="hideButton" data-i18n-aria-label="closeStats" data-i18n-title="closeStats" aria-label="戦績ウィンドウを閉じる" title="戦績ウィンドウを閉じる">×</button>
-        </div>
+      <div class="window-actions floating-window-actions">
+        <button id="resetButton" data-i18n-aria-label="resetStats" data-i18n-title="resetStats" aria-label="戦績をリセット" title="戦績をリセット">↻</button>
+        <button id="hideButton" data-i18n-aria-label="closeStats" data-i18n-title="closeStats" aria-label="戦績ウィンドウを閉じる" title="戦績ウィンドウを閉じる">×</button>
       </div>
-      <nav class="match-tabs" data-i18n-aria-label="matchType" aria-label="対戦種別">
-        <button class="active" data-match-type="ranked" data-i18n="ranked">ランク</button>
-        <button data-match-type="battleHub" data-i18n="battleHub">バトルハブ</button>
-        <button data-match-type="casual" data-i18n="casual">カジュアル</button>
-      </nav>
       <section class="summary">
-        <div class="record-group" data-i18n-aria-label="winsLosses" aria-label="勝数と敗数">
+        <div class="record-group" data-display-card="record" data-i18n-aria-label="winsLosses" aria-label="勝数と敗数">
           <span class="record-labels"><span>W</span><span>L</span></span>
           <strong class="record-values"><span id="recordWins">0</span><span>-</span><span id="recordLosses">0</span></strong>
         </div>
         <span class="divider"></span>
-        <div class="metric-group">
+        <div class="metric-group" data-display-card="winRate">
           <small data-i18n="winRate">勝率</small>
           <strong class="accent" id="winRate">0.0%</strong>
         </div>
         <span class="divider"></span>
-        <div class="metric-group">
+        <div class="metric-group" data-display-card="currentRating">
+          <small id="currentRatingLabel">CURRENT MR</small>
+          <strong id="currentRating">—</strong>
+        </div>
+        <span class="divider"></span>
+        <div class="metric-group" data-display-card="ratingDelta">
           <small id="ratingTypeLabel">MR</small>
           <strong id="ratingDelta">±0</strong>
         </div>
         <span class="divider"></span>
-        <div class="metric-group potential-group">
+        <div class="metric-group potential-group" data-display-card="potentialRating">
           <small id="medianRatingLabel">POTENTIAL MR</small>
           <strong id="medianRating">—</strong>
           <span class="metric-sample" id="medianRatingSample"></span>
         </div>
+        <span class="divider"></span>
+        <div class="metric-group character-group" data-display-card="currentCharacter">
+          <small data-i18n="currentCharacter">CURRENT CHARACTER</small>
+          <strong id="currentCharacter">—</strong>
+        </div>
+        <span class="divider"></span>
+        <div class="metric-group rank-group" data-display-card="mrRank">
+          <small data-i18n="mrRank">MR RANK</small>
+          <strong id="mrRank">—</strong>
+          <span class="metric-sample" id="mrRankHome"></span>
+        </div>
       </section>
-      <section class="stats-chart" id="statsChartPanel">
+      <section class="stats-chart" id="statsChartPanel" data-display-card="graph">
         <header>
           <span class="chart-label" id="statsChartLabel">MR TREND</span>
           <span class="chart-state" id="statsChartState" data-i18n="dataWaiting">データ待機中</span>

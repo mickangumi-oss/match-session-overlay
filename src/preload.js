@@ -16,6 +16,12 @@ contextBridge.exposeInMainWorld("matchOverlay", {
   selectHistoryProfile: (userCode) =>
     ipcRenderer.invoke("history:select-profile", { userCode }),
   clearHistoryProfile: () => ipcRenderer.invoke("history:clear-profile"),
+  getSocialState: () => ipcRenderer.invoke("social:state"),
+  refreshSocial: (kind) => ipcRenderer.invoke("social:refresh", { kind }),
+  changeSocialPage: (kind, page) =>
+    ipcRenderer.invoke("social:page", { kind, page }),
+  openSocialProfile: (profileId) =>
+    ipcRenderer.invoke("social:open-profile", { profileId }),
   openStatsWindow: () => ipcRenderer.invoke("display:open"),
   hideStatsWindow: () => ipcRenderer.invoke("display:hide"),
   toggleStatsWindow: () => ipcRenderer.invoke("display:toggle"),
@@ -44,6 +50,11 @@ contextBridge.exposeInMainWorld("matchOverlay", {
     const listener = (_event, state) => callback(state);
     ipcRenderer.on("history:state", listener);
     return () => ipcRenderer.removeListener("history:state", listener);
+  },
+  onSocialState: (callback) => {
+    const listener = (_event, state) => callback(state);
+    ipcRenderer.on("social:state", listener);
+    return () => ipcRenderer.removeListener("social:state", listener);
   },
   onAuthenticatedPlayer: (callback) => {
     const listener = (_event, player) => callback(player);
