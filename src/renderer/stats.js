@@ -60,6 +60,15 @@ const FONT_STACKS = {
   mono: '"Cascadia Mono", Consolas, monospace',
 };
 const FONT_STYLES = new Set(["normal", "italic"]);
+const METRIC_ITEM_KEYS = [
+  "record",
+  "winRate",
+  "currentRating",
+  "ratingDelta",
+  "potentialRating",
+  "currentCharacter",
+  "mrRank",
+];
 
 function fontStackFor(value) {
   if (FONT_STACKS[value]) return FONT_STACKS[value];
@@ -76,6 +85,11 @@ const elements = {
   recordValues: document.querySelector(".record-values"),
   ratingTypeLabel: document.getElementById("ratingTypeLabel"),
   ratingDelta: document.getElementById("ratingDelta"),
+  currentRatingLabel: document.getElementById("currentRatingLabel"),
+  currentRating: document.getElementById("currentRating"),
+  currentCharacter: document.getElementById("currentCharacter"),
+  mrRank: document.getElementById("mrRank"),
+  mrRankHome: document.getElementById("mrRankHome"),
   medianRatingLabel: document.getElementById("medianRatingLabel"),
   medianRating: document.getElementById("medianRating"),
   medianRatingSample: document.getElementById("medianRatingSample"),
@@ -86,7 +100,7 @@ const elements = {
   statsChartLabel: document.getElementById("statsChartLabel"),
   hideButton: document.getElementById("hideButton"),
   resetButton: document.getElementById("resetButton"),
-  matchTabs: [...document.querySelectorAll("[data-match-type]")],
+  displayCards: [...document.querySelectorAll("[data-display-card]")],
 };
 
 let trackerState = null;
@@ -163,8 +177,10 @@ function fitStatsValues() {
   for (const element of [
     elements.recordValues,
     elements.winRate,
+    elements.currentRating,
     elements.ratingDelta,
     elements.medianRating,
+    elements.currentCharacter,
   ]) {
     fitStatsValue(element);
   }
@@ -420,11 +436,9 @@ function drawStatsChart(
 }
 
 function renderStatsChart(state) {
-  const isVertical =
-    displaySettings?.windowOrientation === "vertical" &&
-    displaySettings?.graphVisible !== false;
-  elements.statsChartPanel.classList.toggle("hidden", !isVertical);
-  if (!isVertical) return;
+  const graphVisible = displaySettings?.displayItems?.graph !== false;
+  elements.statsChartPanel.classList.toggle("hidden", !graphVisible);
+  if (!graphVisible) return;
   const matchType = displaySettings?.matchType ?? "ranked";
   const configuredLimit = [0, 20, 50, 100].includes(
     Number(displaySettings?.graphMatchCount),
@@ -494,7 +508,8 @@ function renderStatsChart(state) {
         displayHistory,
         graphMatchCount,
         ratingType,
-        state?.medianRatingType === ratingType && state?.medianRatingSampleCount >= 2
+        displaySettings?.potentialLineVisible !== false &&
+          state?.medianRatingType === ratingType && state?.medianRatingSampleCount >= 2
           ? state.medianRating
           : null,
         graphMatchStart,
@@ -512,19 +527,43 @@ function renderTracker(state) {
   elements.root.classList.toggle("suppressed", state?.overlaySuppressed === true);
   const matchType = displaySettings?.matchType ?? "ranked";
   const selected = state.stats?.[matchType] ?? {};
-  const wins = Number(selected.wins ?? 0);
-  const losses = Number(selected.losses ?? 0);
+  const presentation = state?.presentation ?? {};
+  const wins = Number(presentation.wins ?? selected.wins ?? 0);
+  const losses = Number(presentation.losses ?? selected.losses ?? 0);
   const total = wins + losses;
   const isRanked = matchType === "ranked";
-  const delta = isRanked ? Number(selected.ratingDelta ?? 0) : null;
+  const delta = isRanked
+    ? Number(presentation.ratingDelta ?? selected.ratingDelta ?? 0)
+    : null;
 
-  elements.winRate.textContent = `${(total ? (wins / total) * 100 : 0).toFixed(1)}%`;
+  elements.winRate.textContent = `${Number(
+    presentation.winRate ?? (total ? (wins / total) * 100 : 0),
+  ).toFixed(1)}%`;
   elements.recordWins.textContent = String(wins);
   elements.recordLosses.textContent = String(losses);
-  const ratingType = state.ratingType === "LP" ? "LP" : "MR";
+  const ratingType = presentation.ratingType === "LP" || state.ratingType === "LP" ? "LP" : "MR";
+  const currentRating = Number(presentation.currentRating);
+  elements.currentRatingLabel.textContent = `${t("currentRating", "CURRENT")} ${ratingType}`;
+  elements.currentRating.textContent = Number.isFinite(currentRating)
+    ? String(Math.round(currentRating))
+    : "—";
   elements.ratingTypeLabel.textContent = `${ratingType} ${t("delta", "DELTA")}`;
   elements.ratingDelta.textContent =
     delta == null ? "—" : `${delta > 0 ? "+" : delta < 0 ? "" : "±"}${delta}`;
+  elements.currentCharacter.textContent =
+    String(presentation.currentCharacter ?? state?.player?.characterDisplayName ?? "").trim() || "—";
+  const mrRank = Number(presentation.mrRank ?? state?.ranking?.rank);
+  const locale = displaySettings?.locale || "ja-jp";
+  elements.mrRank.textContent = Number.isFinite(mrRank) && mrRank > 0
+    ? locale === "ja-jp"
+      ? `${new Intl.NumberFormat(locale).format(mrRank)}位`
+      : `#${new Intl.NumberFormat(locale).format(mrRank)}`
+    : (presentation.mrRankLoading ?? state?.ranking?.status === "loading")
+      ? "…"
+      : "—";
+  elements.mrRankHome.textContent = String(
+    presentation.mrRankHome ?? state?.ranking?.homeLabel ?? "",
+  ).trim();
   renderMedianRating(state);
   fitStatsValues();
   renderStatsChart(state);
@@ -550,8 +589,44 @@ function renderMedianRating(state) {
   }
 }
 
+function normalizedDisplayItems(settings = {}) {
+  const source = settings.displayItems;
+  const defaults = Object.fromEntries(
+    [...METRIC_ITEM_KEYS, "graph"].map((key) => [key, true]),
+  );
+  if (!source || typeof source !== "object") {
+    if (typeof settings.graphVisible === "boolean") {
+      defaults.graph = settings.graphVisible;
+    }
+    return defaults;
+  }
+  for (const key of Object.keys(defaults)) {
+    if (typeof source[key] === "boolean") defaults[key] = source[key];
+  }
+  return defaults;
+}
+
+function renderDisplayItemVisibility(settings) {
+  const displayItems = normalizedDisplayItems(settings);
+  settings.displayItems = displayItems;
+  const visibleMetricCount = METRIC_ITEM_KEYS.filter(
+    (key) => displayItems[key],
+  ).length;
+  for (const card of elements.displayCards) {
+    const visible = displayItems[card.dataset.displayCard] !== false;
+    card.classList.toggle("hidden", !visible);
+  }
+  elements.root.style.setProperty(
+    "--visible-card-count",
+    String(Math.max(1, visibleMetricCount)),
+  );
+  elements.root.classList.toggle("no-metrics", visibleMetricCount === 0);
+  elements.root.classList.toggle("no-chart", displayItems.graph === false);
+}
+
 function renderSettings(settings) {
   displaySettings = settings;
+  renderDisplayItemVisibility(settings);
   localeApi?.applyTranslations?.(document, settings.locale || "ja-jp");
   document.documentElement.style.setProperty(
     "--font-scale",
@@ -585,20 +660,13 @@ function renderSettings(settings) {
   );
   elements.root.classList.toggle(
     "horizontal",
-    settings.mode === "window" && settings.windowOrientation !== "vertical",
-  );
-  elements.root.classList.toggle(
-    "no-chart",
-    settings.windowOrientation !== "vertical" || settings.graphVisible === false,
+    settings.windowOrientation !== "vertical",
   );
   elements.root.classList.toggle(
     "locked",
     settings.overlayInteractionLocked === true,
   );
   animateBackgroundOpacity(settings.backgroundOpacity);
-  for (const tab of elements.matchTabs) {
-    tab.classList.toggle("active", tab.dataset.matchType === settings.matchType);
-  }
   if (trackerState) {
     renderTracker(trackerState);
   } else {
@@ -644,11 +712,6 @@ function finishWindowDrag(event) {
 }
 elements.root.addEventListener("pointerup", finishWindowDrag);
 elements.root.addEventListener("pointercancel", finishWindowDrag);
-for (const tab of elements.matchTabs) {
-  tab.addEventListener("click", () =>
-    api.updateDisplaySettings({ matchType: tab.dataset.matchType }),
-  );
-}
 api.onState(renderTracker);
 api.onDisplaySettings(renderSettings);
 
@@ -666,23 +729,43 @@ window.addEventListener("resize", () => {
 
 if (remoteOverlay) {
   document.body.classList.add("remote-overlay");
+  const dispatchRemoteOverlay = (payload) => {
+    const settings = {
+      ...(payload.displaySettings ?? {}),
+      overlaySize: payload.overlaySize,
+      mode: "overlay",
+      overlayInteractionLocked: true,
+    };
+    const width = Number(settings.overlaySize?.width);
+    const height = Number(settings.overlaySize?.height);
+    if (Number.isFinite(width) && Number.isFinite(height)) {
+      document.body.style.width = `${width}px`;
+      document.body.style.height = `${height}px`;
+    }
+    for (const callback of remoteStateListeners) callback(payload);
+    for (const callback of remoteDisplaySettingsListeners) callback(settings);
+  };
   const refreshRemoteOverlay = async () => {
     try {
-      const { payload, settings } = await fetchRemoteOverlayState();
-      const width = Number(settings.overlaySize?.width);
-      const height = Number(settings.overlaySize?.height);
-      if (Number.isFinite(width) && Number.isFinite(height)) {
-        document.body.style.width = `${width}px`;
-        document.body.style.height = `${height}px`;
-      }
-      for (const callback of remoteStateListeners) callback(payload);
-      for (const callback of remoteDisplaySettingsListeners) callback(settings);
+      const { payload } = await fetchRemoteOverlayState();
+      dispatchRemoteOverlay(payload);
     } catch {
       // Keep the last rendered frame while the local app is starting or
       // temporarily unavailable. The next low-frequency poll will retry.
     }
   };
   refreshRemoteOverlay();
+  if (typeof EventSource === "function") {
+    const overlayEvents = new EventSource("/events");
+    overlayEvents.addEventListener("state", (event) => {
+      try {
+        dispatchRemoteOverlay(JSON.parse(event.data));
+      } catch {
+        // The periodic state request remains the recovery path for an invalid
+        // or interrupted event frame.
+      }
+    });
+  }
   window.setInterval(refreshRemoteOverlay, 2000);
 }
 

@@ -14,7 +14,9 @@
   --magenta: #ff3d8d;
   --red: #ff657d;
   --stats-font-family: Impact, "Arial Black", "Bahnschrift Condensed", sans-serif;
+  --stats-label-font-family: var(--stats-font-family);
   --stats-font-style: normal;
+  --accent: var(--cyan);
   font-family: "Segoe UI Variable", "Yu Gothic UI", Meiryo, system-ui, sans-serif;
 }
 
@@ -1114,6 +1116,16 @@ body.update-required .cockpit .hud-panel .update-row * {
 .history-heading h2 { margin: 2px 0 0; }
 .history-heading-actions { align-items: center; gap: 8px; }
 .history-fetch-state { color: #43d8ff; font-size: 11px; }
+.history-fetch-state.loading {
+  color: var(--lime);
+  font-weight: 800;
+  animation: history-loading-pulse 900ms ease-in-out infinite alternate;
+}
+
+@keyframes history-loading-pulse {
+  from { opacity: 0.55; }
+  to { opacity: 1; text-shadow: 0 0 9px rgba(183, 255, 66, 0.5); }
+}
 .history-target {
   display: grid;
   grid-template-columns: minmax(180px, 260px) auto auto minmax(0, 1fr);
@@ -1640,4 +1652,283 @@ footer {
     inset -3px 0 0 rgba(67, 216, 255, 0.68),
     0 16px 36px rgba(0, 0, 0, 0.55),
     0 0 18px rgba(67, 168, 255, 0.1);
+}
+
+/* Categorized two-column options layout. */
+.options-category-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.options-category-card {
+  display: grid;
+  min-width: 0;
+  align-content: start;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid rgba(102, 135, 177, 0.34);
+  background: rgba(3, 8, 16, 0.72);
+  box-shadow: inset 2px 0 0 rgba(255, 61, 141, 0.58);
+}
+
+.options-category-card h4 {
+  margin: 0;
+  color: var(--lime);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+}
+
+.options-category-wide {
+  grid-column: 1 / -1;
+}
+
+.category-control {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.category-control select {
+  width: 100%;
+  min-width: 0;
+  height: 27px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  background: #11151e;
+  color: var(--text);
+  font-size: 10px;
+}
+
+.category-control select option,
+.category-control select optgroup {
+  background: #11151e;
+  color: #f7f8ff;
+}
+
+.display-item-fieldset {
+  display: grid;
+  margin: 0;
+  padding: 6px;
+  border: 1px solid rgba(67, 216, 255, 0.22);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px 8px;
+}
+
+.display-item-fieldset legend {
+  padding-inline: 4px;
+  color: var(--cyan);
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.display-item-fieldset label {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
+  color: rgba(247, 248, 255, 0.82);
+  font-size: 9px;
+  white-space: nowrap;
+}
+
+.display-item-fieldset input {
+  flex: 0 0 auto;
+  accent-color: var(--magenta);
+}
+
+.compact-typography {
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 0.8fr) auto;
+}
+
+.data-integration-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: end;
+  gap: 8px;
+}
+
+.compact-overlay-box {
+  margin: 0;
+}
+
+.telemetry-panel .scoreboard {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.monitor-character {
+  display: grid;
+  min-width: 0;
+  margin-left: auto;
+  gap: 3px;
+  text-align: right;
+}
+
+.monitor-character .control-label {
+  color: var(--cyan);
+  font-size: 8px;
+  letter-spacing: 0.12em;
+  white-space: nowrap;
+}
+
+.monitor-character strong {
+  max-width: min(210px, 27vw);
+  overflow: hidden;
+  color: var(--text);
+  font-family: var(--stats-font-family);
+  font-size: clamp(16px, 1.8vw, 22px);
+  font-style: var(--stats-font-style);
+  font-weight: 800;
+  letter-spacing: 0.045em;
+  line-height: 1;
+  text-overflow: ellipsis;
+  text-transform: none;
+  white-space: nowrap;
+}
+
+.monitor-rank {
+  display: grid;
+  min-width: 82px;
+  gap: 2px;
+  text-align: right;
+}
+
+.monitor-rank .control-label {
+  color: var(--cyan);
+  font-size: 8px;
+  letter-spacing: 0.12em;
+}
+
+.monitor-rank strong {
+  color: var(--lime);
+  font-family: "Bahnschrift Condensed", "Yu Gothic UI", sans-serif;
+  font-size: clamp(17px, 1.9vw, 23px);
+  line-height: 1;
+}
+
+.monitor-rank small {
+  overflow: hidden;
+  max-width: 120px;
+  color: var(--muted);
+  font-size: 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.social-panel {
+  display: grid;
+  min-height: 0;
+  padding: 13px 14px;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.social-heading,
+.social-player-heading,
+.social-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.social-tabs {
+  display: flex;
+  gap: 4px;
+  margin-top: 5px;
+}
+
+.social-tabs button {
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.035);
+  color: var(--muted);
+  font: 800 9px/1 "Cascadia Mono", monospace;
+}
+
+.social-tabs button.active {
+  border-color: rgba(67, 216, 255, 0.55);
+  color: var(--cyan);
+  box-shadow: inset 2px 0 var(--magenta);
+}
+
+.social-list {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.social-player {
+  display: grid;
+  width: 100%;
+  padding: 8px 3px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+  color: var(--text);
+  gap: 3px;
+  text-align: left;
+}
+
+.social-player:hover,
+.social-player:focus-visible {
+  background: rgba(67, 216, 255, 0.07);
+}
+
+.social-player-name {
+  overflow: hidden;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 800;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.social-player-name:hover,
+.social-player-name:focus-visible {
+  color: var(--cyan);
+  text-decoration: underline;
+}
+
+.social-presence {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.social-presence.online { color: var(--lime); }
+
+.social-player-detail,
+.social-player-activity,
+.social-message,
+.social-page-info {
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.social-pagination {
+  justify-content: center;
+}
+
+.social-pagination span {
+  min-width: 48px;
+  color: var(--cyan);
+  font: 700 9px/1 "Cascadia Mono", monospace;
+  text-align: center;
+}
+
+.options-category-card.force-update {
+  border-color: rgba(255, 101, 125, 0.9);
+  box-shadow: inset 3px 0 0 var(--red), 0 0 16px rgba(255, 101, 125, 0.2);
+}
+
+.option-button {
+  position: relative;
+}
+
+.option-button .update-badge {
+  margin-left: 3px;
 }

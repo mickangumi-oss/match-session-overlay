@@ -206,8 +206,13 @@ function normalizeFighter(raw) {
     platform: String(personal.platform_name ?? raw?.platform_name ?? ""),
     characterId: Number(raw?.favorite_character_id ?? 0) || null,
     character: String(raw?.favorite_character_tool_name ?? ""),
-    characterDisplayName: String(characterDisplayName ?? "").trim(),
+    // Search results are useful for resolving the stable character id, but the
+    // CURRENT CHARACTER label is sourced only from the locale-specific
+    // profile response.
+    characterDisplayName: "",
+    searchCharacterDisplayName: String(characterDisplayName ?? "").trim(),
     mr: Number(league.master_rating ?? 0) || null,
+    mrRank: Number(league.master_rating_ranking ?? 0) || null,
     lp: Number(league.league_point ?? 0) || null,
     ratingSource: "search",
     lastPlayedAt: Number(raw?.last_play_at ?? 0) || null,
@@ -259,6 +264,37 @@ function profileCharacterName(object) {
   ).trim();
 }
 
+function collectProfileCharacterCandidates(value, path = "", result = [], depth = 0) {
+  if (value == null || result.length >= 300 || depth > 8) return result;
+  if (Array.isArray(value)) {
+    value.slice(0, 100).forEach((item, index) =>
+      collectProfileCharacterCandidates(item, `${path}[${index}]`, result, depth + 1),
+    );
+    return result;
+  }
+  if (typeof value !== "object") return result;
+
+  const characterId = profileCharacterId(value);
+  const characterDisplayName = profileCharacterName(value);
+  if (characterId != null && characterDisplayName) {
+    result.push({
+      characterId,
+      characterDisplayName,
+      preferred: /current|selected|favorite|playing|my_character/.test(path.toLowerCase()),
+      path,
+    });
+  }
+  for (const [key, child] of Object.entries(value)) {
+    collectProfileCharacterCandidates(
+      child,
+      path ? `${path}.${key}` : key,
+      result,
+      depth + 1,
+    );
+  }
+  return result;
+}
+
 function collectProfileRatingCandidates(value, path = "", result = [], depth = 0) {
   if (value == null || result.length >= 300 || depth > 8) return result;
   if (Array.isArray(value)) {
@@ -278,10 +314,19 @@ function collectProfileRatingCandidates(value, path = "", result = [], depth = 0
     firstValue(value, ["league_point", "leaguePoint", "lp"]) ??
       firstValue(nestedLeague, ["league_point", "leaguePoint", "lp"]),
   );
-  if (mr != null || lp != null) {
+  const mrRank = finitePositive(
+    firstValue(value, ["master_rating_ranking", "masterRatingRanking", "mr_rank"]) ??
+      firstValue(nestedLeague, [
+        "master_rating_ranking",
+        "masterRatingRanking",
+        "mr_rank",
+      ]),
+  );
+  if (mr != null || lp != null || mrRank != null) {
     const pathText = path.toLowerCase();
     result.push({
       mr,
+      mrRank,
       lp,
       characterId: profileCharacterId(value) ?? profileCharacterId(nestedLeague),
       characterDisplayName: profileCharacterName(value),
@@ -298,6 +343,7 @@ function collectProfileRatingCandidates(value, path = "", result = [], depth = 0
 
 function normalizeProfilePlayer(data, fallbackPlayer = {}) {
   const candidates = collectProfileRatingCandidates(data);
+  const characterCandidates = collectProfileCharacterCandidates(data);
   const desiredCharacterId = Number(fallbackPlayer.characterId) || null;
   const matching = desiredCharacterId == null
     ? []
@@ -319,29 +365,46 @@ function normalizeProfilePlayer(data, fallbackPlayer = {}) {
     unscoped.find((item) => item.preferred) ??
     unscoped[0] ??
     null;
-  if (!candidate) return null;
+  const matchingCharacterNames = desiredCharacterId == null
+    ? []
+    : characterCandidates.filter(
+        (item) => item.characterId === desiredCharacterId,
+      );
+  const characterCandidate =
+    matchingCharacterNames.find((item) => item.preferred) ??
+    matchingCharacterNames[0] ??
+    null;
+  if (!candidate && !characterCandidate) return null;
 
   // A profile candidate with LP explicitly means the character is below
   // Master; do not carry an unrelated MR from the search result into it (and
   // vice versa). Only use the fallback value when the candidate has no value
   // for either rating system.
-  const mr = candidate.mr != null
+  const mr = candidate?.mr != null
     ? candidate.mr
-    : candidate.lp != null
+    : candidate?.lp != null
       ? null
       : finitePositive(fallbackPlayer.mr);
-  const lp = candidate.lp != null
+  const lp = candidate?.lp != null
     ? candidate.lp
-    : candidate.mr != null
+    : candidate?.mr != null
       ? null
       : finitePositive(fallbackPlayer.lp);
+  const mrRank = mr != null
+    ? candidate?.mrRank ?? finitePositive(fallbackPlayer.mrRank)
+    : null;
   return {
     ...fallbackPlayer,
     mr,
+    mrRank,
     lp,
-    characterId: candidate.characterId ?? fallbackPlayer.characterId ?? null,
-    characterDisplayName:
-      candidate.characterDisplayName || fallbackPlayer.characterDisplayName || "",
+    characterId:
+      desiredCharacterId ??
+      candidate?.characterId ??
+      characterCandidate?.characterId ??
+      null,
+    characterDisplayName: characterCandidate?.characterDisplayName ?? "",
+    characterDisplayNameSource: characterCandidate ? "profile" : "",
     ratingSource: "profile",
   };
 }
@@ -691,6 +754,7 @@ module.exports = {
   SERVICE_ORIGIN,
   applyNewReplays,
   classifyBattleType,
+  collectProfileCharacterCandidates,
   createEmptyMatchStats,
   findNewRankedReplays,
   normalizeFighter,

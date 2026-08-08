@@ -33,6 +33,11 @@ const HISTORY_PAGE_SIZE = 10;
 const RECENT_HISTORY_PREVIEW_LIMIT = 5;
 let historyPage = 0;
 let managementChartRenderToken = 0;
+let socialState = {
+  friends: { status: "idle", page: 1, totalPages: 1, players: [] },
+  following: { status: "idle", page: 1, totalPages: 1, players: [] },
+};
+let activeSocialKind = "friends";
 
 const elements = Object.fromEntries(
   [
@@ -52,6 +57,8 @@ const elements = Object.fromEntries(
     "recordLosses",
     "winRate",
     "currentCharacter",
+    "currentMrRank",
+    "currentMrRankHome",
     "currentRatingLabel",
     "currentRating",
     "medianRatingLabel",
@@ -74,6 +81,9 @@ const elements = Object.fromEntries(
     "optionsButton",
     "closeOptionsButton",
     "optionsPanel",
+    "optionsUpdateBadge",
+    "maintenanceSettingsCard",
+    "rankingHomeInput",
     "fontScaleInput",
     "fontScaleValue",
     "graphLabelScaleInput",
@@ -100,6 +110,15 @@ const elements = Object.fromEntries(
     "updateProgressBar",
     "notice",
     "languageInput",
+    "socialFriendsTab",
+    "socialFollowingTab",
+    "socialRefreshButton",
+    "socialList",
+    "socialEmpty",
+    "socialError",
+    "socialPreviousButton",
+    "socialNextButton",
+    "socialPageInfo",
     "historyPanel",
     "closeHistoryButton",
     "historyTargetCode",
@@ -208,29 +227,23 @@ function drawHistoryResultChart(records) {
   const context = canvas.getContext("2d");
   context.setTransform(ratio, 0, 0, ratio, 0, 0);
   context.clearRect(0, 0, width, height);
-  if (!records.length) return;
-  // Aggregate results by calendar day so each bar represents one date.
-  // Losses are drawn at the bottom and wins above them, making the daily
-  // result composition readable without requiring one bar per match.
-  const grouped = new Map();
-  for (const record of records) {
-    const date = dateKeyForHistory(record);
-    if (!date) continue;
-    const bucket = grouped.get(date) || { win: 0, loss: 0, draw: 0 };
-    if (record.result === "win") bucket.win += 1;
-    else if (record.result === "loss") bucket.loss += 1;
-    else bucket.draw += 1;
-    grouped.set(date, bucket);
-  }
-  const ordered = [...grouped.entries()]
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([date, values]) => ({ date, ...values }));
+  const chartModel = window.matchHistoryChartModel?.buildSevenDayResultChart(
+    records.map((record) => ({
+      dateKey: dateKeyForHistory(record),
+      result: record.result,
+    })),
+    {
+      endDateKey: elements.historyDateTo?.value || "",
+      todayKey: window.matchHistoryChartModel?.localTodayKey?.() || "",
+    },
+  );
+  const ordered = chartModel?.buckets ?? [];
   if (!ordered.length) return;
   const padding = { top: 12, right: 14, bottom: 32, left: 32 };
   const plotWidth = Math.max(1, width - padding.left - padding.right);
   const plotHeight = Math.max(1, height - padding.top - padding.bottom);
 
-  const maximum = Math.max(1, ...ordered.map((bucket) => bucket.win + bucket.loss + bucket.draw));
+  const maximum = Math.max(1, ...ordered.map((bucket) => bucket.total));
   const tickStep = maximum <= 5 ? 1 : Math.ceil(maximum / 5);
   const axisMaximum = Math.ceil(maximum / tickStep) * tickStep;
   context.strokeStyle = "rgba(120, 190, 220, .18)";
@@ -248,11 +261,13 @@ function drawHistoryResultChart(records) {
     context.fillText(String(tick), padding.left - 6, y);
   }
 
-  const slotWidth = plotWidth / ordered.length;
-  const barGap = Math.max(3, Math.min(14, slotWidth / 5));
-  const barWidth = Math.max(5, slotWidth - barGap);
-  ordered.forEach((bucket, index) => {
-    const x = padding.left + index * slotWidth + (slotWidth - barWidth) / 2;
+  const slotWidth = plotWidth / 7;
+  const barWidth = Math.max(5, Math.min(42, slotWidth * 0.62));
+  ordered.forEach((bucket) => {
+    const x =
+      padding.left +
+      bucket.dayIndex * slotWidth +
+      (slotWidth - barWidth) / 2;
     let cursor = padding.top + plotHeight;
     for (const [count, color] of [
       [bucket.loss, "#2d78df"],
@@ -265,14 +280,12 @@ function drawHistoryResultChart(records) {
       context.fillStyle = color;
       context.fillRect(x, cursor, barWidth, segmentHeight);
     }
-    if (ordered.length <= 12 || index % Math.ceil(ordered.length / 12) === 0) {
-      const parsedDate = new Date(`${bucket.date}T00:00:00`);
-      const label = `${String(parsedDate.getMonth() + 1).padStart(2, "0")}/${String(parsedDate.getDate()).padStart(2, "0")}`;
-      context.fillStyle = "rgba(247,248,255,.72)";
-      context.textAlign = "center";
-      context.textBaseline = "top";
-      context.fillText(label, x + barWidth / 2, padding.top + plotHeight + 7);
-    }
+    const [, month, day] = bucket.dateKey.split("-");
+    const label = `${month}/${day}`;
+    context.fillStyle = "rgba(247,248,255,.72)";
+    context.textAlign = "center";
+    context.textBaseline = "top";
+    context.fillText(label, x + barWidth / 2, padding.top + plotHeight + 7);
   });
 }
 
@@ -590,8 +603,17 @@ function renderHistoryState(nextState = historyState) {
     elements.historyNextButton.disabled = !totalPages || historyPage >= totalPages - 1;
   }
   const cooldown = Number(historyState.cooldownSeconds || 0);
-  elements.fetchHistoryButton.disabled = !historyState.canFetch;
-  elements.historyFetchState.textContent = historyState.viewingOther && historyState.polling
+  elements.fetchHistoryButton.disabled = historyState.fetching || !historyState.canFetch;
+  elements.fetchHistoryButton.textContent = historyState.fetching
+    ? t("historyFetching", "Loading…")
+    : t("fetchHistory", "Import 100 matches");
+  elements.historyFetchState.classList.toggle("loading", Boolean(historyState.fetching));
+  elements.historyFetchState.textContent = historyState.fetching
+    ? t("historyFetchProgress", "Loading page {page}/{max} · {count} fetched")
+      .replace("{page}", String(historyState.fetchPage || 1))
+      .replace("{max}", String(historyState.fetchMaxPages || 10))
+      .replace("{count}", String(historyState.fetchedCount || 0))
+    : historyState.viewingOther && historyState.polling
     ? t("historyAutoUpdating", "Automatic update: every {seconds}s").replace(
       "{seconds}",
       String(historyState.pollIntervalSeconds ?? "--"),
@@ -721,6 +743,7 @@ function fitManagementScoreValues() {
     elements.currentRating,
     elements.ratingDelta,
     elements.medianRating,
+    elements.currentCharacter,
   ]) {
     fitScoreValue(element);
   }
@@ -1071,9 +1094,9 @@ function historyForDisplay(selected, total) {
 }
 
 function renderManagementChart(state, { immediate = false } = {}) {
-  // The graph option controls the compact stats window/overlay only. The
-  // management screen is the dedicated graph workspace and always keeps it
-  // visible for inspection.
+  // Output visibility settings belong only to the Electron stats window and
+  // OBS overlay. The management monitor remains a complete reference even
+  // when the output graph is disabled.
   elements.managementChartPanel.classList.remove("hidden");
 
   const matchType = displaySettings.matchType ?? "ranked";
@@ -1105,7 +1128,8 @@ function renderManagementChart(state, { immediate = false } = {}) {
         history,
         graphMatchCount,
         ratingType,
-        state?.medianRatingType === ratingType && state?.medianRatingSampleCount >= 2
+        displaySettings?.potentialLineVisible !== false &&
+          state?.medianRatingType === ratingType && state?.medianRatingSampleCount >= 2
           ? state.medianRating
           : null,
         series.matchStart,
@@ -1131,7 +1155,7 @@ function renderRatingLabels(state = trackerState) {
 }
 
 function renderCurrentRating(state = trackerState) {
-  const trackedRating = state?.currentRating;
+  const trackedRating = state?.presentation?.currentRating ?? state?.currentRating;
   const rating =
     trackedRating ??
     selectedPlayer?.mr ??
@@ -1139,7 +1163,7 @@ function renderCurrentRating(state = trackerState) {
     null;
   const ratingType =
     trackedRating != null
-      ? state.ratingType
+      ? state?.presentation?.ratingType ?? state.ratingType
       : selectedPlayer?.mr != null
         ? "MR"
         : selectedPlayer?.lp != null
@@ -1176,20 +1200,95 @@ function renderMedianRating(state = trackerState) {
 
 function renderCurrentCharacter(state = trackerState) {
   const siteCharacter = String(
-    state?.player?.characterDisplayName ??
+    state?.presentation?.currentCharacter ??
+      state?.player?.characterDisplayName ??
       selectedPlayer?.characterDisplayName ??
       "",
   ).trim();
-  const toolCharacter = String(
-    state?.player?.character ?? selectedPlayer?.character ?? "",
-  ).trim();
-  elements.currentCharacter.textContent = siteCharacter
-    ? siteCharacter.toLocaleUpperCase("en-US")
-    : toolCharacter
-      ? localeApi?.characterName
-        ? localeApi.characterName(toolCharacter)
-        : toolCharacter.toLocaleUpperCase("en-US")
+  elements.currentCharacter.textContent = siteCharacter || "—";
+  fitScoreValue(elements.currentCharacter);
+}
+
+function renderCurrentMrRank(state = trackerState) {
+  if (!elements.currentMrRank) return;
+  const ranking = state?.ranking ?? {};
+  const rank = Number(ranking.rank);
+  const locale = displaySettings.locale || "ja-jp";
+  elements.currentMrRank.textContent = Number.isFinite(rank) && rank > 0
+    ? locale === "ja-jp"
+      ? `${new Intl.NumberFormat(locale).format(rank)}位`
+      : `#${new Intl.NumberFormat(locale).format(rank)}`
+    : ranking.status === "loading"
+      ? "…"
       : "—";
+  elements.currentMrRankHome.textContent = String(ranking.homeLabel ?? "").trim();
+}
+
+function formatSocialDate(timestamp) {
+  const value = Number(timestamp);
+  if (!Number.isFinite(value) || value <= 0) return "—";
+  return new Intl.DateTimeFormat(displaySettings.locale || "ja-jp", {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(value));
+}
+
+function renderSocialState(state = socialState) {
+  socialState = state ?? socialState;
+  const tabState = socialState[activeSocialKind] ?? {
+    status: "idle", page: 1, totalPages: 1, players: [],
+  };
+  for (const button of [elements.socialFriendsTab, elements.socialFollowingTab]) {
+    const active = button?.dataset.socialKind === activeSocialKind;
+    button?.classList.toggle("active", active);
+    button?.setAttribute("aria-selected", String(active));
+  }
+  elements.socialList.replaceChildren();
+  for (const player of tabState.players ?? []) {
+    const row = document.createElement("div");
+    row.className = "social-player";
+    row.tabIndex = 0;
+    row.setAttribute("role", "button");
+    row.dataset.profileId = String(player.profileId ?? "");
+
+    const heading = document.createElement("span");
+    heading.className = "social-player-heading";
+    const name = document.createElement("button");
+    name.type = "button";
+    name.className = "social-player-name";
+    name.dataset.socialHistoryCode = String(player.profileId ?? "");
+    name.textContent = String(player.name ?? "—");
+    const status = document.createElement("span");
+    status.className = `social-presence ${player.online ? "online" : "offline"}`;
+    status.textContent = String(player.statusName || (player.online ? "ONLINE" : t("offline", "OFFLINE")));
+    heading.append(name, status);
+
+    const detail = document.createElement("span");
+    detail.className = "social-player-detail";
+    const rating = player.ratingType && player.rating != null
+      ? `${player.ratingType} ${Number(player.rating).toLocaleString(displaySettings.locale || "ja-jp")}`
+      : "—";
+    detail.textContent = [player.platform, player.characterName, player.rankName, rating]
+      .filter(Boolean).join(" · ");
+
+    const activity = document.createElement("span");
+    activity.className = "social-player-activity";
+    const hub = [player.battleHubRegion, player.battleHubServer].filter(Boolean).join(" ");
+    activity.textContent = hub || `${t("lastPlayed", "Last played")} ${formatSocialDate(player.lastPlayedAt)}`;
+    row.append(heading, detail, activity);
+    elements.socialList.append(row);
+  }
+  const hasPlayers = (tabState.players ?? []).length > 0;
+  elements.socialEmpty.classList.toggle("hidden", hasPlayers || tabState.status === "loading");
+  elements.socialError.classList.toggle("hidden", tabState.status !== "error");
+  elements.socialRefreshButton.disabled = tabState.status === "loading";
+  const page = Math.max(1, Number(tabState.page) || 1);
+  const totalPages = Math.max(page, Number(tabState.totalPages) || 1);
+  elements.socialPageInfo.textContent = `${page} / ${totalPages}`;
+  elements.socialPreviousButton.disabled = tabState.status === "loading" || page <= 1;
+  elements.socialNextButton.disabled = tabState.status === "loading" || page >= totalPages;
 }
 
 function applyAuthenticatedPlayer(player) {
@@ -1201,6 +1300,7 @@ function applyAuthenticatedPlayer(player) {
   renderRatingLabels();
   renderCurrentRating();
   renderCurrentCharacter();
+  renderCurrentMrRank();
   setStatus(elements.authStatus, t("loggedIn", "ログイン済み"), "ok");
   elements.startTrackingButton.disabled = false;
   if (api.getHistoryState) {
@@ -1226,16 +1326,22 @@ function renderTracker(state) {
   renderRatingLabels(state);
   renderCurrentRating(state);
   renderCurrentCharacter(state);
+  renderCurrentMrRank(state);
   const matchType = displaySettings.matchType ?? "ranked";
   const selected = state.stats?.[matchType] ?? {};
-  const wins = Number(selected.wins ?? 0);
-  const losses = Number(selected.losses ?? 0);
+  const presentation = state?.presentation ?? {};
+  const wins = Number(presentation.wins ?? selected.wins ?? 0);
+  const losses = Number(presentation.losses ?? selected.losses ?? 0);
   const total = wins + losses;
   const delta =
-    matchType === "ranked" ? Number(selected.ratingDelta ?? 0) : null;
+    matchType === "ranked"
+      ? Number(presentation.ratingDelta ?? selected.ratingDelta ?? 0)
+      : null;
   elements.recordWins.textContent = String(wins);
   elements.recordLosses.textContent = String(losses);
-  elements.winRate.textContent = `${(total ? (wins / total) * 100 : 0).toFixed(1)}%`;
+  elements.winRate.textContent = `${Number(
+    presentation.winRate ?? (total ? (wins / total) * 100 : 0),
+  ).toFixed(1)}%`;
   elements.ratingDelta.textContent =
     delta == null ? "—" : `${delta > 0 ? "+" : delta < 0 ? "" : "±"}${delta}`;
   fitManagementScoreValues();
@@ -1254,11 +1360,81 @@ function renderTracker(state) {
   renderNextUpdate();
 }
 
+const DISPLAY_METRIC_KEYS = [
+  "record",
+  "winRate",
+  "currentRating",
+  "ratingDelta",
+  "potentialRating",
+  "currentCharacter",
+  "mrRank",
+];
+
+function normalizedDisplayItems(settings = {}) {
+  const result = Object.fromEntries(
+    [...DISPLAY_METRIC_KEYS, "graph"].map((key) => [key, true]),
+  );
+  const source = settings.displayItems;
+  if (source && typeof source === "object") {
+    for (const key of Object.keys(result)) {
+      if (typeof source[key] === "boolean") result[key] = source[key];
+    }
+  } else if (typeof settings.graphVisible === "boolean") {
+    result.graph = settings.graphVisible;
+  }
+  return result;
+}
+
+function renderDisplayItemVisibility(settings) {
+  const displayItems = normalizedDisplayItems(settings);
+  settings.displayItems = displayItems;
+  // These visibility switches belong only to the stats window and OBS
+  // overlay. The management monitor remains a complete, stable reference and
+  // always shows every metric regardless of the output selection.
+  for (const input of document.querySelectorAll("[data-display-item]")) {
+    input.checked = displayItems[input.dataset.displayItem] !== false;
+  }
+  return displayItems;
+}
+
+function renderRankingHomeOptions(settings) {
+  if (!elements.rankingHomeInput) return;
+  const catalog = settings.rankingHomeOptions ?? {};
+  const selected = String(settings.rankingHome ?? "all");
+  elements.rankingHomeInput.replaceChildren();
+  const all = document.createElement("option");
+  all.value = String(catalog.all?.value ?? "all");
+  all.textContent = String(catalog.all?.label ?? t("rankingHomeAll", "すべて"));
+  elements.rankingHomeInput.append(all);
+  for (const [key, labelKey] of [
+    ["regions", "rankingRegions"],
+    ["countries", "rankingCountries"],
+  ]) {
+    const options = Array.isArray(catalog[key]) ? catalog[key] : [];
+    if (!options.length) continue;
+    const group = document.createElement("optgroup");
+    group.label = t(labelKey, key);
+    for (const entry of options) {
+      const option = document.createElement("option");
+      option.value = String(entry.value);
+      option.textContent = String(entry.label);
+      group.append(option);
+    }
+    elements.rankingHomeInput.append(group);
+  }
+  elements.rankingHomeInput.value = selected;
+  if (elements.rankingHomeInput.value !== selected) {
+    elements.rankingHomeInput.value = "all";
+  }
+}
+
 function renderDisplaySettings(settings) {
   const previousGraphMatchCount = Number(displaySettings.graphMatchCount);
   displaySettings = settings;
+  const displayItems = renderDisplayItemVisibility(settings);
   const windowOrientation = settings.windowOrientation ?? "horizontal";
   applyLocale(settings.locale || "ja-jp");
+  renderRankingHomeOptions(settings);
   elements.fontScaleInput.value = String(Math.round(settings.fontScale * 100));
   elements.fontScaleValue.textContent = `${elements.fontScaleInput.value}%`;
   elements.graphLabelScaleInput.value = String(
@@ -1298,7 +1474,14 @@ function renderDisplaySettings(settings) {
   for (const button of document.querySelectorAll("[data-graph-visible]")) {
     button.classList.toggle(
       "active",
-      (button.dataset.graphVisible === "true") === settings.graphVisible,
+      (button.dataset.graphVisible === "true") === displayItems.graph,
+    );
+  }
+  for (const button of document.querySelectorAll("[data-potential-line-visible]")) {
+    button.classList.toggle(
+      "active",
+      (button.dataset.potentialLineVisible === "true") ===
+        (settings.potentialLineVisible !== false),
     );
   }
   elements.fontFamilyInput.value = settings.fontFamily;
@@ -1364,8 +1547,10 @@ function renderUpdate(state) {
   const updateRow = elements.updateBadge.closest(".update-row");
   document.body.classList.toggle("update-required", required);
   elements.updateBadge.classList.toggle("hidden", !hasUpdate);
+  elements.optionsUpdateBadge?.classList.toggle("hidden", !hasUpdate);
   updateRow.classList.toggle("has-update", hasUpdate);
   updateRow.classList.toggle("force-update", required);
+  elements.maintenanceSettingsCard?.classList.toggle("force-update", required);
   elements.updateProgress.classList.toggle("hidden", !downloading);
   elements.updateProgressBar.style.width = `${state.progress || 0}%`;
   elements.installUpdateButton.classList.toggle(
@@ -1380,6 +1565,12 @@ function renderUpdate(state) {
   elements.checkUpdateButton.classList.toggle("hidden", hasUpdate);
   elements.checkUpdateButton.disabled =
     state.status === "checking" || state.status === "downloading";
+  if (required) {
+    setOptionsOpen(true);
+    requestAnimationFrame(() =>
+      elements.maintenanceSettingsCard?.scrollIntoView({ block: "nearest" }),
+    );
+  }
 }
 
 elements.openLoginButton.addEventListener("click", async () => {
@@ -1605,13 +1796,131 @@ for (const button of document.querySelectorAll("[data-match-type]")) {
 
 for (const button of document.querySelectorAll("[data-graph-visible]")) {
   button.addEventListener("click", async () => {
+    try {
+      renderDisplaySettings(
+        await unwrap(
+          api.updateDisplaySettings({
+            displayItems: {
+              graph: button.dataset.graphVisible === "true",
+            },
+          }),
+        ),
+      );
+    } catch (error) {
+      renderDisplaySettings(displaySettings);
+      showNotice(error.message, "error");
+    }
+  });
+}
+
+for (const input of document.querySelectorAll("[data-display-item]")) {
+  input.addEventListener("change", async () => {
+    try {
+      renderDisplaySettings(
+        await unwrap(
+          api.updateDisplaySettings({
+            displayItems: { [input.dataset.displayItem]: input.checked },
+          }),
+        ),
+      );
+    } catch (error) {
+      renderDisplaySettings(displaySettings);
+      showNotice(error.message, "error");
+    }
+  });
+}
+
+elements.rankingHomeInput?.addEventListener("change", async () => {
+  try {
     renderDisplaySettings(
-      await unwrap(
-        api.updateDisplaySettings({
-          graphVisible: button.dataset.graphVisible === "true",
-        }),
-      ),
+      await unwrap(api.updateDisplaySettings({
+        rankingHome: elements.rankingHomeInput.value,
+      })),
     );
+  } catch (error) {
+    renderDisplaySettings(displaySettings);
+    showNotice(error.message, "error");
+  }
+});
+
+for (const button of [elements.socialFriendsTab, elements.socialFollowingTab]) {
+  button?.addEventListener("click", () => {
+    activeSocialKind = button.dataset.socialKind;
+    renderSocialState();
+  });
+}
+
+elements.socialRefreshButton?.addEventListener("click", async () => {
+  try {
+    renderSocialState(await unwrap(api.refreshSocial(activeSocialKind)));
+  } catch (error) {
+    showNotice(error.message, "error");
+  }
+});
+
+elements.socialPreviousButton?.addEventListener("click", async () => {
+  const page = Number(socialState[activeSocialKind]?.page) || 1;
+  if (page <= 1) return;
+  try {
+    renderSocialState(await unwrap(api.changeSocialPage(activeSocialKind, page - 1)));
+  } catch (error) {
+    showNotice(error.message, "error");
+  }
+});
+
+elements.socialNextButton?.addEventListener("click", async () => {
+  const current = socialState[activeSocialKind] ?? {};
+  const page = Number(current.page) || 1;
+  if (page >= (Number(current.totalPages) || 1)) return;
+  try {
+    renderSocialState(await unwrap(api.changeSocialPage(activeSocialKind, page + 1)));
+  } catch (error) {
+    showNotice(error.message, "error");
+  }
+});
+
+elements.socialList?.addEventListener("click", async (event) => {
+  const historyLink = event.target.closest("[data-social-history-code]");
+  if (historyLink) {
+    const userCode = historyLink.dataset.socialHistoryCode;
+    if (elements.historyTargetCode) elements.historyTargetCode.value = userCode;
+    void selectHistoryTarget(userCode, { autoFetch: true });
+    return;
+  }
+  const row = event.target.closest("[data-profile-id]");
+  if (!row) return;
+  try {
+    await unwrap(api.openSocialProfile(row.dataset.profileId));
+  } catch (error) {
+    showNotice(error.message, "error");
+  }
+});
+
+elements.socialList?.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter" && event.key !== " ") return;
+  if (event.target.closest("[data-social-history-code]")) return;
+  const row = event.target.closest("[data-profile-id]");
+  if (!row) return;
+  event.preventDefault();
+  void unwrap(api.openSocialProfile(row.dataset.profileId)).catch((error) =>
+    showNotice(error.message, "error"),
+  );
+});
+
+for (const button of document.querySelectorAll("[data-potential-line-visible]")) {
+  button.addEventListener("click", async () => {
+    try {
+      renderDisplaySettings(
+        await unwrap(
+          api.updateDisplaySettings({
+            potentialLineVisible:
+              button.dataset.potentialLineVisible === "true",
+          }),
+        ),
+      );
+    } catch (error) {
+      showNotice(error.message, "error");
+    }
   });
 }
 
@@ -1894,6 +2203,7 @@ api.onHistoryState?.((state) => {
   historyPage = 0;
   renderHistoryState(state);
 });
+api.onSocialState?.(renderSocialState);
 api.onUpdateState(renderUpdate);
 api.onDisplaySettings(renderDisplaySettings);
 api.onAuthenticatedPlayer((player) => {
@@ -1906,13 +2216,15 @@ Promise.all([
   unwrap(api.getHistoryState ? api.getHistoryState() : Promise.resolve({ records: [] })),
   unwrap(api.getUpdateState()),
   unwrap(api.getDisplaySettings()),
+  unwrap(api.getSocialState ? api.getSocialState() : Promise.resolve(socialState)),
 ])
-  .then(async ([state, savedHistory, updateState, settings]) => {
+  .then(async ([state, savedHistory, updateState, settings, savedSocial]) => {
     renderDisplaySettings(settings);
     await populateInstalledFonts(settings.fontFamily);
     renderTracker(state);
     historyPage = 0;
     renderHistoryState(savedHistory);
+    renderSocialState(savedSocial);
     renderUpdate(updateState);
   })
   .catch((error) => showNotice(error.message, "error"));
