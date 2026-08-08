@@ -9,7 +9,7 @@
   "scripts": {
     "test": "node --test",
     "check": "node scripts/check-source.js",
-    "build": "electron-builder --win nsis",
+    "build": "electron-builder --win nsis --publish never",
     "release:manifest": "node scripts/create-release-manifest.js"
   },
   "devDependencies": {
