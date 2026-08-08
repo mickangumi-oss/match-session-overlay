@@ -53,9 +53,10 @@ test("each fetched page merges records and publishes cumulative progress, then c
 });
 
 test("renderer keeps the import action disabled and shows page/count progress while fetching", () => {
-  const source = functionSource(rendererSource, "renderHistoryState");
+  const source = functionSource(rendererSource, "renderHistoryFetchStatus");
 
-  assert.match(source, /fetchHistoryButton\.disabled = historyState\.fetching \|\| !historyState\.canFetch/);
+  assert.match(source, /const canFetch = Boolean\(historyState\.authenticated\)[\s\S]*?!historyState\.fetching/);
+  assert.match(source, /fetchHistoryButton\.disabled = !canFetch/);
   assert.match(source, /historyState\.fetching\s*\?\s*t\("historyFetching", "Loading…"\)/);
   assert.match(source, /t\("historyFetchProgress", "Loading page \{page\}\/\{max\} · \{count\} fetched"\)/);
   assert.match(source, /replace\("\{page\}", String\(historyState\.fetchPage \|\| 1\)\)/);

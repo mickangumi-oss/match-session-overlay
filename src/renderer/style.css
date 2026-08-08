@@ -1932,3 +1932,10 @@ footer {
 .option-button .update-badge {
   margin-left: 3px;
 }
+
+.option-button.has-update {
+  border-color: rgba(183, 255, 66, 0.72);
+  color: var(--lime);
+  box-shadow: inset 0 0 0 1px rgba(183, 255, 66, 0.12),
+    0 0 12px rgba(183, 255, 66, 0.16);
+}
