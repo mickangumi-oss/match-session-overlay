@@ -43,6 +43,27 @@ const {
   shouldAutoStopForInactivity,
   successfulPollDelayMs,
 } = require("./poll-policy");
+const {
+  applyDisplayItemUpdate,
+  defaultDisplayItems,
+  displayItemsEqual,
+  sanitizeDisplayItems,
+  visibleMetricCount,
+} = require("./display-settings");
+const { buildPresentationState } = require("./presentation-model");
+const {
+  DEFAULT_RANKING_HOME,
+  buildCharacterSlugCatalog,
+  buildRankingHomeCatalog,
+  normalizeMasterRanking,
+  rankingCharacterSlug,
+  rankingCacheKey,
+  rankingHomeLabel,
+  rankingRequestQuery,
+  sanitizeRankingHomeKey,
+  shouldRefreshRanking,
+} = require("./ranking-model");
+const { normalizeSocialPage } = require("./social-model");
 const { createUpdater } = require("./updater");
 
 const APP_NAME = "MatchSessionOverlay";
@@ -108,6 +129,14 @@ const STATS_WINDOW_PRESETS = {
   },
 };
 const WINDOW_ORIENTATIONS = new Set(["horizontal", "vertical"]);
+const GRAPH_ONLY_MINIMUM_SIZE = {
+  horizontal: { width: 420, height: 220 },
+  vertical: { width: 360, height: 220 },
+};
+const HORIZONTAL_GRAPH_WITH_METRICS_MINIMUM_SIZE = {
+  width: 520,
+  height: 240,
+};
 const FONT_KEYS = new Set(["street", "condensed", "system", "japanese", "mono"]);
 const FONT_FAMILY_PATTERN = /^[\p{L}\p{M}\p{N}\p{Zs}._&'()\-+#@]{1,100}$/u;
 const POLL_INTERVAL_OPTIONS = new Set([120, 180, 300]);
@@ -279,6 +308,7 @@ let updateRequired = false;
 let authenticatedRatingType = "MR";
 let authenticatedProfileId = null;
 let authenticatedPlayer = null;
+const overlayEventClients = new Set();
 let statsWindowBounds = {
   window: { horizontal: null, vertical: null },
   overlay: null,
@@ -289,7 +319,9 @@ const matchHistoryStores = new Map();
 const historyProfileLookupCache = new Map();
 const profileRefreshCache = new Map();
 const profileRefreshInFlight = new Map();
+const profileCharacterNameCache = new Map();
 let matchHistoryFetchInFlight = null;
+let matchHistoryFetchProgress = null;
 let historyViewPlayer = null;
 let historyViewPollTimer = null;
 let historyViewPollInFlight = false;
@@ -300,6 +332,28 @@ let historyViewNextPollAt = null;
 let historyViewEffectivePollIntervalSeconds = null;
 let historyViewConsecutiveFailures = 0;
 let historyViewStopReason = null;
+const rankingCache = new Map();
+const rankingCatalogCache = new Map();
+const rankingCharacterSlugCache = new Map();
+const rankingInFlight = new Map();
+let rankingState = {
+  status: "idle",
+  rank: null,
+  rating: null,
+  profileId: null,
+  locale: null,
+  characterId: null,
+  homeKey: DEFAULT_RANKING_HOME,
+  homeLabel: "All",
+  updatedAt: null,
+};
+let socialRefreshTimer = null;
+const socialRefreshInFlight = new Map();
+let socialState = {
+  friends: { status: "idle", page: 1, totalPages: 1, pageSize: 0, players: [] },
+  following: { status: "idle", page: 1, totalPages: 1, pageSize: 0, players: [] },
+  updatedAt: null,
+};
 let displaySettings = {
   mode: "window",
   windowOrientation: "horizontal",
@@ -308,7 +362,9 @@ let displaySettings = {
   graphLabelScale: 1.3,
   graphMatchCount: 20,
   backgroundOpacity: 0.94,
-  graphVisible: true,
+  displayItems: defaultDisplayItems(),
+  potentialLineVisible: true,
+  rankingHome: DEFAULT_RANKING_HOME,
   fontFamily: "street",
   fontStyle: "normal",
   textColor: "#f7f8ff",
@@ -327,12 +383,10 @@ function serviceHome() {
   return `${SERVICE_ORIGIN}/6/buckler/${serviceLocale()}`;
 }
 
-function buildProfileRefreshHint(previousPlayer, characterId, characterDisplayName) {
+function buildProfileRefreshHint(previousPlayer, characterId) {
   const hint = {
     ...previousPlayer,
     characterId: characterId ?? previousPlayer?.characterId,
-    characterDisplayName:
-      characterDisplayName || previousPlayer?.characterDisplayName || "",
   };
   const previousCharacterId = Number(previousPlayer?.characterId) || null;
   const nextCharacterId = Number(hint.characterId) || null;
@@ -345,8 +399,11 @@ function buildProfileRefreshHint(previousPlayer, characterId, characterDisplayNa
     // Leave the rating empty so the caller can fall back to this character's
     // latest replay snapshot until the next profile refresh succeeds.
     hint.mr = null;
+    hint.mrRank = null;
     hint.lp = null;
     hint.ratingSource = "search";
+    hint.characterDisplayName = "";
+    hint.characterDisplayNameCacheKey = "";
   }
   return hint;
 }
@@ -385,9 +442,13 @@ try {
       Math.max(0, Number(savedSettings.backgroundOpacity)),
     );
   }
-  if (typeof savedSettings.graphVisible === "boolean") {
-    displaySettings.graphVisible = savedSettings.graphVisible;
+  displaySettings.displayItems = sanitizeDisplayItems(savedSettings.displayItems, {
+    legacyGraphVisible: savedSettings.graphVisible,
+  });
+  if (typeof savedSettings.potentialLineVisible === "boolean") {
+    displaySettings.potentialLineVisible = savedSettings.potentialLineVisible;
   }
+  displaySettings.rankingHome = sanitizeRankingHomeKey(savedSettings.rankingHome);
   const savedFontFamily = normalizeFontFamily(savedSettings.fontFamily);
   if (savedFontFamily) displaySettings.fontFamily = savedFontFamily;
   if (["normal", "italic"].includes(savedSettings.fontStyle)) {
@@ -659,6 +720,10 @@ function publicHistoryState(
   const nextAllowedAt = store.lastFetchedAt
     ? store.lastFetchedAt + MATCH_HISTORY_FETCH_COOLDOWN_MS
     : 0;
+  const fetchProgress =
+    matchHistoryFetchProgress?.profileId === normalizedProfileId
+      ? matchHistoryFetchProgress
+      : null;
   return {
     records: store.records,
     count: store.records.length,
@@ -668,7 +733,14 @@ function publicHistoryState(
     authenticated: Boolean(normalizedProfileId),
     lastFetchedAt: store.lastFetchedAt || null,
     nextAllowedAt: nextAllowedAt || null,
-    canFetch: Boolean(normalizedProfileId) && Date.now() >= nextAllowedAt,
+    canFetch:
+      Boolean(normalizedProfileId) &&
+      !fetchProgress &&
+      Date.now() >= nextAllowedAt,
+    fetching: Boolean(fetchProgress),
+    fetchPage: fetchProgress?.page ?? 0,
+    fetchMaxPages: fetchProgress?.maxPages ?? MATCH_HISTORY_MAX_PAGES,
+    fetchedCount: fetchProgress?.fetchedCount ?? 0,
     cooldownSeconds: Math.max(0, Math.ceil((nextAllowedAt - Date.now()) / 1000)),
     polling: Boolean(historyViewPlayer && historyViewPollingActive),
     pollNextAt: historyViewPlayer ? historyViewNextPollAt : null,
@@ -987,6 +1059,60 @@ function publicGraphData(sourceState) {
   };
 }
 
+function currentRankingCatalog() {
+  return (
+    rankingCatalogCache.get(serviceLocale()) ?? {
+      all: { value: DEFAULT_RANKING_HOME, label: "All" },
+      regions: [],
+      countries: [],
+    }
+  );
+}
+
+function publicRankingState(sourceState = trackerState) {
+  const player = sourceState?.player ?? authenticatedPlayer;
+  const playerProfileId = String(player?.profileId ?? player?.userCode ?? "");
+  const authenticatedId = String(authenticatedProfileId ?? "");
+  const samePlayer =
+    playerProfileId === authenticatedId &&
+    String(rankingState.profileId ?? "") === authenticatedId;
+  const characterId = Number(sourceState?.characterId ?? player?.characterId) || null;
+  const sameCharacter = Number(rankingState.characterId) === characterId;
+  const sameLocale = rankingState.locale === serviceLocale();
+  const sameHome = rankingState.homeKey === displaySettings.rankingHome;
+  const exactRanking = samePlayer && sameCharacter && sameLocale && sameHome;
+  // Ranking pages expose `my_ranking_info` only for the authenticated player.
+  // For a different player selected in match history, use the exact current-
+  // character overall rank returned by that player's freshly fetched official
+  // profile. HOME-specific ranking cannot be inferred for another account.
+  const profileRank = Number(player?.mrRank);
+  const otherProfileRanking =
+    Boolean(playerProfileId) &&
+    playerProfileId !== authenticatedId &&
+    Number(player?.mr) > 0 &&
+    Number.isFinite(profileRank) &&
+    profileRank > 0;
+  const profileHome = currentRankingCatalog().all ?? {
+    value: DEFAULT_RANKING_HOME,
+    label: "All",
+  };
+  return {
+    status: exactRanking ? rankingState.status : otherProfileRanking ? "ready" : "idle",
+    rank: exactRanking ? rankingState.rank : otherProfileRanking ? profileRank : null,
+    rating: exactRanking ? rankingState.rating : otherProfileRanking ? player.mr : null,
+    characterId,
+    homeKey: otherProfileRanking ? profileHome.value : displaySettings.rankingHome,
+    homeLabel: otherProfileRanking
+      ? profileHome.label
+      : rankingHomeLabel(currentRankingCatalog(), displaySettings.rankingHome),
+    updatedAt: exactRanking
+      ? rankingState.updatedAt
+      : otherProfileRanking
+        ? player.profileUpdatedAt ?? null
+        : null,
+  };
+}
+
 function publicTrackerState() {
   const viewState = historyViewTrackerState();
   const sourceState = viewState ?? trackerState;
@@ -996,9 +1122,20 @@ function publicTrackerState() {
     characterStates: _privateCharacterStates,
     ...publicState
   } = sourceState;
+  const median = publicMedianRating(sourceState);
+  const presentationPlayer = sourceState.player ?? historyViewPlayer ?? authenticatedPlayer;
+  const ranking = publicRankingState(sourceState);
   return {
     ...publicState,
-    ...publicMedianRating(sourceState),
+    ...median,
+    presentation: buildPresentationState({
+      sourceState,
+      player: presentationPlayer,
+      matchType: displaySettings.matchType,
+      median,
+      ranking,
+    }),
+    ranking,
     graphData: publicGraphData(sourceState),
     overlaySuppressed,
     selectedMatchType: displaySettings.matchType,
@@ -1019,12 +1156,7 @@ function publicOverlayState() {
       ? statsWindow.getBounds()
       : null;
   const savedOverlayBounds = statsWindowBounds.overlay;
-  const overlayPreset =
-    displaySettings.windowOrientation === "vertical"
-      ? displaySettings.graphVisible === false
-        ? STATS_WINDOW_PRESETS.overlay.verticalNoChart
-        : STATS_WINDOW_PRESETS.overlay.vertical
-      : STATS_WINDOW_PRESETS.overlay.chart;
+  const overlayPreset = statsWindowPresetFor("overlay");
   const fallbackOverlaySize = {
     width: overlayPreset.minWidth,
     height: overlayPreset.minHeight,
@@ -1043,6 +1175,15 @@ function publicOverlayState() {
     liveOverlayBounds ??
     (savedOverlaySizeUsable ? savedOverlayBounds : null) ??
     fallbackOverlaySize;
+  const presentationPlayer = sourceState.player ?? historyViewPlayer ?? authenticatedPlayer;
+  const ranking = publicRankingState(sourceState);
+  const presentation = buildPresentationState({
+    sourceState,
+    player: presentationPlayer,
+    matchType: displaySettings.matchType,
+    median,
+    ranking,
+  });
   return {
     active: sourceState.active,
     currentRating: sourceState.currentRating,
@@ -1054,16 +1195,24 @@ function publicOverlayState() {
     medianRatingType: median.medianRatingType,
     medianRatingSampleCount: median.medianRatingSampleCount,
     graphData,
+    presentation,
+    ranking,
     ratingType: sourceState.ratingType || authenticatedRatingType,
     selectedMatchType: displaySettings.matchType,
     overlaySize: {
       width: Math.min(
         overlayPreset.maxWidth ?? STATS_WINDOW_PRESETS.overlay.maxWidth,
-        Math.max(300, Number(overlaySize.width) || fallbackOverlaySize.width),
+        Math.max(
+          overlayPreset.minWidth ?? 300,
+          Number(overlaySize.width) || fallbackOverlaySize.width,
+        ),
       ),
       height: Math.min(
         overlayPreset.maxHeight ?? STATS_WINDOW_PRESETS.overlay.maxHeight,
-        Math.max(68, Number(overlaySize.height) || fallbackOverlaySize.height),
+        Math.max(
+          overlayPreset.minHeight ?? 68,
+          Number(overlaySize.height) || fallbackOverlaySize.height,
+        ),
       ),
     },
     displaySettings: {
@@ -1073,13 +1222,26 @@ function publicOverlayState() {
       graphLabelScale: displaySettings.graphLabelScale,
       graphMatchCount: displaySettings.graphMatchCount,
       backgroundOpacity: displaySettings.backgroundOpacity,
-      graphVisible: displaySettings.graphVisible,
+      displayItems: displaySettings.displayItems,
+      potentialLineVisible: displaySettings.potentialLineVisible,
       fontFamily: displaySettings.fontFamily,
       fontStyle: displaySettings.fontStyle,
       textColor: displaySettings.textColor,
       locale: displaySettings.locale,
     },
   };
+}
+
+function broadcastOverlayState() {
+  if (!overlayEventClients.size) return;
+  const message = `event: state\ndata: ${JSON.stringify(publicOverlayState())}\n\n`;
+  for (const response of [...overlayEventClients]) {
+    try {
+      response.write(message);
+    } catch {
+      overlayEventClients.delete(response);
+    }
+  }
 }
 
 function sendTrackerState() {
@@ -1089,6 +1251,7 @@ function sendTrackerState() {
   if (statsWindow && !statsWindow.isDestroyed()) {
     statsWindow.webContents.send("tracker:state", publicTrackerState());
   }
+  broadcastOverlayState();
 }
 
 function publicDisplaySettings({ statsWindowVisible } = {}) {
@@ -1098,6 +1261,7 @@ function publicDisplaySettings({ statsWindowVisible } = {}) {
     statsWindow.isVisible();
   return {
     ...displaySettings,
+    rankingHomeOptions: currentRankingCatalog(),
     overlayInteractionLocked: !overlayEditMode,
     statsWindowVisible: statsWindowVisible ?? actualStatsWindowVisible,
   };
@@ -1193,21 +1357,92 @@ function savedStatsWindowBounds(mode = displaySettings.mode) {
     : statsWindowBounds[mode];
 }
 
-function currentStatsWindowPreset() {
-  const modePreset = STATS_WINDOW_PRESETS[displaySettings.mode];
+function statsWindowPresetFor(mode = displaySettings.mode) {
+  const isOverlay = mode === "overlay";
   const isVertical = displaySettings.windowOrientation === "vertical";
-  const sizePreset = isVertical
-    ? displaySettings.graphVisible === false
-      ? modePreset.verticalNoChart ?? modePreset.vertical ?? modePreset.summary
-      : modePreset.vertical ?? modePreset.summary
-    : displaySettings.mode === "window"
-      ? modePreset.horizontal
-      : modePreset.summary;
+  const metricCount = visibleMetricCount(displaySettings.displayItems);
+  const graphVisible = displaySettings.displayItems.graph === true;
+  const graphOnly = metricCount === 0 && graphVisible;
+  const horizontalGraphWithMetrics = metricCount > 0 && graphVisible;
+  const graphOnlyMinimum = GRAPH_ONLY_MINIMUM_SIZE[
+    isVertical ? "vertical" : "horizontal"
+  ];
+  if (isVertical) {
+    const cardHeight = isOverlay ? 76 : 86;
+    const cardArea = metricCount
+      ? metricCount * cardHeight + Math.max(0, metricCount - 1) * 8
+      : 0;
+    const graphArea = graphVisible ? (isOverlay ? 184 : 230) : 0;
+    const contentGap = metricCount && graphVisible ? 8 : 0;
+    const outerAllowance = metricCount || !graphVisible ? 20 : 8;
+    const height = Math.min(
+      1080,
+      Math.max(
+        graphOnly ? graphOnlyMinimum.height : 96,
+        cardArea + graphArea + contentGap + outerAllowance,
+      ),
+    );
+    return {
+      width: 380,
+      height,
+      minWidth: graphOnly ? graphOnlyMinimum.width : 300,
+      minHeight: graphOnly
+        ? graphOnlyMinimum.height
+        : Math.min(height, Math.max(82, cardArea + (graphVisible ? 130 : 0) + 12)),
+      maxWidth: 600,
+      maxHeight: 1100,
+    };
+  }
+
+  const preferredCardWidth = isOverlay ? 118 : 142;
+  const minimumCardWidth = isOverlay ? 76 : 88;
+  const preferredMetricWidth = metricCount
+    ? metricCount * preferredCardWidth + Math.max(0, metricCount - 1) * 6 + 20
+    : 0;
+  const minimumMetricWidth = metricCount
+    ? metricCount * minimumCardWidth + Math.max(0, metricCount - 1) * 4 + 12
+    : 0;
+  const width = Math.min(1200, Math.max(graphVisible ? 520 : 320, preferredMetricWidth));
+  const minWidth = Math.min(
+    1000,
+    Math.max(
+      horizontalGraphWithMetrics
+        ? HORIZONTAL_GRAPH_WITH_METRICS_MINIMUM_SIZE.width
+        : graphVisible
+          ? 380
+          : 300,
+      minimumMetricWidth,
+    ),
+  );
+  const cardArea = metricCount ? (isOverlay ? 60 : 94) : 0;
+  const graphArea = graphVisible ? (isOverlay ? 112 : 184) : 0;
+  const outerAllowance = metricCount || !graphVisible ? 16 : 6;
+  const height = Math.max(
+    graphOnly ? graphOnlyMinimum.height : 68,
+    cardArea + graphArea + (metricCount && graphVisible ? 6 : 0) + outerAllowance,
+  );
   return {
-    ...sizePreset,
-    maxWidth: sizePreset.maxWidth ?? modePreset.maxWidth,
-    maxHeight: sizePreset.maxHeight ?? modePreset.maxHeight,
+    width,
+    height,
+    minWidth: graphOnly ? Math.max(minWidth, graphOnlyMinimum.width) : minWidth,
+    minHeight: graphOnly
+      ? graphOnlyMinimum.height
+      : horizontalGraphWithMetrics
+        ? HORIZONTAL_GRAPH_WITH_METRICS_MINIMUM_SIZE.height
+        : Math.max(
+            68,
+            Math.min(
+              height,
+              (metricCount ? 52 : 0) + (graphVisible ? 90 : 0) + 12,
+            ),
+          ),
+    maxWidth: 1200,
+    maxHeight: isOverlay ? 520 : 700,
   };
+}
+
+function currentStatsWindowPreset() {
+  return statsWindowPresetFor(displaySettings.mode);
 }
 
 function sendDisplaySettings() {
@@ -1216,6 +1451,7 @@ function sendDisplaySettings() {
       target.webContents.send("display:settings", publicDisplaySettings());
     }
   }
+  broadcastOverlayState();
 }
 
 function syncStatsAlwaysOnTop() {
@@ -1323,18 +1559,17 @@ function updateDisplaySettings(
   ensureUpdateAllowed();
   const previousMode = displaySettings.mode;
   const previousOrientation = displaySettings.windowOrientation;
-  const previousGraphVisible = displaySettings.graphVisible;
+  const previousDisplayItems = { ...displaySettings.displayItems };
+  const previousMatchType = displaySettings.matchType;
   const previousLocale = displaySettings.locale;
   const previousPollInterval = displaySettings.pollIntervalSeconds;
+  const previousRankingHome = displaySettings.rankingHome;
   const previousLaunchAtLogin = displaySettings.launchAtLogin;
   const previousAutoDetectGame = displaySettings.autoDetectGame;
   const previousGameExecutable = displaySettings.gameExecutableName;
   const orientationChanging =
     WINDOW_ORIENTATIONS.has(nextSettings.windowOrientation) &&
     nextSettings.windowOrientation !== previousOrientation;
-  const graphVisibilityChanging =
-    typeof nextSettings.graphVisible === "boolean" &&
-    nextSettings.graphVisible !== previousGraphVisible;
   if (orientationChanging && previousMode === "window") {
     // Preserve the current layout before switching the active orientation so
     // returning to it restores the exact size and position the user left.
@@ -1379,9 +1614,28 @@ function updateDisplaySettings(
       Math.max(0, Number(nextSettings.backgroundOpacity)),
     );
   }
-  if (typeof nextSettings.graphVisible === "boolean") {
-    displaySettings.graphVisible = nextSettings.graphVisible;
+  if (nextSettings.displayItems && typeof nextSettings.displayItems === "object") {
+    displaySettings.displayItems = applyDisplayItemUpdate(
+      displaySettings.displayItems,
+      nextSettings.displayItems,
+    );
+  } else if (typeof nextSettings.graphVisible === "boolean") {
+    // Accept the previous renderer payload during an in-place update, but keep
+    // displayItems as the only persisted source of truth.
+    displaySettings.displayItems = applyDisplayItemUpdate(displaySettings.displayItems, {
+      graph: nextSettings.graphVisible,
+    });
   }
+  if (typeof nextSettings.potentialLineVisible === "boolean") {
+    displaySettings.potentialLineVisible = nextSettings.potentialLineVisible;
+  }
+  if (Object.hasOwn(nextSettings, "rankingHome")) {
+    displaySettings.rankingHome = sanitizeRankingHomeKey(nextSettings.rankingHome);
+  }
+  const displayItemsChanging = !displayItemsEqual(
+    previousDisplayItems,
+    displaySettings.displayItems,
+  );
   const nextFontFamily = normalizeFontFamily(nextSettings.fontFamily);
   if (nextFontFamily) displaySettings.fontFamily = nextFontFamily;
   if (["normal", "italic"].includes(nextSettings.fontStyle)) {
@@ -1402,10 +1656,22 @@ function updateDisplaySettings(
     buildId = null;
     buildIdLocale = null;
     buildIdInFlight = null;
-    profileRefreshCache.clear();
-    if (trackerState.active && trackerState.player?.userCode) {
-      void refreshTrackedPlayerForLocale();
+    rankingState = {
+      ...rankingState,
+      status: "idle",
+      rank: null,
+      rating: null,
+      locale: displaySettings.locale,
+      homeLabel: "—",
+      updatedAt: null,
+    };
+    sendTrackerState();
+    if (trackerState.player || historyViewPlayer || authenticatedPlayer) {
+      void refreshTrackedPlayerForLocale().then(() =>
+        refreshMasterRanking().catch(() => {}),
+      );
     }
+    if (mainWindow?.isVisible()) scheduleSocialRefresh({ immediate: true });
     refreshTrayMenu();
   }
   if (typeof nextSettings.launchAtLogin === "boolean") {
@@ -1428,18 +1694,34 @@ function updateDisplaySettings(
     resizeToPreset:
       previousMode !== displaySettings.mode ||
       previousOrientation !== displaySettings.windowOrientation ||
-      graphVisibilityChanging,
+      displayItemsChanging,
     restoreSavedBounds:
       previousMode !== displaySettings.mode ||
       previousOrientation !== displaySettings.windowOrientation,
   });
   scheduleSettingsWrite();
   sendDisplaySettings();
+  if (previousMatchType !== displaySettings.matchType) {
+    // The shared presentation model includes match-type-specific W/L and
+    // delta values. Push a fresh model with the settings event so the
+    // management screen and Electron stats window do not render one frame
+    // from the previous mode while OBS already has the new state.
+    sendTrackerState();
+  }
   if (
     trackerState.active &&
     previousPollInterval !== displaySettings.pollIntervalSeconds
   ) {
     schedulePolling();
+  }
+  if (
+    previousPollInterval !== displaySettings.pollIntervalSeconds &&
+    mainWindow?.isVisible()
+  ) {
+    scheduleSocialRefresh();
+  }
+  if (previousRankingHome !== displaySettings.rankingHome) {
+    void refreshMasterRanking().catch(() => {});
   }
   if (previousLaunchAtLogin !== displaySettings.launchAtLogin) {
     configureLaunchAtLogin();
@@ -1768,6 +2050,7 @@ function createMainWindow() {
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   loadRendererFile(mainWindow, path.join(__dirname, "renderer", "index.html"));
   mainWindow.webContents.once("did-finish-load", () => {
+    void ensureRankingMetadata().catch(() => {});
     checkAuthentication()
       .then(({ player }) => {
         if (mainWindow && !mainWindow.isDestroyed()) {
@@ -1779,6 +2062,8 @@ function createMainWindow() {
   mainWindow.once("ready-to-show", () => {
     if (!backgroundMode) mainWindow.show();
   });
+  mainWindow.on("show", () => scheduleSocialRefresh({ immediate: true }));
+  mainWindow.on("hide", () => stopSocialRefresh());
   mainWindow.on("close", (event) => {
     if (!isQuitting && tray) {
       event.preventDefault();
@@ -1788,6 +2073,7 @@ function createMainWindow() {
     }
   });
   mainWindow.on("closed", () => {
+    stopSocialRefresh();
     mainWindow = null;
   });
 }
@@ -1878,8 +2164,11 @@ function toggleStatsWindow() {
   return openStatsWindow();
 }
 
-function openLoginWindow() {
+function openLoginWindow(targetUrl = `${serviceHome()}/auth/loginep?redirect_url=/fighterslist/search`) {
+  if (!isAllowedAuthUrl(targetUrl)) throw new Error("SERVICE_URL_NOT_ALLOWED");
+  const refreshAuthenticationOnClose = targetUrl.includes("/auth/loginep");
   if (loginWindow && !loginWindow.isDestroyed()) {
+    loginWindow.loadURL(targetUrl);
     loginWindow.focus();
     return;
   }
@@ -1917,12 +2206,11 @@ function openLoginWindow() {
         event.preventDefault();
       }
     });
-    loginWindow.loadURL(
-      `${serviceHome()}/auth/loginep?redirect_url=/fighterslist/search`,
-    );
+    loginWindow.loadURL(targetUrl);
     loginWindow.on("closed", () => {
       loginWindow = null;
       releaseAppUiModal();
+      if (!refreshAuthenticationOnClose) return;
       checkAuthentication()
         .then(({ player }) => {
           if (mainWindow && !mainWindow.isDestroyed()) {
@@ -1967,11 +2255,37 @@ async function clearPrivateDataWithConfirmation() {
   historyProfileLookupCache.clear();
   profileRefreshCache.clear();
   profileRefreshInFlight.clear();
+  profileCharacterNameCache.clear();
+  rankingCache.clear();
+  rankingCatalogCache.clear();
+  rankingCharacterSlugCache.clear();
+  rankingInFlight.clear();
+  stopSocialRefresh();
+  socialRefreshInFlight.clear();
+  rankingState = {
+    status: "idle",
+    rank: null,
+    rating: null,
+    profileId: null,
+    locale: null,
+    characterId: null,
+    homeKey: displaySettings.rankingHome,
+    homeLabel: "All",
+    updatedAt: null,
+  };
+  socialState = {
+    friends: { status: "idle", page: 1, totalPages: 1, pageSize: 0, players: [] },
+    following: { status: "idle", page: 1, totalPages: 1, pageSize: 0, players: [] },
+    updatedAt: null,
+  };
   stopHistoryViewPolling();
   historyViewPlayer = null;
   matchHistoryFetchInFlight = null;
+  matchHistoryFetchProgress = null;
   authenticatedProfileId = null;
   authenticatedPlayer = null;
+  authenticatedRatingType = "MR";
+  sendSocialState();
   try {
     fs.rmSync(matchHistoryDirectory, { recursive: true, force: true });
     fs.mkdirSync(matchHistoryDirectory, { recursive: true });
@@ -1982,6 +2296,9 @@ async function clearPrivateDataWithConfirmation() {
   }
   sendHistoryState();
   buildId = null;
+  buildIdLocale = null;
+  sendTrackerState();
+  sendDisplaySettings();
   return { cleared: true };
 }
 
@@ -2108,6 +2425,240 @@ async function fetchServiceJson(relativePath, query = {}, retry = true) {
   return response.json();
 }
 
+function openSocialProfile(profileId) {
+  const normalized = normalizeHistoryProfileId(profileId);
+  if (!normalized) throw new Error("INVALID_USER_CODE");
+  openLoginWindow(`${serviceHome()}/profile/${encodeURIComponent(normalized)}`);
+  return { opened: true };
+}
+
+async function ensureRankingMetadata() {
+  const locale = serviceLocale();
+  const cachedCatalog = rankingCatalogCache.get(locale);
+  const cachedCharacters = rankingCharacterSlugCache.get(locale);
+  if (cachedCatalog && cachedCharacters) {
+    return { catalog: cachedCatalog, characters: cachedCharacters };
+  }
+  const metadataKey = `metadata:${locale}`;
+  if (rankingInFlight.has(metadataKey)) return rankingInFlight.get(metadataKey);
+  const request = (async () => {
+    const data = await fetchServiceJson("ranking/master.json", {
+      page: 1,
+      season_type: 1,
+    });
+    const catalog = buildRankingHomeCatalog(data);
+    const characters = buildCharacterSlugCatalog(data);
+    rankingCatalogCache.set(locale, catalog);
+    rankingCharacterSlugCache.set(locale, characters);
+    sendDisplaySettings();
+    return { catalog, characters };
+  })().finally(() => rankingInFlight.delete(metadataKey));
+  rankingInFlight.set(metadataKey, request);
+  return request;
+}
+
+function setRankingUnavailable(player, characterId, status = "idle") {
+  rankingState = {
+    status,
+    rank: null,
+    rating: null,
+    profileId: String(player?.profileId ?? player?.userCode ?? ""),
+    locale: serviceLocale(),
+    characterId: Number(characterId) || null,
+    homeKey: displaySettings.rankingHome,
+    homeLabel: rankingHomeLabel(currentRankingCatalog(), displaySettings.rankingHome),
+    updatedAt: Date.now(),
+  };
+  sendTrackerState();
+  return publicRankingState();
+}
+
+async function refreshMasterRanking({
+  player = trackerState.player ?? authenticatedPlayer,
+  characterId = trackerState.characterId ?? player?.characterId,
+} = {}) {
+  const profileId = String(player?.profileId ?? player?.userCode ?? "").trim();
+  const expectedCharacterId = Number(characterId) || null;
+  const isMaster = Number(player?.mr) > 0;
+  if (!profileId || !expectedCharacterId || !isMaster) {
+    return setRankingUnavailable(player, expectedCharacterId);
+  }
+
+  const locale = serviceLocale();
+  const homeKey = sanitizeRankingHomeKey(displaySettings.rankingHome);
+  const cacheKey = rankingCacheKey({
+    locale,
+    profileId,
+    characterId: expectedCharacterId,
+    homeKey,
+    act: 1,
+  });
+  if (rankingInFlight.has(cacheKey)) return rankingInFlight.get(cacheKey);
+
+  const previous = rankingCache.get(cacheKey) ?? null;
+  rankingState = {
+    status: "loading",
+    rank: previous?.rank ?? null,
+    rating: previous?.rating ?? null,
+    profileId,
+    locale,
+    characterId: expectedCharacterId,
+    homeKey,
+    homeLabel: rankingHomeLabel(currentRankingCatalog(), homeKey),
+    updatedAt: previous?.updatedAt ?? null,
+  };
+  sendTrackerState();
+
+  const request = (async () => {
+    try {
+      const { catalog, characters } = await ensureRankingMetadata();
+      if (locale !== serviceLocale()) return publicRankingState();
+      const characterSlug = rankingCharacterSlug(
+        player,
+        expectedCharacterId,
+        characters,
+      );
+      if (!characterSlug) throw new Error("RANKING_CHARACTER_NOT_FOUND");
+      const data = await fetchServiceJson(
+        "ranking/master.json",
+        rankingRequestQuery({ characterSlug, homeKey }),
+      );
+      const normalized = normalizeMasterRanking(data, {
+        profileId,
+        characterId: expectedCharacterId,
+      });
+      if (String(authenticatedProfileId ?? "") !== profileId) {
+        return publicRankingState();
+      }
+      const now = Date.now();
+      const next = normalized
+        ? { ...normalized, updatedAt: now }
+        : { rank: null, rating: null, characterId: expectedCharacterId, updatedAt: now };
+      rankingCache.set(cacheKey, next);
+      if (
+        locale === serviceLocale() &&
+        homeKey === displaySettings.rankingHome &&
+        String(authenticatedProfileId ?? "") === profileId
+      ) {
+        rankingState = {
+          status: "ready",
+          rank: next.rank,
+          rating: next.rating,
+          profileId,
+          locale,
+          characterId: expectedCharacterId,
+          homeKey,
+          homeLabel: rankingHomeLabel(catalog, homeKey),
+          updatedAt: now,
+        };
+        sendTrackerState();
+      }
+      return publicRankingState();
+    } catch {
+      const fallback = rankingCache.get(cacheKey) ?? null;
+      if (
+        locale === serviceLocale() &&
+        homeKey === displaySettings.rankingHome &&
+        String(authenticatedProfileId ?? "") === profileId
+      ) {
+        rankingState = {
+          status: "error",
+          rank: fallback?.rank ?? null,
+          rating: fallback?.rating ?? null,
+          profileId,
+          locale,
+          characterId: expectedCharacterId,
+          homeKey,
+          homeLabel: rankingHomeLabel(currentRankingCatalog(), homeKey),
+          updatedAt: fallback?.updatedAt ?? null,
+        };
+        sendTrackerState();
+      }
+      return publicRankingState();
+    }
+  })().finally(() => rankingInFlight.delete(cacheKey));
+  rankingInFlight.set(cacheKey, request);
+  return request;
+}
+
+function publicSocialState() {
+  return {
+    friends: { ...socialState.friends, players: [...socialState.friends.players] },
+    following: { ...socialState.following, players: [...socialState.following.players] },
+    updatedAt: socialState.updatedAt,
+  };
+}
+
+function sendSocialState() {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send("social:state", publicSocialState());
+  }
+}
+
+async function refreshSocialKind(kind, page = socialState[kind]?.page ?? 1) {
+  if (!["friends", "following"].includes(kind)) throw new Error("SOCIAL_KIND_INVALID");
+  const requestedPage = Math.max(1, Math.trunc(Number(page) || 1));
+  const profileIdAtRequest = String(authenticatedProfileId ?? "");
+  const requestKey = `${kind}:${requestedPage}:${serviceLocale()}`;
+  if (socialRefreshInFlight.has(requestKey)) return socialRefreshInFlight.get(requestKey);
+  const previous = socialState[kind];
+  socialState[kind] = { ...previous, status: "loading" };
+  sendSocialState();
+  const request = (async () => {
+    try {
+      const relativePath = kind === "following"
+        ? "fighterslist/follow.json"
+        : "fighterslist/friend.json";
+      const data = await fetchServiceJson(relativePath, { page: requestedPage });
+      if (String(authenticatedProfileId ?? "") !== profileIdAtRequest) {
+        return publicSocialState();
+      }
+      const normalized = normalizeSocialPage(data, kind);
+      socialState[kind] = { ...normalized, status: "ready" };
+      socialState.updatedAt = Date.now();
+    } catch (error) {
+      socialState[kind] = { ...previous, status: "error" };
+      throw error;
+    } finally {
+      sendSocialState();
+    }
+    return publicSocialState();
+  })().finally(() => socialRefreshInFlight.delete(requestKey));
+  socialRefreshInFlight.set(requestKey, request);
+  return request;
+}
+
+async function refreshSocialLists() {
+  const results = await Promise.allSettled([
+    refreshSocialKind("friends", socialState.friends.page),
+    refreshSocialKind("following", socialState.following.page),
+  ]);
+  if (results.every((result) => result.status === "rejected")) {
+    throw results[0].reason;
+  }
+  return publicSocialState();
+}
+
+function stopSocialRefresh() {
+  clearTimeout(socialRefreshTimer);
+  socialRefreshTimer = null;
+}
+
+function scheduleSocialRefresh({ immediate = false } = {}) {
+  stopSocialRefresh();
+  if (!mainWindow || mainWindow.isDestroyed() || !mainWindow.isVisible()) return;
+  const run = async () => {
+    socialRefreshTimer = null;
+    if (!mainWindow || mainWindow.isDestroyed() || !mainWindow.isVisible()) return;
+    if (authenticatedProfileId) await refreshSocialLists().catch(() => {});
+    if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()) {
+      scheduleSocialRefresh();
+    }
+  };
+  const delay = immediate ? 0 : displaySettings.pollIntervalSeconds * 1000;
+  socialRefreshTimer = setTimeout(run, delay);
+}
+
 async function checkAuthenticationInternal() {
   const data = await fetchServiceJson("fighterslist/friend.json");
   if (!data?.pageProps) {
@@ -2128,7 +2679,7 @@ async function checkAuthenticationInternal() {
     throw error;
   }
   player = await refreshProfilePlayer(player);
-  return { authenticated: true, player };
+  return { authenticated: true, player, friendPage: normalizeSocialPage(data, "friends") };
 }
 
 async function checkAuthentication() {
@@ -2142,11 +2693,20 @@ async function checkAuthentication() {
     authenticatedProfileId = player?.profileId ?? player?.userCode ?? null;
     authenticatedRatingType =
       player?.mr != null ? "MR" : player?.lp != null ? "LP" : "MR";
+    if (result.friendPage) {
+      socialState.friends = { ...result.friendPage, status: "ready" };
+      socialState.updatedAt = Date.now();
+      sendSocialState();
+    }
     if (!trackerState.active) {
       trackerState.ratingType = authenticatedRatingType;
       trackerState.updatedAt = Date.now();
       sendTrackerState();
     }
+    await Promise.allSettled([
+      refreshMasterRanking({ player, characterId: player?.characterId }),
+      refreshSocialKind("following", socialState.following.page),
+    ]);
     return result;
   } finally {
     authenticationInFlight = null;
@@ -2180,7 +2740,8 @@ async function refreshProfilePlayer(player, { force = false } = {}) {
   const profileId = normalizeHistoryProfileId(player?.profileId ?? player?.userCode);
   if (!profileId) return player;
   const characterId = Number(player?.characterId) || 0;
-  const cacheKey = `${serviceLocale()}:${profileId}:${characterId}`;
+  const requestedLocale = serviceLocale();
+  const cacheKey = `${requestedLocale}:${profileId}:${characterId}`;
   const now = Date.now();
   const cacheResult = profileCacheLookup(
     profileRefreshCache,
@@ -2198,6 +2759,15 @@ async function refreshProfilePlayer(player, { force = false } = {}) {
   // force refreshes also join an already-running request instead of creating
   // a second request against the official service.
   return shareInFlightRequest(profileRefreshInFlight, cacheKey, async () => {
+    const exactCachedName = profileCharacterNameCache.get(cacheKey)?.name ?? "";
+    const sameCharacter = Number(player?.characterId) === characterId;
+    const retainedName = exactCachedName ||
+      (sameCharacter ? String(player?.characterDisplayName ?? "").trim() : "");
+    const retainedNameKey = exactCachedName
+      ? cacheKey
+      : sameCharacter
+        ? String(player?.characterDisplayNameCacheKey ?? "")
+        : "";
     try {
       // The official profile page's locale-specific Next data is the source of
       // the live CURRENT MR/LP. A replay contains only the value at match
@@ -2205,40 +2775,91 @@ async function refreshProfilePlayer(player, { force = false } = {}) {
       const data = await fetchServiceJson(
         `profile/${encodeURIComponent(profileId)}.json`,
       );
+      if (requestedLocale !== serviceLocale()) return player;
       const refreshed = normalizeProfilePlayer(data, player);
       if (!refreshed) throw new Error("PROFILE_RATING_NOT_FOUND");
-      profileRefreshCache.set(cacheKey, { fetchedAt: now, player: refreshed });
-      return refreshed;
+      const officialName = String(refreshed.characterDisplayName ?? "").trim();
+      if (officialName) {
+        profileCharacterNameCache.set(cacheKey, {
+          fetchedAt: now,
+          name: officialName,
+        });
+      }
+      const nextPlayer = {
+        ...refreshed,
+        profileUpdatedAt: now,
+        characterDisplayName: officialName || retainedName,
+        characterDisplayNameCacheKey: officialName ? cacheKey : retainedNameKey,
+      };
+      profileRefreshCache.set(cacheKey, { fetchedAt: now, player: nextPlayer });
+      return nextPlayer;
     } catch {
       // Never replace a known-good current value with a replay baseline when
       // the optional profile request fails. Cache the failure briefly to
       // preserve the site's request budget and retry on a later polling cycle.
-      profileRefreshCache.set(cacheKey, { fetchedAt: now, player });
-      return player;
+      const fallbackPlayer = {
+        ...player,
+        characterDisplayName: retainedName,
+        characterDisplayNameCacheKey: retainedNameKey,
+      };
+      profileRefreshCache.set(cacheKey, { fetchedAt: now, player: fallbackPlayer });
+      return fallbackPlayer;
     }
   });
 }
 
 async function refreshTrackedPlayerForLocale() {
-  if (!trackerState.active || !trackerState.player?.userCode) return;
+  if (!trackerState.player && !historyViewPlayer && !authenticatedPlayer) return;
   if (localeRefreshInFlight) return localeRefreshInFlight;
 
-  const sessionId = trackingSessionId;
-  const userCode = trackerState.player.userCode;
+  const requestedLocale = serviceLocale();
+  const trackerPlayerAtStart = trackerState.player;
+  const historyPlayerAtStart = historyViewPlayer;
+  const authenticatedPlayerAtStart = authenticatedPlayer;
+  const samePlayerTuple = (current, previous) =>
+    normalizeHistoryProfileId(current?.profileId ?? current?.userCode) ===
+      normalizeHistoryProfileId(previous?.profileId ?? previous?.userCode) &&
+    (Number(current?.characterId) || 0) === (Number(previous?.characterId) || 0);
   localeRefreshInFlight = (async () => {
     try {
-      const refreshedPlayer = await searchPlayer(userCode);
+      const [nextTrackerPlayer, nextHistoryPlayer, nextAuthenticatedPlayer] =
+        await Promise.all([
+          trackerPlayerAtStart
+            ? refreshProfilePlayer(trackerPlayerAtStart, { force: true })
+            : null,
+          historyPlayerAtStart
+            ? refreshProfilePlayer(historyPlayerAtStart, { force: true })
+            : null,
+          authenticatedPlayerAtStart
+            ? refreshProfilePlayer(authenticatedPlayerAtStart, { force: true })
+            : null,
+        ]);
+      if (requestedLocale !== serviceLocale()) return;
       if (
-        sessionId !== trackingSessionId ||
-        !trackerState.active ||
-        trackerState.player?.userCode !== userCode
+        nextTrackerPlayer &&
+        samePlayerTuple(trackerState.player, trackerPlayerAtStart)
       ) {
-        return;
+        trackerState.player = nextTrackerPlayer;
+        trackerState.updatedAt = Date.now();
       }
-      trackerState.player = await refreshProfilePlayer(refreshedPlayer, {
-        force: true,
-      });
-      trackerState.updatedAt = Date.now();
+      if (
+        nextHistoryPlayer &&
+        samePlayerTuple(historyViewPlayer, historyPlayerAtStart)
+      ) {
+        historyViewPlayer = nextHistoryPlayer;
+      }
+      if (
+        nextAuthenticatedPlayer &&
+        samePlayerTuple(authenticatedPlayer, authenticatedPlayerAtStart)
+      ) {
+        authenticatedPlayer = nextAuthenticatedPlayer;
+        authenticatedRatingType =
+          authenticatedPlayer.mr != null ? "MR" : authenticatedPlayer.lp != null ? "LP" : "MR";
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send("auth:player", authenticatedPlayer);
+        }
+      }
+      sendHistoryState();
       sendTrackerState();
     } catch {
       // A locale switch must not interrupt an active session if the optional
@@ -2271,11 +2892,14 @@ async function fetchRankedReplays(profileId) {
   return (await fetchRankedReplaysPage(profileId, 1)).replays;
 }
 
-async function fetchMatchHistoryPages(profileId) {
+async function fetchMatchHistoryPages(profileId, onPage = null) {
   const replays = [];
   for (let page = 1; page <= MATCH_HISTORY_MAX_PAGES; page += 1) {
     const result = await fetchRankedReplaysPage(profileId, page);
     replays.push(...result.replays);
+    if (typeof onPage === "function") {
+      await onPage({ ...result, page, replays: [...result.replays] });
+    }
     if (result.rawCount < MATCH_HISTORY_PAGE_SIZE) break;
   }
   return replays;
@@ -2307,18 +2931,42 @@ async function fetchLocalMatchHistory() {
     const previousReplayIds = new Set(
       existing.records.map((record) => record.replayId),
     );
-    const replays = await fetchMatchHistoryPages(player.profileId);
-    const newReplays = replays.filter(
-      (replay) => replay.replayId && !previousReplayIds.has(replay.replayId),
-    );
-    mergeMatchHistory(replays, player.profileId);
+    let fetchedCount = 0;
+    let newReplayCount = 0;
+    matchHistoryFetchProgress = {
+      profileId: player.profileId,
+      page: 0,
+      maxPages: MATCH_HISTORY_MAX_PAGES,
+      fetchedCount: 0,
+    };
+    sendHistoryState();
+    await fetchMatchHistoryPages(player.profileId, async ({ page, replays }) => {
+      fetchedCount += replays.length;
+      for (const replay of replays) {
+        if (replay.replayId && !previousReplayIds.has(replay.replayId)) {
+          previousReplayIds.add(replay.replayId);
+          newReplayCount += 1;
+        }
+      }
+      matchHistoryFetchProgress = {
+        profileId: player.profileId,
+        page,
+        maxPages: MATCH_HISTORY_MAX_PAGES,
+        fetchedCount,
+      };
+      // Persist and notify after every page. This lets the renderer update
+      // the summary, charts, and table while later pages remain queued.
+      const changed = mergeMatchHistory(replays, player.profileId);
+      if (!changed) sendHistoryState();
+      sendTrackerState();
+    });
     const fetchedStore = loadMatchHistoryStore(player.profileId);
     fetchedStore.lastFetchedAt = Date.now();
     persistMatchHistoryStore(player.profileId, fetchedStore);
     if (
       historyViewPlayer &&
       historyViewPlayer.profileId === player.profileId &&
-      newReplays.length
+      newReplayCount > 0
     ) {
       historyViewLastNewMatchAt = Date.now();
     }
@@ -2333,6 +2981,8 @@ async function fetchLocalMatchHistory() {
     return await matchHistoryFetchInFlight;
   } finally {
     matchHistoryFetchInFlight = null;
+    matchHistoryFetchProgress = null;
+    sendHistoryState();
   }
 }
 
@@ -2360,7 +3010,13 @@ async function selectHistoryProfile(userCode) {
       });
       nextHistoryViewPlayer = player;
     }
-    nextHistoryViewPlayer = await refreshProfilePlayer(nextHistoryViewPlayer);
+    // Selecting a history target is an explicit lookup action. Refresh the
+    // official profile once here even if a recent cached search result exists,
+    // so CURRENT MR and the current character's overall MR rank are visible
+    // before the 100-match history fetch starts.
+    nextHistoryViewPlayer = await refreshProfilePlayer(nextHistoryViewPlayer, {
+      force: true,
+    });
   }
   stopHistoryViewPolling();
   historyViewPlayer = nextHistoryViewPlayer;
@@ -2456,6 +3112,11 @@ async function startTrackingInternal(player) {
   snapshotCurrentCharacter(trackerState);
   sendTrackerState();
   openStatsWindow();
+
+  await refreshMasterRanking({
+    player: trackerState.player,
+    characterId: trackerState.characterId,
+  }).catch(() => {});
 
   schedulePolling();
   return publicTrackerState();
@@ -2555,6 +3216,7 @@ async function refreshTracking(sessionId = trackingSessionId) {
   }
   const previousReplayIds = new Set(trackerState.seenReplayIds);
   const previousCharacterId = trackerState.characterId;
+  const previousMr = trackerState.player?.mr ?? null;
   const replays = await fetchRankedReplays(trackerState.player.profileId);
   if (sessionId !== trackingSessionId || !trackerState.active) {
     return publicTrackerState();
@@ -2595,6 +3257,20 @@ async function refreshTracking(sessionId = trackingSessionId) {
       refreshedPlayer,
       hasNewRankedReplay,
     );
+  }
+  if (shouldRefreshRanking({
+    characterChanged,
+    newRankedMatchCount: newRankedReplays.length,
+    previousMr,
+    currentMr: trackerState.player?.mr ?? null,
+    isMaster: Number(trackerState.player?.mr) > 0,
+  })) {
+    await refreshMasterRanking({
+      player: trackerState.player,
+      characterId: trackerState.characterId,
+    }).catch(() => {});
+  } else if (Number(trackerState.player?.mr) <= 0) {
+    setRankingUnavailable(trackerState.player, trackerState.characterId);
   }
   const now = Date.now();
   if (hasNewReplay) trackerState.lastNewMatchAt = now;
@@ -2687,6 +3363,7 @@ function friendlyError(error) {
     SERVICE_SELF_NOT_FOUND:
       "ログイン中のプレイヤー情報を自動取得できませんでした",
     INVALID_GAME_EXECUTABLE: "有効なゲーム実行ファイルを選択してください",
+    DISPLAY_ITEM_REQUIRED: "表示項目は最低1つ選択してください",
     UPDATE_REQUIRED: "セキュリティ更新が必要なため、更新後に利用できます",
   };
   if (messages[code]) return messages[code];
@@ -2742,6 +3419,24 @@ function registerIpcHandlers() {
   ipcMain.handle(
     "history:clear-profile",
     resultHandler(() => clearHistoryProfileSelection()),
+  );
+  ipcMain.handle(
+    "social:state",
+    resultHandler(async () => publicSocialState(), { allowDuringUpdate: true }),
+  );
+  ipcMain.handle(
+    "social:refresh",
+    resultHandler(({ kind }) =>
+      kind ? refreshSocialKind(kind, socialState[kind]?.page) : refreshSocialLists(),
+    ),
+  );
+  ipcMain.handle(
+    "social:page",
+    resultHandler(({ kind, page }) => refreshSocialKind(kind, page)),
+  );
+  ipcMain.handle(
+    "social:open-profile",
+    resultHandler(({ profileId }) => openSocialProfile(profileId)),
   );
   ipcMain.handle(
     "display:open",
@@ -2854,6 +3549,17 @@ function startOverlayServer() {
       response.end(JSON.stringify(publicOverlayState()));
       return;
     }
+    if (requestPath === "/events") {
+      response.writeHead(200, {
+        "Content-Type": "text/event-stream; charset=utf-8",
+        "Cache-Control": "no-cache, no-store",
+        Connection: "keep-alive",
+      });
+      overlayEventClients.add(response);
+      response.write(`event: state\ndata: ${JSON.stringify(publicOverlayState())}\n\n`);
+      request.on("close", () => overlayEventClients.delete(response));
+      return;
+    }
     if (rendererAssets[requestPath]) {
       const [fileName, contentType] = rendererAssets[requestPath];
       try {
@@ -2946,6 +3652,7 @@ app.on("before-quit", () => {
   isQuitting = true;
   stopPolling();
   stopHistoryViewPolling();
+  stopSocialRefresh();
   clearInterval(gameMonitorTimer);
   clearTimeout(displaySettingsWriteTimer);
   try {

@@ -30,6 +30,23 @@ const EN = {
   loginNote: "The official login page is used. The app never reads your ID or password.",
   openOfficial: "Open official site",
   refresh: "Refresh",
+  settings: "Settings",
+  categoryAppSettings: "App settings",
+  categoryMaintenance: "Maintenance",
+  mrRank: "MR RANK",
+  rankingHome: "HOME",
+  rankingHomeAll: "All",
+  rankingRegions: "Regions",
+  rankingCountries: "Country homes",
+  playerStatus: "PLAYER STATUS",
+  friends: "FRIENDS",
+  following: "FOLLOWING",
+  offline: "OFFLINE",
+  lastPlayed: "Last played",
+  previousPage: "Previous",
+  nextPage: "Next",
+  socialEmpty: "No players to display",
+  socialLoadError: "Could not retrieve player status",
   privacy: "PRIVACY",
   localData: "Local data",
   deleteLogin: "Delete login data",
@@ -41,7 +58,7 @@ const EN = {
   check: "Check",
   startup: "STARTUP",
   startupHeading: "Run the app when the computer starts",
-  startupNote: "Runs the app when Windows sign-in starts. Turn this ON to use game-start detection.",
+  startupNote: "Runs the app minimized to the notification area at Windows sign-in without opening the management window. Turn this ON to use game-start detection.",
   gameDetection: "GAME DETECTION",
   gameDetectionHeading: "Show the overlay when the game starts",
   gameDetectionNote: "Select the target game's .exe. This works only when startup launch is ON and the app is running.",
@@ -87,6 +104,13 @@ const EN = {
   normal: "Window",
   overlay: "Overlay",
   displayOptions: "Display options",
+  categoryDisplayContent: "Display content",
+  categoryDisplayFormat: "Display format",
+  categoryGraph: "Graph",
+  categoryDesign: "Design",
+  categoryDataIntegration: "Data and integration",
+  displayedStats: "Displayed stats",
+  potentialBaseline: "POTENTIAL rating baseline",
   graph: "GRAPH",
   graphMatchCount: "GRAPH MATCHES",
   matches20: "20 MATCHES",
@@ -191,6 +215,8 @@ const EN = {
   historyFetchReady: "Ready (one request per 10 minutes)",
   historyFetchCooldown: "Available again in {seconds}s",
   historyFetched: "Match history imported locally",
+  historyFetching: "Loading…",
+  historyFetchProgress: "Loading page {page}/{max} · {count} fetched",
   historyFetchUnavailable: "Log in to import match history",
   recentMatches: "RECENT MATCHES",
   historyPrevious: "Previous",
@@ -244,7 +270,24 @@ const JA = {
   unverified: "未確認",
   loginNote: "公式ログイン画面を使用します。ID・パスワードをアプリから読み取ることはありません。",
   openOfficial: "公式サイトを開く",
-  refresh: "再取得",
+  refresh: "更新",
+  settings: "設定",
+  categoryAppSettings: "アプリ設定",
+  categoryMaintenance: "メンテナンス",
+  mrRank: "MR RANK",
+  rankingHome: "HOME",
+  rankingHomeAll: "すべて",
+  rankingRegions: "地域",
+  rankingCountries: "国別ホーム",
+  playerStatus: "PLAYER STATUS",
+  friends: "FRIENDS",
+  following: "FOLLOWING",
+  offline: "OFFLINE",
+  lastPlayed: "最終プレイ",
+  previousPage: "前へ",
+  nextPage: "次へ",
+  socialEmpty: "表示するプレイヤーはいません",
+  socialLoadError: "プレイヤー状態を取得できませんでした",
   privacy: "PRIVACY",
   localData: "ローカルデータ",
   deleteLogin: "ログイン情報を削除",
@@ -256,7 +299,7 @@ const JA = {
   check: "確認",
   startup: "STARTUP",
   startupHeading: "コンピューターの起動時にアプリを実行する",
-  startupNote: "Windowsへのサインイン時に管理画面を表示してアプリを起動します。ゲーム起動検知を使う場合は、この設定をONにしてください。",
+  startupNote: "Windowsへのサインイン時に管理画面を表示せず、通知領域へ最小化してアプリを起動します。ゲーム起動検知を使う場合は、この設定をONにしてください。",
   gameDetection: "GAME DETECTION",
   gameDetectionHeading: "ゲーム起動を検知してオーバーレイを表示する",
   gameDetectionNote: "対象ゲームの.exeを指定します。この機能は「コンピューターの起動時にアプリを実行する」がONで、アプリが起動中の場合に動作します。",
@@ -302,6 +345,13 @@ const JA = {
   normal: "通常",
   overlay: "オーバーレイ",
   displayOptions: "表示オプション",
+  categoryDisplayContent: "表示内容",
+  categoryDisplayFormat: "表示形式",
+  categoryGraph: "グラフ",
+  categoryDesign: "デザイン",
+  categoryDataIntegration: "データ取得・連携",
+  displayedStats: "表示する戦績項目",
+  potentialBaseline: "POTENTIAL MR基準線",
   graph: "GRAPH",
   graphMatchCount: "グラフ表示試合数",
   matches20: "20戦",
@@ -389,6 +439,8 @@ const JA_HISTORY = {
   historyFetchReady: "取得できます（10分に1回）",
   historyFetchCooldown: "あと{seconds}秒で取得できます",
   historyFetched: "対戦履歴をローカルに保存しました",
+  historyFetching: "読み込み中…",
+  historyFetchProgress: "読み込み中：{page}/{max}ページ・{count}件取得済み",
   historyFetchUnavailable: "ログインすると対戦履歴を取得できます",
   recentMatches: "最近の対戦",
   historyPrevious: "前へ",
@@ -760,18 +812,6 @@ for (const [locale, labels] of Object.entries(ORIENTATION_LABELS)) {
   Object.assign(PACKS[locale], labels);
 }
 
-// The service exposes tool names, while the official character names differ
-// between the Japanese release and the other supported regions. Keep this
-// small alias table local so no character metadata is sent anywhere.
-const CHARACTER_NAME_ALIASES = {
-  GOUKI: { ja: "GOUKI", intl: "AKUMA" },
-  AKUMA: { ja: "GOUKI", intl: "AKUMA" },
-  豪鬼: { ja: "GOUKI", intl: "AKUMA" },
-  VEGA: { ja: "VEGA", intl: "M. BISON" },
-  BALROG: { ja: "BALROG", intl: "VEGA" },
-  MBISON: { ja: "M. BISON", intl: "BALROG" },
-};
-
 let activeLocale = "ja-jp";
 
 function packFor(locale = activeLocale) {
@@ -785,11 +825,7 @@ function translate(key, locale = activeLocale) {
 
 function characterName(value, locale = activeLocale) {
   const raw = String(value ?? "").trim();
-  if (!raw) return "";
-  const normalized = raw.toLocaleUpperCase("en-US").replace(/[.\s_-]+/g, "");
-  const alias = CHARACTER_NAME_ALIASES[normalized];
-  if (alias) return alias[locale === "ja-jp" ? "ja" : "intl"];
-  return raw.toLocaleUpperCase("en-US");
+  return raw;
 }
 
 function applyTranslations(root = document, locale = activeLocale) {

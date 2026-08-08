@@ -1,5 +1,6 @@
 node_modules/
 dist/
+dist-qa-next/
 out/
 coverage/
 *.log
@@ -13,6 +14,8 @@ tmp/
 screenshots/
 docs/images/overlay-horizontal-example.png
 test/
+!test/
+!test/*.test.js
 scripts/management-fixture.js
 scripts/visual-fixture.js
 docs/qa-checklist.md
