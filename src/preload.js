@@ -27,6 +27,10 @@ contextBridge.exposeInMainWorld("matchOverlay", {
   toggleStatsWindow: () => ipcRenderer.invoke("display:toggle"),
   getDisplaySettings: () => ipcRenderer.invoke("display:settings"),
   getInstalledFonts: () => ipcRenderer.invoke("system:fonts"),
+  previewNotificationSound: (soundId) =>
+    ipcRenderer.invoke("system:notification-sound-preview", { soundId }),
+  previewFriendNotification: () =>
+    ipcRenderer.invoke("friend-notification:preview"),
   updateDisplaySettings: (settings) =>
     ipcRenderer.invoke("display:update", settings),
   toggleOverlayInteraction: () =>
