@@ -39,6 +39,48 @@
     return `${date.getFullYear()}-${month}-${day}`;
   }
 
+  function niceStepAtLeast(value, minimum = 1) {
+    const target = Math.max(Number(minimum) || 1, Number(value) || 1);
+    const magnitude = 10 ** Math.floor(Math.log10(target));
+    const fraction = target / magnitude;
+    const niceFraction = fraction <= 1 ? 1 : fraction <= 2 ? 2 : fraction <= 5 ? 5 : 10;
+    return Math.max(minimum, niceFraction * magnitude);
+  }
+
+  function buildHistoryRatingAxis(values, ratingType, { maxIntervals = 3 } = {}) {
+    const normalized = (Array.isArray(values) ? values : [])
+      .map(Number)
+      .filter(Number.isFinite);
+    if (!normalized.length) return null;
+    const rawMin = Math.min(...normalized);
+    const rawMax = Math.max(...normalized);
+    const range = Math.max(1, rawMax - rawMin);
+    if (String(ratingType).toUpperCase() !== "LP") {
+      const minimum = Math.max(0, rawMin - Math.ceil(range * 0.12));
+      const maximum = rawMax + Math.ceil(range * 0.12) || minimum + 1;
+      return {
+        minimum,
+        maximum,
+        ticks: [maximum, minimum + (maximum - minimum) / 2, minimum],
+      };
+    }
+
+    const intervalLimit = Math.max(1, Math.trunc(Number(maxIntervals) || 3));
+    const step = niceStepAtLeast(range / intervalLimit, 1000);
+    const minimum = Math.max(0, Math.floor(rawMin / step) * step);
+    const maximum = Math.max(minimum + step, Math.ceil(rawMax / step) * step);
+    const intervalCount = Math.max(1, Math.round((maximum - minimum) / step));
+    return {
+      minimum,
+      maximum,
+      step,
+      ticks: Array.from(
+        { length: intervalCount + 1 },
+        (_, index) => maximum - index * step,
+      ),
+    };
+  }
+
   function buildSevenDayResultChart(
     records,
     { endDateKey = "", todayKey = localTodayKey() } = {},
@@ -90,6 +132,7 @@
   }
 
   const api = {
+    buildHistoryRatingAxis,
     buildSevenDayResultChart,
     dateKeyFromOrdinal,
     dateOrdinal,

@@ -1,6 +1,7 @@
 node_modules/
 dist/
 dist-qa-next/
+dist-qa-*/
 out/
 coverage/
 *.log

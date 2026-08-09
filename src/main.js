@@ -648,6 +648,10 @@ function normalizeStoredHistoryRecord(value) {
     const number = Number(candidate);
     return Number.isFinite(number) && number > 0 ? number : null;
   };
+  const ownRating = finiteOrNull(value.ownRating ?? value.rating);
+  const ownRatingType = ["MR", "LP"].includes(value.ownRatingType ?? value.ratingType)
+    ? value.ownRatingType ?? value.ratingType
+    : null;
   return {
     replayId,
     profileId,
@@ -661,10 +665,17 @@ function normalizeStoredHistoryRecord(value) {
     ownName: String(value.ownName ?? "").slice(0, 80),
     ownCharacterName: String(value.ownCharacterName ?? "").slice(0, 80),
     characterId: finiteOrNull(value.characterId),
-    ownRating: finiteOrNull(value.ownRating ?? value.rating),
-    ownRatingType: ["MR", "LP"].includes(value.ownRatingType ?? value.ratingType)
-      ? value.ownRatingType ?? value.ratingType
-      : null,
+    ownRating,
+    ownRatingType,
+    // MASTER battle logs and profiles can contain both values. Keep the
+    // existing primary MR/LP fields for every current UI surface, while these
+    // parallel values feed only the two history trend charts.
+    ownMr: finiteOrNull(
+      value.ownMr ?? value.mr ?? (ownRatingType === "MR" ? ownRating : null),
+    ),
+    ownLp: finiteOrNull(
+      value.ownLp ?? value.lp ?? (ownRatingType === "LP" ? ownRating : null),
+    ),
     opponentName: String(value.opponentName ?? "").slice(0, 80),
     opponentUserCode: normalizeHistoryProfileId(value.opponentUserCode),
     opponentCharacterName: String(value.opponentCharacterName ?? "").slice(0, 80),
@@ -817,12 +828,18 @@ function mergeMatchHistory(replays, profileId) {
   );
   let changed = false;
   for (const replay of replays) {
+    const replayId = String(replay?.replayId ?? "").trim();
+    const previous = replayId ? existing.get(replayId) : null;
     const normalized = normalizeStoredHistoryRecord({
+      ...previous,
       ...replay,
+      // Prefer a fresh battle-log value, while retaining profile-enriched
+      // parallel ratings when an older API response omits one of them.
+      ownMr: replay?.ownMr ?? replay?.mr ?? previous?.ownMr,
+      ownLp: replay?.ownLp ?? replay?.lp ?? previous?.ownLp,
       profileId: normalizedProfileId,
     });
     if (!normalized) continue;
-    const previous = existing.get(normalized.replayId);
     if (!previous || JSON.stringify(previous) !== JSON.stringify(normalized)) {
       existing.set(normalized.replayId, normalized);
       changed = true;
@@ -836,6 +853,33 @@ function mergeMatchHistory(replays, profileId) {
   if (!changed && !retentionChanged) return false;
   store.records = retained;
   persistMatchHistoryStore(normalizedProfileId, store);
+  sendHistoryState();
+  return true;
+}
+
+function applyCurrentProfileLpToHistory(player, { replayIds = [] } = {}) {
+  const profileId = normalizeHistoryProfileId(player?.profileId ?? player?.userCode);
+  const characterId = Number(player?.characterId) || null;
+  const lp = Number(player?.lp);
+  // This supplemental snapshot is required only for MASTER characters. LP-only
+  // characters already use LP as their primary stored rating.
+  if (!profileId || !characterId || Number(player?.mr) <= 0 || !Number.isFinite(lp) || lp <= 0) {
+    return false;
+  }
+  const replayIdSet = new Set(
+    (Array.isArray(replayIds) ? replayIds : [])
+      .map((value) => String(value ?? "").trim())
+      .filter(Boolean),
+  );
+  const store = loadMatchHistoryStore(profileId);
+  const candidate = store.records
+    .filter((record) => record.matchType === "ranked")
+    .filter((record) => Number(record.characterId) === characterId)
+    .filter((record) => !replayIdSet.size || replayIdSet.has(record.replayId))
+    .sort((left, right) => Number(right.uploadedAt) - Number(left.uploadedAt))[0];
+  if (!candidate || Number(candidate.ownLp) === lp) return false;
+  candidate.ownLp = lp;
+  persistMatchHistoryStore(profileId, store);
   sendHistoryState();
   return true;
 }
@@ -982,6 +1026,11 @@ async function runHistoryViewPoll(sessionId) {
       );
       historyViewPlayer = await refreshProfilePlayer(playerHint, {
         force: true,
+      });
+      applyCurrentProfileLpToHistory(historyViewPlayer, {
+        replayIds: newReplays
+          .filter((replay) => replay.matchType === "ranked")
+          .map((replay) => replay.replayId),
       });
     }
     historyViewConsecutiveFailures = 0;
@@ -3919,6 +3968,7 @@ async function fetchLocalMatchHistory() {
     const fetchedStore = loadMatchHistoryStore(player.profileId);
     fetchedStore.lastFetchedAt = Date.now();
     persistMatchHistoryStore(player.profileId, fetchedStore);
+    applyCurrentProfileLpToHistory(player);
     if (
       historyViewPlayer &&
       historyViewPlayer.profileId === player.profileId &&
@@ -3979,6 +4029,7 @@ async function selectHistoryProfile(userCode) {
     nextHistoryViewPlayer = await refreshProfilePlayer(nextHistoryViewPlayer, {
       force: true,
     });
+    applyCurrentProfileLpToHistory(nextHistoryViewPlayer);
     assertPrivateDataGeneration(generation);
   }
   assertPrivateDataGeneration(generation);
@@ -4022,6 +4073,11 @@ async function startTrackingInternal(player) {
   // Keep the existing session counter semantics while also enriching the
   // local history when the tracker already made this request.
   mergeMatchHistory(replays, player.profileId);
+  applyCurrentProfileLpToHistory(player, {
+    replayIds: replays
+      .filter((replay) => replay.matchType === "ranked")
+      .map((replay) => replay.replayId),
+  });
   const now = Date.now();
 
   if (resumable) {
@@ -4225,6 +4281,9 @@ async function refreshTracking(sessionId = trackingSessionId) {
       return publicTrackerState();
     }
     trackerState.player = refreshedPlayer;
+    applyCurrentProfileLpToHistory(refreshedPlayer, {
+      replayIds: newRankedReplays.map((replay) => replay.replayId),
+    });
     trackerState = syncCurrentPlayerRatingState(
       trackerState,
       refreshedPlayer,
