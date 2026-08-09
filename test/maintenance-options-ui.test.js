@@ -59,6 +59,33 @@ test("local data deletion keeps the existing confirmation-backed IPC path", () =
   assert.match(renderer, /clearDataButton\.addEventListener\("click", async \(\) => \{[\s\S]*?api\.clearPrivateData\(\)/);
 });
 
+test("maintenance copy names the version and the complete local-data scope", () => {
+  const i18n = read("src/renderer/i18n.js");
+  const html = read("src/renderer/index.html");
+  const renderer = read("src/renderer/renderer.js");
+  const updater = read("src/updater.js");
+  const main = read("src/main.js");
+
+  assert.match(i18n, /currentAppVersion: "CURRENT APP VERSION"/);
+  assert.match(i18n, /currentAppVersion: "現在のアプリバージョン"/);
+  assert.match(
+    i18n,
+    /localDataClearNote: "Clears the official-site login session, saved match history, and temporary profile, ranking, and FRIENDS data\. Display settings remain\. Your ID and password are never stored\."/,
+  );
+  assert.match(
+    i18n,
+    /localDataClearNote: "公式サイトのログイン状態、保存した対戦履歴、プロフィール・ランキング・FRIENDSなどの一時キャッシュを削除します。表示設定は残ります。ID・パスワード自体は保存していません。"/,
+  );
+  assert.match(html, /data-i18n="currentAppVersion"[^>]*>[^<]*<\/span><strong id="currentAppVersion">/);
+  assert.match(html, /data-i18n="localDataClearNote"/);
+  assert.match(updater, /currentVersion: app\.getVersion\(\)/);
+  assert.match(renderer, /elements\.currentAppVersion\.textContent = currentVersion \? `v\$\{currentVersion\}` : "—"/);
+  const clearStart = main.indexOf("async function clearPrivateDataWithConfirmation");
+  const clearEnd = main.indexOf("\nfunction wait(", clearStart);
+  assert.ok(clearStart >= 0 && clearEnd > clearStart);
+  assert.doesNotMatch(main.slice(clearStart, clearEnd), /displaySettingsPath/);
+});
+
 test("background and font-size sliders share the same design-card row", () => {
   const html = read("src/renderer/index.html");
   const css = read("src/renderer/style.css");

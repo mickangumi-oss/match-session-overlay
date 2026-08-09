@@ -74,6 +74,7 @@ test("Japanese and English provide complete notification option labels", () => {
     "friendOnlineNotificationTiming",
     "friendOnlineNotificationTimingAlways",
     "friendOnlineNotificationTimingGameOnly",
+    "friendOnlineNotificationGameExeNote",
     "friendOnlineNotificationSound",
     "friendOnlineNotificationSoundNote",
     "notificationSoundNone",
@@ -88,4 +89,13 @@ test("Japanese and English provide complete notification option labels", () => {
   ]) {
     assert.match(i18n, new RegExp(`${key}:`));
   }
+
+  assert.match(
+    i18n,
+    /friendOnlineNotificationGameExeNote: "To use Only while the game is running, register the game's \.exe in App settings\. Notifications are not sent if it is not registered\. Game-start detection does not need to be ON\.",/,
+  );
+  assert.match(
+    i18n,
+    /friendOnlineNotificationGameExeNote: "ゲーム起動中のみを使用するにはアプリ設定でゲーム\.exeの登録が必要です。未登録の場合は通知されません。ゲーム起動検知をONにする必要はありません。",/,
+  );
 });

@@ -11,13 +11,13 @@
 - 公式サイトへのログインと戦績取得に必要なインターネット接続
 - OBSで表示する場合のみ、OBS Studio（任意）
 
-公開版: v1.2.0
+公開版: v1.3.0
 
 ## ダウンロード
 
-[v1.2.0をダウンロード（GitHub Releases）](https://github.com/mickangumi-oss/match-session-overlay/releases/download/v1.2.0/Match-Session-Overlay-1.2.0-Setup.exe)
+[v1.3.0をダウンロード（GitHub Releases）](https://github.com/mickangumi-oss/match-session-overlay/releases/download/v1.3.0/Match-Session-Overlay-1.3.0-Setup.exe)
 
-開いたページの「Assets」から、`Match-Session-Overlay-1.2.0-Setup.exe`をダウンロードして実行してください。最新版以外のファイルや、配布元を確認できないファイルは使用しないでください。
+開いたページの「Assets」から、`Match-Session-Overlay-1.3.0-Setup.exe`をダウンロードして実行してください。最新版以外のファイルや、配布元を確認できないファイルは使用しないでください。
 
 詳しい操作手順は[`docs/usage.md`](docs/usage.md)、表示レイアウトは[`docs/window-layout.md`](docs/window-layout.md)、対戦履歴は[`docs/match-history.md`](docs/match-history.md)、フォントは[`docs/font-settings.md`](docs/font-settings.md)をご覧ください。
 
@@ -25,7 +25,7 @@
 
 正式な配布インストーラーは、公開前にMicrosoft DefenderおよびVirusTotalでセキュリティチェックを実施します。検査結果は公開時点のものであり、完全な安全性を保証するものではありません。インストーラーは必ずこのリポジトリの公式GitHub Releaseから取得し、各リリースノートに記載されたSHA-256と一致することを確認してください。
 
-`v1.2.0`はMicrosoft Defenderで検出なし、VirusTotalで`0 / 67`でした。検査対象のSHA-256は`6F7892CB67AA008AD479C1F298C5E311D33FA58ADBE48B77052E368DF8DD6699`です。[VirusTotalの公開レポート](https://www.virustotal.com/gui/file/6f7892cb67aa008ad479c1f298c5e311d33fa58adbe48b77052e368df8dd6699/detection)も確認できます。
+`v1.3.0`はMicrosoft Defenderで検出なし、VirusTotalで`0 / 68`でした。検査対象のSHA-256は`F66B8250F8B8AF53762E29706ED2DBC41A1C3D6AB6E5B7EC0217FD68463282BA`です。[VirusTotalの公開レポート](https://www.virustotal.com/gui/file/f66b8250f8b8af53762e29706ed2dbc41a1c3d6ab6e5b7ec0217fd68463282ba/detection)も確認できます。
 
 ## 画面イメージ
 
@@ -57,9 +57,27 @@ MR RANKと現在のキャラクター、セッション戦績、FRIENDS／FOLLOW
 
 ### 対戦履歴
 
-取得済みの対戦を絞り込み、勝敗、勝率、最大連勝、MR／LP推移、末尾7日間の勝敗グラフを確認できます。
+取得済みの対戦を絞り込み、勝敗、勝率、最大連勝、MR／LP推移、末尾7日間の勝敗グラフ、相手キャラクター別成績を確認できます。
 
 ![合成データを表示した対戦履歴画面](docs/images/match-history-example.png)
+
+## v1.3.0の変更内容
+
+### 対戦履歴
+
+- 対戦した相手キャラクターごとの対戦数、勝敗、勝率を一覧で確認できるようにしました。
+- 「対戦数」と「WIN RATE」をそれぞれ選び、一覧全体を昇順・降順に並び替えられるようにしました。
+- MASTER帯の対戦履歴ではMRとLPをそれぞれ保存し、MRの推移とLPの推移を別々に確認できるようにしました。
+- LPグラフの目盛りを読みやすく調整しました。
+- 対戦一覧から自分のプレイヤー名を省き、相手名やキャラクター、レートを確認しやすい幅へ調整しました。
+
+### オプション
+
+- メンテナンスに現在のアプリバージョンを表示するようにしました。
+- ローカルデータを削除したときに消去される内容と、残る設定を画面上で確認できるようにしました。
+- フレンド通知の「ゲーム起動中のみ」にはゲームの実行ファイル登録が必要であることを、通知設定内に表示するようにしました。
+
+詳しい変更内容は[`v1.3.0リリースノート`](docs/release-notes/v1.3.0.md)をご覧ください。
 
 ## v1.2.0の変更内容
 
@@ -228,6 +246,8 @@ OBSでは、管理画面に表示されるブラウザソースURLをOBSの「�
 - FRIENDS／FOLLOWINGをオンライン優先・最終ログイン順で表示し、1ページ10件でページ分割。プレイヤー名から対戦履歴へ移動
 - FRIENDSがOFFLINEからONLINEへ変わったとき、操作を妨げない右下通知を表示。Windows標準サウンドも選択可能
 - ほかのプレイヤーは最新100件、自分は最大5000件の対戦履歴を保存し、期間、対戦モード、キャラクターで絞り込み
+- 対戦した相手キャラクターごとの対戦数、勝敗、勝率を集計し、対戦数または勝率で並び替え
+- MASTER帯の対戦履歴では、MRの推移とLPの推移をそれぞれ表示
 - 対戦履歴の取得中は、取得できたページから表示して進捗を案内
 - 勝敗グラフは末尾7日間を固定幅で表示し、試合のない日は空白を維持
 - 新しい対戦が30分ない場合は確認間隔を5分に延ばし、60分ない場合は自動停止

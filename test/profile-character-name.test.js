@@ -75,6 +75,22 @@ test("the selected character keeps its exact official MR ranking", () => {
   assert.equal(result.mrRank, 222);
 });
 
+test("a Master character keeps both official MR and LP", () => {
+  const profile = syntheticProfile([
+    { id: 1, name: "SYNTHETIC ALPHA", mr: 1600, lp: 25000 },
+    { id: 26, name: "AKUMA", mr: 1510, mrRank: 222, lp: 19000 },
+  ]);
+  const result = normalizeProfilePlayer(profile, {
+    characterId: 26,
+    mr: 1500,
+    mrRank: 999,
+    lp: 18000,
+  });
+  assert.equal(result.mr, 1510);
+  assert.equal(result.mrRank, 222);
+  assert.equal(result.lp, 19000);
+});
+
 test("another character's MR ranking is never substituted", () => {
   const profile = syntheticProfile([
     { id: 1, name: "SYNTHETIC ALPHA", mr: 1600, mrRank: 111 },

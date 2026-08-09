@@ -32,6 +32,7 @@ let historyPanelOpen = false;
 const HISTORY_PAGE_SIZE = 10;
 const RECENT_HISTORY_PREVIEW_LIMIT = 5;
 let historyPage = 0;
+let historyOpponentSort = { key: "matches", direction: "desc" };
 let managementChartRenderToken = 0;
 let managementResizeFrame = 0;
 let socialState = {
@@ -103,6 +104,7 @@ const elements = Object.fromEntries(
     "friendOnlineNotificationsEnabledInput",
     "friendOnlineNotificationTimingAlwaysInput",
     "friendOnlineNotificationTimingGameOnlyInput",
+    "friendOnlineNotificationGameExeNote",
     "friendOnlineNotificationSoundInput",
     "previewFriendOnlineNotificationSoundButton",
     "friendOnlineNotificationDurationInput",
@@ -122,6 +124,7 @@ const elements = Object.fromEntries(
     "checkUpdateButton",
     "installUpdateButton",
     "updateBadge",
+    "currentAppVersion",
     "updateMessage",
     "updateProgress",
     "updateProgressBar",
@@ -163,6 +166,14 @@ const elements = Object.fromEntries(
     "historyLpChart",
     "historyLpEmpty",
     "historyTableBody",
+    "historyOpponentStatsBody",
+    "historyOpponentStatsEmpty",
+    "historyOpponentMatchesHeader",
+    "historyOpponentMatchesSort",
+    "historyOpponentMatchesSortIndicator",
+    "historyOpponentWinRateHeader",
+    "historyOpponentWinRateSort",
+    "historyOpponentWinRateSortIndicator",
     "historyPreviousButton",
     "historyNextButton",
     "historyPageInfo",
@@ -214,21 +225,30 @@ function historyCharacterLabel(record, own = true) {
   return id ? `#${id}` : "—";
 }
 
+function historyRatingValue(record, ratingType) {
+  const normalizedType = String(ratingType || "").toUpperCase();
+  const parallelValue = normalizedType === "MR" ? record?.ownMr : record?.ownLp;
+  const parallelNumber = Number(parallelValue);
+  if (Number.isFinite(parallelNumber) && parallelNumber > 0) return parallelNumber;
+  if (String(record?.ownRatingType || "").toUpperCase() !== normalizedType) return null;
+  const primaryNumber = Number(record?.ownRating);
+  return Number.isFinite(primaryNumber) && primaryNumber > 0 ? primaryNumber : null;
+}
+
 function filteredHistoryRecords() {
   const from = elements.historyDateFrom?.value || "";
   const to = elements.historyDateTo?.value || "";
   const mode = elements.historyMatchType?.value || "all";
   const character = elements.historyCharacter?.value || "all";
-  return (Array.isArray(historyState.records) ? historyState.records : [])
-    .filter((record) => {
-      const date = dateKeyForHistory(record);
-      return (!from || date >= from) && (!to || date <= to);
-    })
-    .filter((record) => mode === "all" || record.matchType === mode)
-    .filter((record) => {
-      if (character === "all") return true;
-      return String(record.characterId ?? "") === character;
-    })
+  const filterRecords = window.matchHistoryOpponentCharacterStats?.filterHistoryRecords;
+  const filtered = typeof filterRecords === "function"
+    ? filterRecords(
+        historyState.records,
+        { from, to, mode, character },
+        dateKeyForHistory,
+      )
+    : [];
+  return filtered
     .sort((a, b) => Number(b.uploadedAt) - Number(a.uploadedAt));
 }
 
@@ -309,15 +329,12 @@ function drawHistoryResultChart(records) {
 
 function drawHistoryRatingChart(records, ratingType, canvas, emptyElement) {
   if (!canvas) return;
-  const isLp = ratingType === "LP";
   const orderedRecords = [...records]
-    .filter((record) => String(record.ownRatingType || "").toUpperCase() === ratingType)
-    .filter((record) => Number.isFinite(Number(record.ownRating)))
-    .filter((record) => !isLp || Number(record.ownRating) > 0)
+    .filter((record) => historyRatingValue(record, ratingType) != null)
     .sort((a, b) => Number(a.playedAt ?? a.uploadedAt) - Number(b.playedAt ?? b.uploadedAt));
   const points = orderedRecords.map((record, index) => ({
     match: index + 1,
-    value: Number(record.ownRating),
+    value: historyRatingValue(record, ratingType),
   }));
   if (emptyElement) emptyElement.classList.toggle("hidden", points.length > 0);
 
@@ -333,48 +350,39 @@ function drawHistoryRatingChart(records, ratingType, canvas, emptyElement) {
   context.clearRect(0, 0, width, height);
   if (!points.length) return;
 
-  const padding = { top: 10, right: 8, bottom: 24, left: 44 };
-  const plotWidth = Math.max(1, width - padding.left - padding.right);
-  const plotHeight = Math.max(1, height - padding.top - padding.bottom);
   const values = points.map((point) => point.value);
-  const rawMin = Math.min(...values);
-  const rawMax = Math.max(...values);
-  const range = Math.max(1, rawMax - rawMin);
-  const axisStep = isLp ? 1000 : null;
-  const axisMin = isLp
-    ? Math.max(0, Math.floor(rawMin / axisStep) * axisStep)
-    : Math.max(0, rawMin - Math.ceil(range * 0.12));
-  const axisMax = isLp
-    ? Math.max(axisMin + axisStep, Math.ceil(rawMax / axisStep) * axisStep)
-    : rawMax + Math.ceil(range * 0.12) || axisMin + 1;
+  const axis = window.matchHistoryChartModel.buildHistoryRatingAxis(values, ratingType);
+  const axisMin = axis.minimum;
+  const axisMax = axis.maximum;
+  const tickValues = axis.ticks;
   const color = ratingType === "MR" ? "#ff2e69" : "#43d8ff";
   const formatValue = (value) => Math.round(value).toLocaleString();
 
   context.font = `9px ${fontStackFor(displaySettings.fontFamily)}`;
+  const labelWidth = Math.max(
+    0,
+    ...tickValues.map((value) => context.measureText(formatValue(value)).width),
+  );
+  const padding = {
+    top: 10,
+    right: 8,
+    bottom: 24,
+    left: Math.max(44, Math.ceil(labelWidth) + 10),
+  };
+  const plotWidth = Math.max(1, width - padding.left - padding.right);
+  const plotHeight = Math.max(1, height - padding.top - padding.bottom);
   context.textAlign = "right";
   context.textBaseline = "middle";
   context.fillStyle = "rgba(247,248,255,.62)";
   context.strokeStyle = "rgba(120, 190, 220, .16)";
   context.lineWidth = 1;
-  const tickValues = isLp
-    ? Array.from(
-        { length: Math.floor((axisMax - axisMin) / axisStep) + 1 },
-        (_, index) => axisMax - index * axisStep,
-      )
-    : [
-        axisMax,
-        axisMin + (axisMax - axisMin) / 2,
-        axisMin,
-      ];
   tickValues.forEach((value, index) => {
     const y = padding.top + (plotHeight * index) / Math.max(1, tickValues.length - 1);
     context.beginPath();
     context.moveTo(padding.left, y);
     context.lineTo(width - padding.right, y);
     context.stroke();
-    if (!isLp || index < 4) {
-      context.fillText(formatValue(value), padding.left - 5, y);
-    }
+    context.fillText(formatValue(value), padding.left - 5, y);
   });
 
   const xFor = (index) => padding.left + (points.length === 1 ? plotWidth / 2 : (index / (points.length - 1)) * plotWidth);
@@ -430,10 +438,11 @@ function appendHistoryCell(row, value, { opponentUserCode = null } = {}) {
     button.className = "history-opponent-link";
     button.dataset.historyOpponentCode = String(opponentUserCode);
     button.textContent = value;
-    button.title = t("historyViewOpponent", "View this player's history");
+    button.title = `${value} · ${t("historyViewOpponent", "View this player's history")}`;
     cell.append(button);
   } else {
     cell.textContent = value;
+    cell.title = value;
   }
   row.append(cell);
 }
@@ -449,27 +458,21 @@ function renderHistoryTable(records) {
       formatHistoryDate(record),
       result,
       historyModeLabel(record.matchType),
-      record.ownName || "—",
       historyCharacterLabel(record),
-      record.opponentName || "—",
       record.ownRating == null ? "—" : `${record.ownRatingType || ""} ${record.ownRating}`,
-    ];
-    // Keep the player's rating next to their character for quick scanning.
-    cells.splice(5, 0, cells.splice(6, 1)[0]);
-    cells.splice(
-      7,
-      0,
+      record.opponentName || "—",
       historyCharacterLabel(record, false),
       record.opponentRating == null ? "—" : `${record.opponentRatingType || ""} ${record.opponentRating}`,
-    );
+    ];
     cells.forEach((value, index) => {
       const cell = document.createElement("td");
       if (index === 1) cell.className = result === "W" ? "result-win" : result === "L" ? "result-loss" : "result-draw";
-      if (index === 6) {
+      if (index === 5) {
         appendHistoryCell(row, value, { opponentUserCode: record.opponentUserCode });
         row.lastElementChild.className = cell.className;
       } else {
         cell.textContent = value;
+        cell.title = value;
         row.append(cell);
       }
     });
@@ -585,6 +588,63 @@ function renderHistoryFetchStatus() {
               .replace("{seconds}", String(cooldown));
 }
 
+function renderOpponentCharacterStats(records) {
+  const body = elements.historyOpponentStatsBody;
+  if (!body) return;
+  const statsModel = window.matchHistoryOpponentCharacterStats;
+  const buildStats = statsModel?.buildOpponentCharacterStats;
+  const stats = typeof buildStats === "function" ? buildStats(records) : [];
+  const sortedStats = typeof statsModel?.sortOpponentCharacterStats === "function"
+    ? statsModel.sortOpponentCharacterStats(stats, historyOpponentSort)
+    : stats;
+  body.replaceChildren();
+  for (const entry of sortedStats) {
+    const row = document.createElement("tr");
+    const character = document.createElement("td");
+    character.textContent = entry.label
+      ? String(entry.label).toLocaleUpperCase()
+      : `#${entry.characterId}`;
+    const matches = document.createElement("td");
+    matches.textContent = String(entry.matches);
+    const result = document.createElement("td");
+    const wins = document.createElement("span");
+    wins.className = "history-matchup-wins";
+    wins.textContent = String(entry.wins);
+    const separator = document.createTextNode(" - ");
+    const losses = document.createElement("span");
+    losses.className = "history-matchup-losses";
+    losses.textContent = String(entry.losses);
+    result.append(wins, separator, losses);
+    const winRate = document.createElement("td");
+    const percentage = Math.max(0, Math.min(100, Number(entry.winRate) || 0));
+    winRate.className = "history-matchup-win-rate";
+    winRate.style.setProperty("--matchup-win-rate", `${percentage}%`);
+    winRate.textContent = `${percentage.toFixed(1)}%`;
+    row.append(character, matches, result, winRate);
+    body.append(row);
+  }
+  elements.historyOpponentStatsEmpty?.classList.toggle("hidden", sortedStats.length > 0);
+  const matchesActive = historyOpponentSort.key === "matches";
+  const winRateActive = historyOpponentSort.key === "winRate";
+  const sortIndicator = historyOpponentSort.direction === "asc" ? "▲" : "▼";
+  if (elements.historyOpponentMatchesSortIndicator) {
+    elements.historyOpponentMatchesSortIndicator.textContent =
+      matchesActive ? sortIndicator : "";
+  }
+  if (elements.historyOpponentWinRateSortIndicator) {
+    elements.historyOpponentWinRateSortIndicator.textContent =
+      winRateActive ? sortIndicator : "";
+  }
+  elements.historyOpponentMatchesHeader?.setAttribute(
+    "aria-sort",
+    matchesActive ? (historyOpponentSort.direction === "asc" ? "ascending" : "descending") : "none",
+  );
+  elements.historyOpponentWinRateHeader?.setAttribute(
+    "aria-sort",
+    winRateActive ? (historyOpponentSort.direction === "asc" ? "ascending" : "descending") : "none",
+  );
+}
+
 function renderHistoryState(nextState = historyState) {
   historyState = nextState || { records: [], canFetch: false, authenticated: false, cooldownSeconds: 0 };
   const allRecords = Array.isArray(historyState.records) ? historyState.records : [];
@@ -636,6 +696,7 @@ function renderHistoryState(nextState = historyState) {
   drawHistoryResultChart(records);
   drawHistoryRatingChart(records, "MR", elements.historyMrChart, elements.historyMrEmpty);
   drawHistoryRatingChart(records, "LP", elements.historyLpChart, elements.historyLpEmpty);
+  renderOpponentCharacterStats(records);
   const totalPages = Math.ceil(records.length / HISTORY_PAGE_SIZE);
   historyPage = totalPages ? Math.min(historyPage, totalPages - 1) : 0;
   const pageRecords = records.slice(
@@ -1615,6 +1676,10 @@ function renderDisplaySettings(settings) {
     friendOnlineNotificationTiming === "always";
   elements.friendOnlineNotificationTimingGameOnlyInput.checked =
     friendOnlineNotificationTiming === "game-only";
+  elements.friendOnlineNotificationGameExeNote?.classList.toggle(
+    "warning",
+    friendOnlineNotificationTiming === "game-only" && !settings.gameExecutableName,
+  );
   const soundOptions = Array.isArray(settings.friendOnlineNotificationSoundOptions)
     ? settings.friendOnlineNotificationSoundOptions
     : [];
@@ -1697,6 +1762,10 @@ function renderUpdateMessage(state) {
 }
 
 function renderUpdate(state) {
+  const currentVersion = String(state.currentVersion ?? "").trim().replace(/^v/i, "");
+  if (elements.currentAppVersion) {
+    elements.currentAppVersion.textContent = currentVersion ? `v${currentVersion}` : "—";
+  }
   elements.updateMessage.textContent = renderUpdateMessage(state);
   const downloading = state.status === "downloading";
   const required = state.required === true;
@@ -1860,6 +1929,18 @@ elements.historyPreviousButton?.addEventListener("click", () => {
 elements.historyNextButton?.addEventListener("click", () => {
   historyPage += 1;
   renderHistoryState();
+});
+elements.historyOpponentMatchesSort?.addEventListener("click", () => {
+  historyOpponentSort = historyOpponentSort.key === "matches"
+    ? { key: "matches", direction: historyOpponentSort.direction === "desc" ? "asc" : "desc" }
+    : { key: "matches", direction: "desc" };
+  renderOpponentCharacterStats(filteredHistoryRecords());
+});
+elements.historyOpponentWinRateSort?.addEventListener("click", () => {
+  historyOpponentSort = historyOpponentSort.key === "winRate"
+    ? { key: "winRate", direction: historyOpponentSort.direction === "desc" ? "asc" : "desc" }
+    : { key: "winRate", direction: "desc" };
+  renderOpponentCharacterStats(filteredHistoryRecords());
 });
 elements.fetchHistoryButton?.addEventListener("click", async () => {
   elements.fetchHistoryButton.disabled = true;
