@@ -194,6 +194,7 @@
                   <div class="utility-row update-row">
                     <div class="update-copy">
                       <div class="update-title"><span class="control-label" data-i18n="appUpdate">APP UPDATE</span><span class="update-badge hidden" id="updateBadge" data-i18n="updateAvailable">UPDATE</span></div>
+                      <p class="current-version-line"><span data-i18n="currentAppVersion">現在のアプリバージョン</span><strong id="currentAppVersion">v—</strong></p>
                       <p id="updateMessage" data-i18n="githubUpdateNote">GitHub Releasesから更新を確認できます</p>
                       <div class="progress hidden" id="updateProgress"><div id="updateProgressBar"></div></div>
                     </div>
@@ -201,7 +202,7 @@
                   </div>
                   <div class="utility-divider"></div>
                   <div class="utility-row local-data-row">
-                    <div><span class="control-label" data-i18n="localData">ローカルデータ</span></div>
+                    <div class="local-data-copy"><span class="control-label" data-i18n="localData">ローカルデータ</span><p data-i18n="localDataClearNote">公式サイトのログイン状態、保存した対戦履歴、プロフィール・ランキング・FRIENDSなどの一時キャッシュを削除します。表示設定は残ります。ID・パスワード自体は保存していません。</p></div>
                     <button class="maintenance-action-button danger" id="clearDataButton" data-i18n="clear">消去</button>
                   </div>
                 </section>
@@ -349,6 +350,7 @@
                       <label><input id="friendOnlineNotificationTimingGameOnlyInput" name="friendOnlineNotificationTiming" type="radio" value="game-only" /><span data-i18n="friendOnlineNotificationTimingGameOnly">ゲーム起動中のみ</span></label>
                     </div>
                   </fieldset>
+                  <p class="setting-note notification-game-exe-note" id="friendOnlineNotificationGameExeNote" data-i18n="friendOnlineNotificationGameExeNote">ゲーム起動中のみを使用するにはアプリ設定でゲーム.exeの登録が必要です。未登録の場合は通知されません。ゲーム起動検知をONにする必要はありません。</p>
                   <div class="category-control notification-sound-control">
                     <label for="friendOnlineNotificationSoundInput" class="control-label" data-i18n="friendOnlineNotificationSound">通知音</label>
                     <div class="notification-sound-picker">
@@ -466,8 +468,8 @@
           <section class="history-table-card">
             <header><span class="control-label" data-i18n="matchList">MATCH LIST</span></header>
             <div class="history-table-scroll">
-              <table>
-                <thead><tr><th data-i18n="date">DATE</th><th data-i18n="result">RESULT</th><th data-i18n="matchType">MODE</th><th data-i18n="player">PLAYER</th><th data-i18n="myCharacter">MY CHARACTER</th><th data-i18n="rating">MY MR / LP</th><th data-i18n="opponent">OPPONENT</th><th data-i18n="opponentCharacter">OPPONENT CHARACTER</th><th data-i18n="opponentRating">OPPONENT MR / LP</th></tr></thead>
+              <table class="history-match-table">
+                <thead><tr><th data-i18n="date">DATE</th><th data-i18n="result">RESULT</th><th data-i18n="matchType">MODE</th><th data-i18n="myCharacter">MY CHARACTER</th><th data-i18n="rating">MY MR / LP</th><th data-i18n="opponent">OPPONENT</th><th data-i18n="opponentCharacter">OPPONENT CHARACTER</th><th data-i18n="opponentRating">OPPONENT MR / LP</th></tr></thead>
                 <tbody id="historyTableBody"></tbody>
               </table>
             </div>
@@ -476,6 +478,21 @@
               <span id="historyPageInfo" aria-live="polite">0 / 0</span>
               <button class="button secondary" id="historyNextButton" data-i18n="historyNext" disabled>Next</button>
             </nav>
+            <section class="history-opponent-stats" aria-labelledby="historyOpponentStatsTitle">
+              <header><span class="control-label" id="historyOpponentStatsTitle" data-i18n="opponentCharacterStats">OPPONENT CHARACTER STATS</span></header>
+              <div class="history-opponent-stats-scroll">
+                <table>
+                  <thead><tr>
+                    <th data-i18n="opponentCharacter">OPPONENT CHARACTER</th>
+                    <th id="historyOpponentMatchesHeader" aria-sort="descending"><button class="history-stats-sort matches" id="historyOpponentMatchesSort" type="button"><span data-i18n="matches">MATCHES</span><span class="history-sort-indicator" id="historyOpponentMatchesSortIndicator" aria-hidden="true">▼</span></button></th>
+                    <th data-i18n="winsLosses">W / L</th>
+                    <th id="historyOpponentWinRateHeader" aria-sort="none"><button class="history-stats-sort win-rate" id="historyOpponentWinRateSort" type="button"><span data-i18n="winRate">WIN RATE</span><span class="history-sort-indicator" id="historyOpponentWinRateSortIndicator" aria-hidden="true"></span></button></th>
+                  </tr></thead>
+                  <tbody id="historyOpponentStatsBody"></tbody>
+                </table>
+                <p class="history-opponent-stats-empty" id="historyOpponentStatsEmpty" data-i18n="opponentCharacterStatsEmpty">No opponent character data</p>
+              </div>
+            </section>
           </section>
         </div>
       </section>
@@ -486,6 +503,7 @@
       </div>
     </main>
     <script src="../history-chart-model.js"></script>
+    <script src="../history-opponent-character-stats.js"></script>
     <script src="./i18n.js"></script>
     <script src="./renderer.js"></script>
   </body>

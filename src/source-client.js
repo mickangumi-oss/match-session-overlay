@@ -376,18 +376,20 @@ function normalizeProfilePlayer(data, fallbackPlayer = {}) {
     null;
   if (!candidate && !characterCandidate) return null;
 
-  // A profile candidate with LP explicitly means the character is below
-  // Master; do not carry an unrelated MR from the search result into it (and
-  // vice versa). Only use the fallback value when the candidate has no value
-  // for either rating system.
-  const mr = candidate?.mr != null
+  // Keep both values when the official profile supplies both: Master matches
+  // can still change LP. A candidate that supplies only one system remains
+  // authoritative for that character, so it must not inherit the other value
+  // from a stale fallback (which could belong to a prior rank state).
+  const hasCandidateMr = candidate?.mr != null;
+  const hasCandidateLp = candidate?.lp != null;
+  const mr = hasCandidateMr
     ? candidate.mr
-    : candidate?.lp != null
+    : hasCandidateLp
       ? null
       : finitePositive(fallbackPlayer.mr);
-  const lp = candidate?.lp != null
+  const lp = hasCandidateLp
     ? candidate.lp
-    : candidate?.mr != null
+    : hasCandidateMr
       ? null
       : finitePositive(fallbackPlayer.lp);
   const mrRank = mr != null
@@ -648,6 +650,8 @@ function normalizeReplay(raw, targetProfileId) {
     result,
     mr,
     lp,
+    ownMr: mr,
+    ownLp: lp,
     rating: mr ?? lp,
     ratingType: ownRatingType,
     ownUserCode: p1Id === target ? p1Id : p2Id,

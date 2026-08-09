@@ -2,7 +2,10 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { buildSevenDayResultChart } = require("../src/history-chart-model");
+const {
+  buildHistoryRatingAxis,
+  buildSevenDayResultChart,
+} = require("../src/history-chart-model");
 
 test("a single day uses one of seven fixed calendar slots", () => {
   const model = buildSevenDayResultChart(
@@ -59,4 +62,17 @@ test("same-day wins and losses are one stacked bucket", () => {
     draw: 0,
     total: 3,
   });
+});
+
+test("large LP ranges use at most four readable axis labels", () => {
+  const axis = buildHistoryRatingAxis([100, 120_000], "LP");
+  assert.deepEqual(axis.ticks, [150_000, 100_000, 50_000, 0]);
+  assert.ok(axis.ticks.length <= 4);
+  assert.equal(axis.step, 50_000);
+});
+
+test("nearby LP values keep a minimum one-thousand-point grid", () => {
+  const axis = buildHistoryRatingAxis([120_100, 120_900], "LP");
+  assert.deepEqual(axis.ticks, [121_000, 120_000]);
+  assert.equal(axis.step, 1000);
 });
