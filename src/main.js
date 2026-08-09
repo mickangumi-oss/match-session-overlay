@@ -4,7 +4,7 @@ const fs = require("node:fs");
 const http = require("node:http");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
-const { execFile } = require("node:child_process");
+const { execFile, spawn } = require("node:child_process");
 const { promisify } = require("node:util");
 const {
   app,
@@ -73,7 +73,29 @@ const {
   paginateSocialPlayers,
   socialSourcePagePlan,
 } = require("./social-model");
+const {
+  applyFriendOnlineSnapshot,
+  createFriendOnlineNotificationBatch,
+  createFriendOnlineNotificationState,
+  friendOnlineNotificationView,
+  getFriendNotificationAccountEpoch,
+  mergeFriendOnlineNotificationBatch,
+  resetFriendOnlineNotificationAccount,
+} = require("./friend-online-notifications");
+const { fetchCompleteFriendSnapshot } = require("./friend-snapshot");
+const {
+  NO_NOTIFICATION_SOUND,
+  listWindowsNotificationSounds,
+  resolveWindowsNotificationSound,
+  scalePcmWavVolume,
+  sanitizeWindowsNotificationSound,
+} = require("./windows-notification-sounds");
 const { createUpdater } = require("./updater");
+const {
+  OWN_MATCH_HISTORY_LIMIT,
+  matchHistoryRetentionLimit,
+  retainNewestMatchHistory,
+} = require("./match-history-retention");
 
 const APP_NAME = "MatchSessionOverlay";
 const OVERLAY_HOST = "127.0.0.1";
@@ -172,6 +194,7 @@ const LOCALE_KEYS = new Set([
 ]);
 const execFileAsync = promisify(execFile);
 const backgroundMode = process.argv.includes("--background");
+const windowsNotificationSounds = listWindowsNotificationSounds();
 
 const FALLBACK_INSTALLED_FONTS = [
   "Impact",
@@ -255,7 +278,7 @@ const sessionDataPath = path.join(localDataRoot, "session-data");
 const displaySettingsPath = path.join(userDataPath, "display-settings.json");
 const matchHistoryDirectory = path.join(userDataPath, "match-history");
 const matchHistoryPath = path.join(userDataPath, "match-history.json");
-const MATCH_HISTORY_LIMIT = 5000;
+const MATCH_HISTORY_LIMIT = OWN_MATCH_HISTORY_LIMIT;
 // The battle log is paginated at ten entries per page. A manual import walks
 // at most ten pages (100 entries) through the existing request queue; live
 // polling intentionally remains a single-page request.
@@ -286,6 +309,8 @@ if (!hasSingleInstanceLock) {
 let mainWindow;
 let loginWindow;
 let statsWindow;
+let friendNotificationWindow;
+let friendNotificationPreviewWindow;
 let tray;
 let overlayServer;
 let sourceSession;
@@ -365,6 +390,15 @@ let rankingState = {
 };
 let socialRefreshTimer = null;
 const socialRefreshInFlight = new Map();
+let friendNotificationState = createFriendOnlineNotificationState();
+let friendNotificationSnapshotVersion = 0;
+let friendNotificationBatch = null;
+let friendNotificationAggregationTimer = null;
+let friendNotificationLeaveTimer = null;
+let friendNotificationHideTimer = null;
+let friendNotificationPreviewInFlight = null;
+let friendNotificationPreviewLoadInFlight = null;
+const notificationSoundPlaybackCache = new Map();
 const SOCIAL_PAGE_SIZE = 10;
 const socialSourcePages = {
   friends: new Map(),
@@ -410,6 +444,12 @@ let displaySettings = {
   launchAtLogin: false,
   autoDetectGame: false,
   gameExecutableName: "",
+  friendOnlineNotificationsEnabled: false,
+  friendOnlineNotificationTiming: "game-only",
+  friendOnlineNotificationSound: NO_NOTIFICATION_SOUND,
+  friendOnlineNotificationDurationSeconds: 5,
+  friendOnlineNotificationBackgroundOpacity: 0.94,
+  friendOnlineNotificationVolume: 1,
 };
 
 function serviceLocale() {
@@ -511,6 +551,32 @@ try {
       : legacyAutoLaunch;
   if (isSafeExecutableName(savedSettings.gameExecutableName)) {
     displaySettings.gameExecutableName = savedSettings.gameExecutableName;
+  }
+  displaySettings.friendOnlineNotificationsEnabled =
+    savedSettings.friendOnlineNotificationsEnabled === true;
+  displaySettings.friendOnlineNotificationTiming =
+    savedSettings.friendOnlineNotificationTiming === "always" ? "always" : "game-only";
+  displaySettings.friendOnlineNotificationSound = sanitizeWindowsNotificationSound(
+    savedSettings.friendOnlineNotificationSound,
+    windowsNotificationSounds,
+  );
+  if (Number.isInteger(Number(savedSettings.friendOnlineNotificationDurationSeconds))) {
+    displaySettings.friendOnlineNotificationDurationSeconds = Math.min(
+      15,
+      Math.max(3, Number(savedSettings.friendOnlineNotificationDurationSeconds)),
+    );
+  }
+  if (Number.isFinite(Number(savedSettings.friendOnlineNotificationBackgroundOpacity))) {
+    displaySettings.friendOnlineNotificationBackgroundOpacity = Math.min(
+      1,
+      Math.max(0, Number(savedSettings.friendOnlineNotificationBackgroundOpacity)),
+    );
+  }
+  if (Number.isFinite(Number(savedSettings.friendOnlineNotificationVolume))) {
+    displaySettings.friendOnlineNotificationVolume = Math.min(
+      1,
+      Math.max(0, Number(savedSettings.friendOnlineNotificationVolume)),
+    );
   }
   if (savedSettings.windowBounds && typeof savedSettings.windowBounds === "object") {
     const savedWindowBounds = savedSettings.windowBounds.window;
@@ -615,6 +681,29 @@ function normalizeHistoryProfileId(value) {
   return /^\d{4,12}$/.test(normalized) ? normalized : null;
 }
 
+function historyRetentionLimit(profileId) {
+  return matchHistoryRetentionLimit({
+    profileId: normalizeHistoryProfileId(profileId),
+    ownProfileId: normalizeHistoryProfileId(
+      authenticatedProfileId ??
+        authenticatedPlayer?.profileId ??
+        trackerState.player?.profileId,
+    ),
+    viewedProfileId: normalizeHistoryProfileId(historyViewPlayer?.profileId),
+  });
+}
+
+function trimMatchHistoryStore(profileId, store) {
+  if (!store || !Array.isArray(store.records)) return false;
+  const retained = retainNewestMatchHistory(
+    store.records,
+    historyRetentionLimit(profileId),
+  );
+  const changed = retained.length !== store.records.length;
+  store.records = retained;
+  return changed;
+}
+
 function historyStorePath(profileId) {
   const normalized = normalizeHistoryProfileId(profileId);
   return normalized
@@ -666,6 +755,7 @@ function persistMatchHistoryStore(profileId, store = loadMatchHistoryStore(profi
   const normalizedProfileId = normalizeHistoryProfileId(profileId);
   const filePath = historyStorePath(normalizedProfileId);
   if (!normalizedProfileId || !filePath || !store) return false;
+  trimMatchHistoryStore(normalizedProfileId, store);
   try {
     fs.writeFileSync(
       filePath,
@@ -738,10 +828,13 @@ function mergeMatchHistory(replays, profileId) {
       changed = true;
     }
   }
-  if (!changed) return false;
-  store.records = [...existing.values()]
-    .sort((a, b) => b.uploadedAt - a.uploadedAt)
-    .slice(0, MATCH_HISTORY_LIMIT);
+  const retained = retainNewestMatchHistory(
+    [...existing.values()],
+    historyRetentionLimit(normalizedProfileId),
+  );
+  const retentionChanged = retained.length !== existing.size;
+  if (!changed && !retentionChanged) return false;
+  store.records = retained;
   persistMatchHistoryStore(normalizedProfileId, store);
   sendHistoryState();
   return true;
@@ -1341,6 +1434,7 @@ function publicDisplaySettings({ statsWindowVisible } = {}) {
     statsWindow.isVisible();
   return {
     ...displaySettings,
+    friendOnlineNotificationSoundOptions: windowsNotificationSounds,
     rankingHomeOptions: currentRankingCatalog(),
     overlayInteractionLocked: !overlayEditMode,
     statsWindowVisible: statsWindowVisible ?? actualStatsWindowVisible,
@@ -1650,6 +1744,8 @@ function updateDisplaySettings(
   const previousLaunchAtLogin = displaySettings.launchAtLogin;
   const previousAutoDetectGame = displaySettings.autoDetectGame;
   const previousGameExecutable = displaySettings.gameExecutableName;
+  const previousFriendNotificationsEnabled =
+    displaySettings.friendOnlineNotificationsEnabled;
   const orientationChanging =
     WINDOW_ORIENTATIONS.has(nextSettings.windowOrientation) &&
     nextSettings.windowOrientation !== previousOrientation;
@@ -1773,6 +1869,38 @@ function updateDisplaySettings(
   if (isSafeExecutableName(nextSettings.gameExecutableName)) {
     displaySettings.gameExecutableName = nextSettings.gameExecutableName;
   }
+  if (typeof nextSettings.friendOnlineNotificationsEnabled === "boolean") {
+    displaySettings.friendOnlineNotificationsEnabled =
+      nextSettings.friendOnlineNotificationsEnabled;
+  }
+  if (["always", "game-only"].includes(nextSettings.friendOnlineNotificationTiming)) {
+    displaySettings.friendOnlineNotificationTiming =
+      nextSettings.friendOnlineNotificationTiming;
+  }
+  if (Object.hasOwn(nextSettings, "friendOnlineNotificationSound")) {
+    displaySettings.friendOnlineNotificationSound = sanitizeWindowsNotificationSound(
+      nextSettings.friendOnlineNotificationSound,
+      windowsNotificationSounds,
+    );
+  }
+  if (Number.isInteger(Number(nextSettings.friendOnlineNotificationDurationSeconds))) {
+    displaySettings.friendOnlineNotificationDurationSeconds = Math.min(
+      15,
+      Math.max(3, Number(nextSettings.friendOnlineNotificationDurationSeconds)),
+    );
+  }
+  if (Number.isFinite(Number(nextSettings.friendOnlineNotificationBackgroundOpacity))) {
+    displaySettings.friendOnlineNotificationBackgroundOpacity = Math.min(
+      1,
+      Math.max(0, Number(nextSettings.friendOnlineNotificationBackgroundOpacity)),
+    );
+  }
+  if (Number.isFinite(Number(nextSettings.friendOnlineNotificationVolume))) {
+    displaySettings.friendOnlineNotificationVolume = Math.min(
+      1,
+      Math.max(0, Number(nextSettings.friendOnlineNotificationVolume)),
+    );
+  }
   applyDisplayMode({
     resizeToPreset:
       previousMode !== displaySettings.mode ||
@@ -1815,6 +1943,19 @@ function updateDisplaySettings(
     previousGameExecutable !== displaySettings.gameExecutableName
   ) {
     configureGameDetection();
+  }
+  if (
+    previousFriendNotificationsEnabled !==
+    displaySettings.friendOnlineNotificationsEnabled
+  ) {
+    resetFriendNotificationBaseline();
+    if (displaySettings.friendOnlineNotificationsEnabled) {
+      prewarmFriendNotificationWindow();
+      scheduleSocialRefresh({ immediate: true });
+    } else {
+      dismissFriendNotification({ destroy: false });
+      if (!mainWindow?.isVisible()) stopSocialRefresh();
+    }
   }
   return publicDisplaySettings();
 }
@@ -2108,6 +2249,425 @@ function createTray() {
   refreshTrayMenu();
 }
 
+function resetFriendNotificationBaseline(accountId = authenticatedProfileId) {
+  const normalizedAccountId = String(accountId ?? "").trim();
+  friendNotificationSnapshotVersion += 1;
+  friendNotificationState = normalizedAccountId
+    ? resetFriendOnlineNotificationAccount(
+        friendNotificationState,
+        normalizedAccountId,
+      )
+    : createFriendOnlineNotificationState();
+  dismissFriendNotification({ destroy: false });
+}
+
+function friendNotificationDisplay() {
+  // Process-name detection does not expose the game window bounds. Until a
+  // reliable native bounds source exists, use the specified primary-display
+  // fallback instead of guessing from an independently movable stats window.
+  return screen.getPrimaryDisplay();
+}
+
+function positionFriendNotification(height) {
+  if (!friendNotificationWindow || friendNotificationWindow.isDestroyed()) return;
+  const display = friendNotificationDisplay();
+  const workArea = display.workArea;
+  const width = 340;
+  const margin = 20;
+  friendNotificationWindow.setBounds({
+    x: workArea.x + workArea.width - width - margin,
+    y: workArea.y + workArea.height - height - margin,
+    width,
+    height,
+  });
+}
+
+function positionFriendNotificationPreview(height) {
+  if (!friendNotificationPreviewWindow || friendNotificationPreviewWindow.isDestroyed()) return;
+  const display = friendNotificationDisplay();
+  const workArea = display.workArea;
+  const width = 340;
+  const margin = 20;
+  friendNotificationPreviewWindow.setBounds({
+    x: workArea.x + workArea.width - width - margin,
+    y: workArea.y + workArea.height - height - margin,
+    width,
+    height,
+  });
+}
+
+async function notificationSoundPlaybackPath(soundPath, volume) {
+  if (volume >= 1) return soundPath;
+  const volumePercent = Math.round(volume * 100);
+  const cacheKey = `${soundPath}\0${volumePercent}`;
+  if (!notificationSoundPlaybackCache.has(cacheKey)) {
+    notificationSoundPlaybackCache.set(cacheKey, (async () => {
+      const cacheDirectory = path.join(sessionDataPath, "notification-sound-cache");
+      const outputPath = path.join(
+        cacheDirectory,
+        `${volumePercent}-${path.basename(soundPath)}`,
+      );
+      const source = await fs.promises.readFile(soundPath);
+      const adjusted = scalePcmWavVolume(source, volume);
+      await fs.promises.mkdir(cacheDirectory, { recursive: true });
+      await fs.promises.writeFile(outputPath, adjusted);
+      return outputPath;
+    })().catch((error) => {
+      notificationSoundPlaybackCache.delete(cacheKey);
+      throw error;
+    }));
+  }
+  return notificationSoundPlaybackCache.get(cacheKey);
+}
+
+async function playFriendNotificationSound(soundId = displaySettings.friendOnlineNotificationSound) {
+  const soundPath = resolveWindowsNotificationSound(soundId, windowsNotificationSounds);
+  const volume = Math.min(1, Math.max(0, Number(displaySettings.friendOnlineNotificationVolume) || 0));
+  if (!soundPath || process.platform !== "win32" || volume <= 0) return false;
+  let playbackPath;
+  try {
+    playbackPath = await notificationSoundPlaybackPath(soundPath, volume);
+  } catch {
+    return false;
+  }
+  const powershellPath = path.join(
+    process.env.SystemRoot || process.env.WINDIR || "C:\\Windows",
+    "System32",
+    "WindowsPowerShell",
+    "v1.0",
+    "powershell.exe",
+  );
+  const command = [
+    "$soundPath = [Environment]::GetEnvironmentVariable('MSO_NOTIFICATION_SOUND')",
+    "$player = [System.Media.SoundPlayer]::new($soundPath)",
+    "$player.PlaySync()",
+  ].join("; ");
+  return new Promise((resolve) => {
+    let settled = false;
+    let child;
+    const finish = (played) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      resolve(played);
+    };
+    const timeout = setTimeout(() => {
+      child?.kill();
+      finish(false);
+    }, 15_000);
+    try {
+      child = spawn(
+        powershellPath,
+        ["-NoLogo", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", command],
+        {
+          windowsHide: true,
+          stdio: "ignore",
+          env: { ...process.env, MSO_NOTIFICATION_SOUND: playbackPath },
+        },
+      );
+      child.once("error", () => finish(false));
+      child.once("close", (code) => finish(code === 0));
+    } catch {
+      finish(false);
+    }
+  });
+}
+
+function createFriendNotificationWindow() {
+  if (friendNotificationWindow && !friendNotificationWindow.isDestroyed()) {
+    return friendNotificationWindow;
+  }
+  friendNotificationWindow = new BrowserWindow({
+    width: 340,
+    height: 72,
+    show: false,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    movable: false,
+    minimizable: false,
+    maximizable: false,
+    focusable: false,
+    skipTaskbar: true,
+    backgroundColor: "#00000000",
+    webPreferences: {
+      preload: path.join(__dirname, "friend-notification-preload.js"),
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true,
+    },
+  });
+  friendNotificationWindow.removeMenu();
+  friendNotificationWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  friendNotificationWindow.setSkipTaskbar(true);
+  friendNotificationWindow.setFocusable(false);
+  friendNotificationWindow.setAlwaysOnTop(true, "screen-saver");
+  friendNotificationWindow.setIgnoreMouseEvents(true);
+  friendNotificationWindow.setVisibleOnAllWorkspaces(true, {
+    visibleOnFullScreen: true,
+  });
+  loadRendererFile(
+    friendNotificationWindow,
+    path.join(__dirname, "renderer", "friend-notification.html"),
+  );
+  friendNotificationWindow.on("closed", () => {
+    friendNotificationWindow = null;
+  });
+  return friendNotificationWindow;
+}
+
+function prewarmFriendNotificationWindow() {
+  if (!displaySettings.friendOnlineNotificationsEnabled) return null;
+  const notificationWindow = createFriendNotificationWindow();
+  // Creating the native window while the app is already in the foreground
+  // prevents Windows from surfacing the taskbar when the first game-time
+  // notification appears. It remains hidden, non-focusable, and excluded
+  // from the taskbar until showInactive() is used for a real transition.
+  notificationWindow.setSkipTaskbar(true);
+  notificationWindow.setFocusable(false);
+  notificationWindow.hide();
+  return notificationWindow;
+}
+
+async function createFriendNotificationPreviewWindow() {
+  if (friendNotificationPreviewWindow && !friendNotificationPreviewWindow.isDestroyed()) {
+    if (friendNotificationPreviewLoadInFlight) {
+      await friendNotificationPreviewLoadInFlight;
+    }
+    return friendNotificationPreviewWindow;
+  }
+  const previewWindow = new BrowserWindow({
+    width: 340,
+    height: 72,
+    // The sample is launched only from the visible management window. Making
+    // it an owned toolbar window keeps Windows from treating its first show as
+    // a new top-level app surface and raising the taskbar.
+    parent:
+      mainWindow && !mainWindow.isDestroyed()
+        ? mainWindow
+        : undefined,
+    type: "toolbar",
+    show: false,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    movable: false,
+    minimizable: false,
+    maximizable: false,
+    focusable: false,
+    skipTaskbar: true,
+    backgroundColor: "#00000000",
+    webPreferences: {
+      preload: path.join(__dirname, "friend-notification-preload.js"),
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true,
+    },
+  });
+  friendNotificationPreviewWindow = previewWindow;
+  previewWindow.removeMenu();
+  previewWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  previewWindow.setSkipTaskbar(true);
+  previewWindow.setFocusable(false);
+  previewWindow.setAlwaysOnTop(true, "floating");
+  previewWindow.setIgnoreMouseEvents(true);
+  previewWindow.on("closed", () => {
+    if (friendNotificationPreviewWindow === previewWindow) {
+      friendNotificationPreviewWindow = null;
+    }
+  });
+  friendNotificationPreviewLoadInFlight = loadRendererFile(
+    previewWindow,
+    path.join(__dirname, "renderer", "friend-notification.html"),
+  );
+  try {
+    await friendNotificationPreviewLoadInFlight;
+  } finally {
+    friendNotificationPreviewLoadInFlight = null;
+  }
+  return previewWindow;
+}
+
+async function prewarmFriendNotificationPreviewWindow() {
+  const previewWindow = await createFriendNotificationPreviewWindow();
+  if (previewWindow.isDestroyed()) return null;
+  previewWindow.setSkipTaskbar(true);
+  previewWindow.setFocusable(false);
+  previewWindow.hide();
+  return previewWindow;
+}
+
+function dismissFriendNotificationPreview({ destroy = false } = {}) {
+  if (!friendNotificationPreviewWindow || friendNotificationPreviewWindow.isDestroyed()) return;
+  if (destroy) friendNotificationPreviewWindow.destroy();
+  else friendNotificationPreviewWindow.hide();
+}
+
+async function previewFriendOnlineNotification() {
+  if (friendNotificationPreviewInFlight) return friendNotificationPreviewInFlight;
+  friendNotificationPreviewInFlight = (async () => {
+    const previewWindow = await createFriendNotificationPreviewWindow();
+    if (previewWindow.isDestroyed()) return { shown: false };
+    const payload = {
+      count: 1,
+      names: ["SAMPLE FRIEND"],
+      remainingCount: 0,
+      titleKey: "friendOnline",
+      locale: serviceLocale(),
+      backgroundOpacity: displaySettings.friendOnlineNotificationBackgroundOpacity,
+    };
+    const durationMs = displaySettings.friendOnlineNotificationDurationSeconds * 1000;
+    positionFriendNotificationPreview(72);
+    previewWindow.webContents.send("friend-notification:payload", {
+      ...payload,
+      phase: "visible",
+    });
+    previewWindow.showInactive();
+    previewWindow.setFocusable(false);
+    const soundCompletion = playFriendNotificationSound();
+    await wait(Math.max(0, durationMs - 180));
+    if (!previewWindow.isDestroyed()) {
+      previewWindow.webContents.send("friend-notification:payload", {
+        ...payload,
+        phase: "leaving",
+      });
+    }
+    await wait(180);
+    if (!previewWindow.isDestroyed()) previewWindow.hide();
+    await soundCompletion;
+    return { shown: true };
+  })().finally(() => {
+    friendNotificationPreviewInFlight = null;
+  });
+  return friendNotificationPreviewInFlight;
+}
+
+function sendFriendNotificationPayload(phase = "visible") {
+  if (
+    !friendNotificationBatch ||
+    !friendNotificationWindow ||
+    friendNotificationWindow.isDestroyed() ||
+    friendNotificationWindow.webContents.isLoading()
+  ) {
+    return;
+  }
+  const view = friendOnlineNotificationView(friendNotificationBatch);
+  if (view.count < 1) return;
+  friendNotificationWindow.webContents.send("friend-notification:payload", {
+    ...view,
+    locale: serviceLocale(),
+    backgroundOpacity: displaySettings.friendOnlineNotificationBackgroundOpacity,
+    phase,
+  });
+}
+
+function presentFriendNotification() {
+  if (!friendNotificationBatch || !displaySettings.friendOnlineNotificationsEnabled) return;
+  const notificationWindow = createFriendNotificationWindow();
+  const view = friendOnlineNotificationView(friendNotificationBatch);
+  if (view.count < 1) return;
+  const show = () => {
+    if (
+      !friendNotificationBatch ||
+      !displaySettings.friendOnlineNotificationsEnabled ||
+      notificationWindow.isDestroyed()
+    ) {
+      return;
+    }
+    const latestView = friendOnlineNotificationView(friendNotificationBatch);
+    positionFriendNotification(latestView.count > 1 ? 100 : 72);
+    sendFriendNotificationPayload("visible");
+    notificationWindow.showInactive();
+    notificationWindow.setFocusable(false);
+    void playFriendNotificationSound();
+  };
+  if (notificationWindow.webContents.isLoading()) {
+    notificationWindow.webContents.once("did-finish-load", show);
+  } else {
+    show();
+  }
+
+  clearTimeout(friendNotificationLeaveTimer);
+  clearTimeout(friendNotificationHideTimer);
+  const remaining = Math.max(0, friendNotificationBatch.dismissAt - Date.now());
+  friendNotificationLeaveTimer = setTimeout(() => {
+    sendFriendNotificationPayload("leaving");
+  }, Math.max(0, remaining - 180));
+  friendNotificationHideTimer = setTimeout(() => {
+    if (friendNotificationWindow && !friendNotificationWindow.isDestroyed()) {
+      friendNotificationWindow.hide();
+    }
+    friendNotificationBatch = null;
+    friendNotificationLeaveTimer = null;
+    friendNotificationHideTimer = null;
+  }, remaining);
+}
+
+function flushFriendNotificationBatch() {
+  clearTimeout(friendNotificationAggregationTimer);
+  friendNotificationAggregationTimer = null;
+  presentFriendNotification();
+}
+
+function queueFriendOnlineNotifications(players) {
+  if (!displaySettings.friendOnlineNotificationsEnabled) return;
+  const now = Date.now();
+  const previousBatch = friendNotificationBatch;
+  friendNotificationBatch = previousBatch
+    ? mergeFriendOnlineNotificationBatch(previousBatch, players, now, {
+        displayMs: displaySettings.friendOnlineNotificationDurationSeconds * 1000,
+      })
+    : createFriendOnlineNotificationBatch(players, now, {
+        displayMs: displaySettings.friendOnlineNotificationDurationSeconds * 1000,
+      });
+  if (!friendNotificationBatch) return;
+  const replacedExpiredBatch =
+    previousBatch && friendNotificationBatch.openedAt !== previousBatch.openedAt;
+  if (replacedExpiredBatch) {
+    // The old hide callback may be queued on the same event-loop boundary.
+    // Cancel it before it can erase the newly-created batch, then give the new
+    // transition its own aggregation and five-second display lifetime.
+    clearTimeout(friendNotificationLeaveTimer);
+    clearTimeout(friendNotificationHideTimer);
+    friendNotificationLeaveTimer = null;
+    friendNotificationHideTimer = null;
+    if (friendNotificationWindow && !friendNotificationWindow.isDestroyed()) {
+      friendNotificationWindow.hide();
+    }
+  }
+
+  if (
+    friendNotificationWindow &&
+    !friendNotificationWindow.isDestroyed() &&
+    friendNotificationWindow.isVisible()
+  ) {
+    const view = friendOnlineNotificationView(friendNotificationBatch);
+    positionFriendNotification(view.count > 1 ? 100 : 72);
+    sendFriendNotificationPayload("visible");
+    return;
+  }
+  if (!friendNotificationAggregationTimer) {
+    const delay = Math.max(0, friendNotificationBatch.collectUntil - now);
+    friendNotificationAggregationTimer = setTimeout(
+      flushFriendNotificationBatch,
+      delay,
+    );
+  }
+}
+
+function dismissFriendNotification({ destroy = false } = {}) {
+  clearTimeout(friendNotificationAggregationTimer);
+  clearTimeout(friendNotificationLeaveTimer);
+  clearTimeout(friendNotificationHideTimer);
+  friendNotificationAggregationTimer = null;
+  friendNotificationLeaveTimer = null;
+  friendNotificationHideTimer = null;
+  friendNotificationBatch = null;
+  if (!friendNotificationWindow || friendNotificationWindow.isDestroyed()) return;
+  if (destroy) friendNotificationWindow.destroy();
+  else friendNotificationWindow.hide();
+}
+
 function createMainWindow() {
   const workAreaHeight = screen.getPrimaryDisplay().workAreaSize.height;
   // Keep the five-row recent-match preview visible on first launch.  Respect
@@ -2146,7 +2706,13 @@ function createMainWindow() {
     if (!backgroundMode) mainWindow.show();
   });
   mainWindow.on("show", () => scheduleSocialRefresh({ immediate: true }));
-  mainWindow.on("hide", () => stopSocialRefresh());
+  mainWindow.on("hide", () => {
+    if (displaySettings.friendOnlineNotificationsEnabled) {
+      scheduleSocialRefresh();
+    } else {
+      stopSocialRefresh();
+    }
+  });
   mainWindow.on("close", (event) => {
     if (!isQuitting && tray) {
       event.preventDefault();
@@ -2156,7 +2722,7 @@ function createMainWindow() {
     }
   });
   mainWindow.on("closed", () => {
-    stopSocialRefresh();
+    if (!displaySettings.friendOnlineNotificationsEnabled) stopSocialRefresh();
     mainWindow = null;
   });
 }
@@ -2362,6 +2928,7 @@ async function clearPrivateDataWithConfirmation() {
   sessionAchievementState = createSessionAchievementState();
   historySessionAchievementState = createSessionAchievementState();
   socialRefreshInFlight.clear();
+  resetFriendNotificationBaseline(authenticatedProfileId);
   resetSocialSourcePages();
   rankingState = {
     status: "idle",
@@ -2727,6 +3294,7 @@ function sendSocialState() {
 }
 
 function invalidateAuthenticationState() {
+  resetFriendNotificationBaseline(authenticatedProfileId);
   authenticatedProfileId = null;
   authenticatedPlayer = null;
   authenticatedRatingType = "MR";
@@ -2751,6 +3319,25 @@ function cacheSocialSourcePage(kind, normalized) {
   const meta = socialSourceMeta[kind];
   meta.pageSize = Math.max(SOCIAL_PAGE_SIZE, meta.pageSize, players.length);
   meta.totalPages = Math.max(sourcePage, Number(normalized?.totalPages) || sourcePage);
+}
+
+function replaceSocialSourcePages(kind, pages) {
+  const normalizedPages = Array.isArray(pages) ? pages : [];
+  const next = new Map();
+  let pageSize = SOCIAL_PAGE_SIZE;
+  let totalPages = 1;
+  for (const normalized of normalizedPages) {
+    const sourcePage = Math.max(1, Math.trunc(Number(normalized?.page) || 1));
+    const players = Array.isArray(normalized?.players) ? normalized.players : [];
+    next.set(sourcePage, { ...normalized, players: [...players] });
+    pageSize = Math.max(pageSize, players.length);
+    totalPages = Math.max(totalPages, Number(normalized?.totalPages) || sourcePage);
+  }
+  socialSourcePages[kind].clear();
+  for (const [page, normalized] of next) {
+    socialSourcePages[kind].set(page, normalized);
+  }
+  socialSourceMeta[kind] = { pageSize, totalPages };
 }
 
 function socialPageLocation(kind, appPage) {
@@ -2793,6 +3380,9 @@ function buildSocialAppPage(kind, appPage, status = "ready") {
 
 async function refreshSocialKind(kind, page = socialState[kind]?.page ?? 1) {
   if (!["friends", "following"].includes(kind)) throw new Error("SOCIAL_KIND_INVALID");
+  if (kind === "friends" && displaySettings.friendOnlineNotificationsEnabled) {
+    return refreshAllFriendsForNotifications(page);
+  }
   const requestedPage = Math.max(1, Math.trunc(Number(page) || 1));
   const location = socialPageLocation(kind, requestedPage);
   const profileIdAtRequest = String(authenticatedProfileId ?? "");
@@ -2841,6 +3431,102 @@ async function refreshSocialKind(kind, page = socialState[kind]?.page ?? 1) {
   return request;
 }
 
+async function isGameRunningForFriendNotification() {
+  if (displaySettings.friendOnlineNotificationTiming === "always") return true;
+  try {
+    return await isConfiguredGameRunning();
+  } catch {
+    // A transient tasklist failure must not consume an otherwise valid
+    // transition as "game stopped". Reuse the existing detector's last
+    // confirmed state when that detector is active.
+    return isGameDetectionEnabled() ? gameWasRunning : false;
+  }
+}
+
+async function refreshAllFriendsForNotifications(
+  page = socialState.friends.page,
+  { seedPage = null } = {},
+) {
+  const requestedPage = Math.max(1, Math.trunc(Number(page) || 1));
+  const profileIdAtRequest = String(authenticatedProfileId ?? "");
+  if (!profileIdAtRequest) throw new Error("SERVICE_AUTH_REQUIRED");
+  const generation = privateDataGeneration;
+  const accountEpoch = getFriendNotificationAccountEpoch(
+    friendNotificationState,
+    profileIdAtRequest,
+  );
+  const snapshotVersion = ++friendNotificationSnapshotVersion;
+  const requestKey = `${profileIdAtRequest}:friends:all:${serviceLocale()}`;
+  if (socialRefreshInFlight.has(requestKey)) return socialRefreshInFlight.get(requestKey);
+  const previous = socialState.friends;
+  socialState.friends = { ...previous, status: "loading" };
+  sendSocialState();
+
+  const request = (async () => {
+    try {
+      const snapshot = await fetchCompleteFriendSnapshot({
+        seedPage,
+        fetchPage: async (sourcePage) => {
+          const data = await fetchServiceJson("fighterslist/friend.json", {
+            page: sourcePage,
+            order_type: "last_play",
+            order_order: 0,
+          });
+          assertPrivateDataGeneration(generation);
+          if (String(authenticatedProfileId ?? "") !== profileIdAtRequest) {
+            throw new Error("PRIVATE_DATA_CLEARED");
+          }
+          return data;
+        },
+        normalizePage: (data, sourcePage) =>
+          normalizeSocialPage(data, "friends", sourcePage),
+      });
+      const { pages, friends } = snapshot;
+      const gameRunning = await isGameRunningForFriendNotification();
+      assertPrivateDataGeneration(generation);
+      if (String(authenticatedProfileId ?? "") !== profileIdAtRequest) {
+        return publicSocialState();
+      }
+      const transition = applyFriendOnlineSnapshot(friendNotificationState, {
+        accountId: profileIdAtRequest,
+        accountEpoch,
+        snapshotVersion,
+        friends,
+        complete: true,
+        succeeded: true,
+        notificationsEnabled: displaySettings.friendOnlineNotificationsEnabled,
+        gameRunning,
+        gameRunningOnly:
+          displaySettings.friendOnlineNotificationTiming === "game-only",
+      });
+      friendNotificationState = transition.state;
+      if (transition.notificationPlayers.length) {
+        queueFriendOnlineNotifications(transition.notificationPlayers);
+      }
+      replaceSocialSourcePages("friends", pages);
+      socialState.friends = buildSocialAppPage("friends", requestedPage);
+      socialState.updatedAt = Date.now();
+    } catch (error) {
+      if (
+        generation === privateDataGeneration &&
+        String(authenticatedProfileId ?? "") === profileIdAtRequest
+      ) {
+        socialState.friends = { ...previous, status: "error" };
+      }
+      throw error;
+    } finally {
+      sendSocialState();
+    }
+    return publicSocialState();
+  })().finally(() => {
+    if (socialRefreshInFlight.get(requestKey) === request) {
+      socialRefreshInFlight.delete(requestKey);
+    }
+  });
+  socialRefreshInFlight.set(requestKey, request);
+  return request;
+}
+
 async function changeSocialPage(kind, page) {
   if (!["friends", "following"].includes(kind)) throw new Error("SOCIAL_KIND_INVALID");
   const requestedPage = Math.max(1, Math.trunc(Number(page) || 1));
@@ -2854,10 +3540,11 @@ async function changeSocialPage(kind, page) {
 }
 
 async function refreshSocialLists() {
-  const results = await Promise.allSettled([
-    refreshSocialKind("friends", socialState.friends.page),
-    refreshSocialKind("following", socialState.following.page),
-  ]);
+  const tasks = [refreshSocialKind("friends", socialState.friends.page)];
+  if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()) {
+    tasks.push(refreshSocialKind("following", socialState.following.page));
+  }
+  const results = await Promise.allSettled(tasks);
   if (results.every((result) => result.status === "rejected")) {
     throw results[0].reason;
   }
@@ -2871,12 +3558,15 @@ function stopSocialRefresh() {
 
 function scheduleSocialRefresh({ immediate = false } = {}) {
   stopSocialRefresh();
-  if (!mainWindow || mainWindow.isDestroyed() || !mainWindow.isVisible()) return;
+  const shouldRun = () =>
+    (mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()) ||
+    displaySettings.friendOnlineNotificationsEnabled;
+  if (!shouldRun()) return;
   const run = async () => {
     socialRefreshTimer = null;
-    if (!mainWindow || mainWindow.isDestroyed() || !mainWindow.isVisible()) return;
+    if (!shouldRun()) return;
     if (authenticatedProfileId) await refreshSocialLists().catch(() => {});
-    if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()) {
+    if (shouldRun()) {
       scheduleSocialRefresh();
     }
   };
@@ -2926,6 +3616,7 @@ async function checkAuthentication() {
     const player = result?.player;
     const nextProfileId = player?.profileId ?? player?.userCode ?? null;
     if (String(authenticatedProfileId ?? "") !== String(nextProfileId ?? "")) {
+      resetFriendNotificationBaseline(authenticatedProfileId);
       resetSocialSourcePages();
       socialState = emptySocialState();
     }
@@ -2944,10 +3635,21 @@ async function checkAuthentication() {
       trackerState.updatedAt = Date.now();
       sendTrackerState();
     }
-    await Promise.allSettled([
+    const postAuthenticationTasks = [
       refreshMasterRanking({ player, characterId: player?.characterId }),
-      refreshSocialKind("following", 1),
-    ]);
+    ];
+    if (displaySettings.friendOnlineNotificationsEnabled) {
+      postAuthenticationTasks.push(
+        refreshAllFriendsForNotifications(1, { seedPage: result.friendPage }),
+      );
+    }
+    if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()) {
+      postAuthenticationTasks.push(refreshSocialKind("following", 1));
+    }
+    await Promise.allSettled(postAuthenticationTasks);
+    if (displaySettings.friendOnlineNotificationsEnabled) {
+      scheduleSocialRefresh();
+    }
     return result;
   } catch (error) {
     if (["SERVICE_AUTH_REQUIRED", "SERVICE_SELF_NOT_FOUND"].includes(error?.message)) {
@@ -3282,7 +3984,14 @@ async function selectHistoryProfile(userCode) {
   assertPrivateDataGeneration(generation);
   stopHistoryViewPolling();
   historyViewPlayer = nextHistoryViewPlayer;
-  if (historyViewPlayer) startHistoryViewPolling();
+  if (historyViewPlayer) {
+    const selectedProfileId = normalizeHistoryProfileId(historyViewPlayer.profileId);
+    const selectedStore = loadMatchHistoryStore(selectedProfileId);
+    if (trimMatchHistoryStore(selectedProfileId, selectedStore)) {
+      persistMatchHistoryStore(selectedProfileId, selectedStore);
+    }
+    startHistoryViewPolling();
+  }
   sendHistoryState();
   sendTrackerState();
   return {
@@ -3732,6 +4441,17 @@ function registerIpcHandlers() {
     resultHandler(listInstalledFonts, { allowDuringUpdate: true }),
   );
   ipcMain.handle(
+    "system:notification-sound-preview",
+    resultHandler(
+      async ({ soundId }) => ({ played: await playFriendNotificationSound(soundId) }),
+      { allowDuringUpdate: true },
+    ),
+  );
+  ipcMain.handle(
+    "friend-notification:preview",
+    resultHandler(async () => previewFriendOnlineNotification(), { allowDuringUpdate: true }),
+  );
+  ipcMain.handle(
     "display:update",
     resultHandler(async (nextSettings) => updateDisplaySettings(nextSettings)),
   );
@@ -3893,6 +4613,10 @@ app.whenReady().then(() => {
   createMainWindow();
   configureLaunchAtLogin();
   configureGameDetection();
+  void prewarmFriendNotificationPreviewWindow().catch(() => {});
+  if (displaySettings.friendOnlineNotificationsEnabled) {
+    prewarmFriendNotificationWindow();
+  }
 
   if (app.isPackaged) {
     startupUpdateTimer = setTimeout(() => {
@@ -3925,6 +4649,8 @@ app.on("before-quit", () => {
   stopPolling();
   stopHistoryViewPolling();
   stopSocialRefresh();
+  dismissFriendNotification({ destroy: true });
+  dismissFriendNotificationPreview({ destroy: true });
   clearInterval(gameMonitorTimer);
   clearTimeout(displaySettingsWriteTimer);
   try {

@@ -335,6 +335,45 @@
                   <div class="game-picker"><span id="gameExecutableName" data-i18n="gameNotSelected">ゲーム未選択</span><button class="icon-button" id="chooseGameButton" data-i18n="chooseExecutable">実行ファイルを選択</button></div>
                 </section>
 
+                <section class="options-category-card" id="friendNotificationSettingsCard">
+                  <h4 data-i18n="categoryNotifications">通知</h4>
+                  <div class="game-auto-heading">
+                    <div><span class="control-label" data-i18n="friendOnlineNotifications">FRIEND ONLINE NOTIFICATIONS</span><h3 data-i18n="friendOnlineNotificationsHeading">フレンドのオンライン通知</h3></div>
+                    <label class="switch"><input id="friendOnlineNotificationsEnabledInput" type="checkbox" data-i18n-aria-label="friendOnlineNotificationsHeading" aria-label="フレンドのオンライン通知" /><span aria-hidden="true"></span></label>
+                  </div>
+                  <p class="setting-note" data-i18n="friendOnlineNotificationsNote">FRIENDSのみを通知します。</p>
+                  <fieldset class="notification-timing-control">
+                    <legend class="control-label" data-i18n="friendOnlineNotificationTiming">通知タイミング</legend>
+                    <div class="notification-timing-options">
+                      <label><input id="friendOnlineNotificationTimingAlwaysInput" name="friendOnlineNotificationTiming" type="radio" value="always" /><span data-i18n="friendOnlineNotificationTimingAlways">常に通知</span></label>
+                      <label><input id="friendOnlineNotificationTimingGameOnlyInput" name="friendOnlineNotificationTiming" type="radio" value="game-only" /><span data-i18n="friendOnlineNotificationTimingGameOnly">ゲーム起動中のみ</span></label>
+                    </div>
+                  </fieldset>
+                  <div class="category-control notification-sound-control">
+                    <label for="friendOnlineNotificationSoundInput" class="control-label" data-i18n="friendOnlineNotificationSound">通知音</label>
+                    <div class="notification-sound-picker">
+                      <select id="friendOnlineNotificationSoundInput" aria-label="通知音"></select>
+                      <button class="icon-button" id="previewFriendOnlineNotificationSoundButton" type="button" data-i18n="previewSound">試聴</button>
+                    </div>
+                    <p class="setting-note" data-i18n="friendOnlineNotificationSoundNote">Windows標準サウンドから選択できます。</p>
+                  </div>
+                  <div class="notification-preview-settings">
+                    <label class="category-control" for="friendOnlineNotificationDurationInput">
+                      <span class="control-label"><span data-i18n="friendOnlineNotificationDuration">表示時間</span> <output id="friendOnlineNotificationDurationValue">5秒</output></span>
+                      <input id="friendOnlineNotificationDurationInput" type="range" min="3" max="15" step="1" value="5" />
+                    </label>
+                    <button class="button secondary notification-sample-button" id="previewFriendOnlineNotificationButton" type="button" data-i18n="previewNotification">サンプル通知を表示</button>
+                  </div>
+                  <label class="category-control" for="friendOnlineNotificationOpacityInput">
+                    <span class="control-label"><span data-i18n="friendOnlineNotificationOpacity">通知背景</span> <output id="friendOnlineNotificationOpacityValue">94%</output></span>
+                    <input id="friendOnlineNotificationOpacityInput" type="range" min="0" max="100" step="1" value="94" />
+                  </label>
+                  <label class="category-control" for="friendOnlineNotificationVolumeInput">
+                    <span class="control-label"><span data-i18n="friendOnlineNotificationVolume">通知音量</span> <output id="friendOnlineNotificationVolumeValue">100%</output></span>
+                    <input id="friendOnlineNotificationVolumeInput" type="range" min="0" max="100" step="1" value="100" />
+                  </label>
+                </section>
+
               </div>
             </section>
 
