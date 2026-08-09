@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Friend online</title>
+    <link rel="stylesheet" href="friend-notification.css" />
+  </head>
+  <body>
+    <main class="friend-toast" id="friendToast" aria-live="polite">
+      <div class="toast-background" id="friendToastBackground" aria-hidden="true"></div>
+      <div class="accent" aria-hidden="true"></div>
+      <section>
+        <p class="eyebrow" id="friendToastTitle">FRIEND ONLINE</p>
+        <div class="names" id="friendToastNames"></div>
+        <p class="others hidden" id="friendToastOthers"></p>
+      </section>
+    </main>
+    <script src="friend-notification.js"></script>
+  </body>
+</html>

@@ -39,6 +39,8 @@ let socialState = {
   following: { status: "idle", page: 1, totalPages: 1, players: [] },
 };
 let activeSocialKind = "friends";
+let notificationSoundPreviewInFlight = false;
+let friendNotificationSampleInFlight = false;
 
 const elements = Object.fromEntries(
   [
@@ -98,6 +100,18 @@ const elements = Object.fromEntries(
     "fontStyleInput",
     "textColorInput",
     "pollIntervalInput",
+    "friendOnlineNotificationsEnabledInput",
+    "friendOnlineNotificationTimingAlwaysInput",
+    "friendOnlineNotificationTimingGameOnlyInput",
+    "friendOnlineNotificationSoundInput",
+    "previewFriendOnlineNotificationSoundButton",
+    "friendOnlineNotificationDurationInput",
+    "friendOnlineNotificationDurationValue",
+    "previewFriendOnlineNotificationButton",
+    "friendOnlineNotificationOpacityInput",
+    "friendOnlineNotificationOpacityValue",
+    "friendOnlineNotificationVolumeInput",
+    "friendOnlineNotificationVolumeValue",
     "launchAtLoginInput",
     "gameDetectionInput",
     "chooseGameButton",
@@ -1420,6 +1434,49 @@ const DISPLAY_METRIC_KEYS = [
   "mrRank",
 ];
 
+function updateNotificationSoundPreviewControl() {
+  if (!elements.previewFriendOnlineNotificationSoundButton) return;
+  const soundDisabled =
+    !elements.friendOnlineNotificationSoundInput ||
+    elements.friendOnlineNotificationSoundInput.value === "none" ||
+    Number(elements.friendOnlineNotificationVolumeInput?.value) === 0;
+  elements.previewFriendOnlineNotificationSoundButton.disabled =
+    notificationSoundPreviewInFlight || friendNotificationSampleInFlight || soundDisabled;
+  elements.previewFriendOnlineNotificationSoundButton.textContent =
+    notificationSoundPreviewInFlight
+      ? t("previewSoundPlaying", "再生中…")
+      : t("previewSound", "試聴");
+}
+
+function updateFriendNotificationSampleControl() {
+  if (!elements.previewFriendOnlineNotificationButton) return;
+  elements.previewFriendOnlineNotificationButton.disabled =
+    friendNotificationSampleInFlight || notificationSoundPreviewInFlight;
+  elements.previewFriendOnlineNotificationButton.textContent =
+    friendNotificationSampleInFlight
+      ? t("previewNotificationActive", "表示中…")
+      : t("previewNotification", "サンプル通知を表示");
+}
+
+function updateFriendNotificationDurationOutput() {
+  if (!elements.friendOnlineNotificationDurationValue) return;
+  const seconds = Number(elements.friendOnlineNotificationDurationInput?.value) || 5;
+  elements.friendOnlineNotificationDurationValue.textContent =
+    t("notificationDurationSeconds", "{seconds}秒").replace("{seconds}", String(seconds));
+}
+
+function updateFriendNotificationOpacityOutput() {
+  if (!elements.friendOnlineNotificationOpacityValue) return;
+  const opacity = Number(elements.friendOnlineNotificationOpacityInput?.value) || 0;
+  elements.friendOnlineNotificationOpacityValue.textContent = `${opacity}%`;
+}
+
+function updateFriendNotificationVolumeOutput() {
+  if (!elements.friendOnlineNotificationVolumeValue) return;
+  const volume = Number(elements.friendOnlineNotificationVolumeInput?.value) || 0;
+  elements.friendOnlineNotificationVolumeValue.textContent = `${volume}%`;
+}
+
 function normalizedDisplayItems(settings = {}) {
   const result = Object.fromEntries(
     [...DISPLAY_METRIC_KEYS, "graph"].map((key) => [key, true]),
@@ -1550,6 +1607,56 @@ function renderDisplaySettings(settings) {
   );
   elements.textColorInput.value = settings.textColor;
   elements.pollIntervalInput.value = String(settings.pollIntervalSeconds);
+  elements.friendOnlineNotificationsEnabledInput.checked =
+    settings.friendOnlineNotificationsEnabled === true;
+  const friendOnlineNotificationTiming =
+    settings.friendOnlineNotificationTiming === "always" ? "always" : "game-only";
+  elements.friendOnlineNotificationTimingAlwaysInput.checked =
+    friendOnlineNotificationTiming === "always";
+  elements.friendOnlineNotificationTimingGameOnlyInput.checked =
+    friendOnlineNotificationTiming === "game-only";
+  const soundOptions = Array.isArray(settings.friendOnlineNotificationSoundOptions)
+    ? settings.friendOnlineNotificationSoundOptions
+    : [];
+  const selectedSound = typeof settings.friendOnlineNotificationSound === "string"
+    ? settings.friendOnlineNotificationSound
+    : "none";
+  elements.friendOnlineNotificationSoundInput.replaceChildren(
+    ...[
+      { id: "none", label: t("notificationSoundNone", "サウンドなし") },
+      ...soundOptions,
+    ].map((sound) => {
+      const option = document.createElement("option");
+      option.value = sound.id;
+      option.textContent = sound.label;
+      return option;
+    }),
+  );
+  elements.friendOnlineNotificationSoundInput.value = selectedSound;
+  if (!elements.friendOnlineNotificationSoundInput.value) {
+    elements.friendOnlineNotificationSoundInput.value = "none";
+  }
+  elements.friendOnlineNotificationVolumeInput.value = String(
+    Math.round(
+      Math.min(1, Math.max(0, Number(settings.friendOnlineNotificationVolume) || 0)) * 100,
+    ),
+  );
+  updateFriendNotificationVolumeOutput();
+  updateNotificationSoundPreviewControl();
+  elements.friendOnlineNotificationDurationInput.value = String(
+    Math.min(15, Math.max(3, Number(settings.friendOnlineNotificationDurationSeconds) || 5)),
+  );
+  updateFriendNotificationDurationOutput();
+  updateFriendNotificationSampleControl();
+  elements.friendOnlineNotificationOpacityInput.value = String(
+    Math.round(
+      Math.min(
+        1,
+        Math.max(0, Number(settings.friendOnlineNotificationBackgroundOpacity) || 0),
+      ) * 100,
+    ),
+  );
+  updateFriendNotificationOpacityOutput();
   elements.launchAtLoginInput.checked = settings.launchAtLogin;
   elements.gameDetectionInput.checked = settings.autoDetectGame;
   elements.gameDetectionInput.disabled = !settings.launchAtLogin;
@@ -2112,6 +2219,151 @@ elements.pollIntervalInput.addEventListener("change", async () => {
     ),
   );
   showNotice(t("pollChanged", "戦績の取得間隔を変更しました"), "success");
+});
+
+elements.friendOnlineNotificationsEnabledInput.addEventListener("change", async () => {
+  try {
+    renderDisplaySettings(
+      await unwrap(
+        api.updateDisplaySettings({
+          friendOnlineNotificationsEnabled:
+            elements.friendOnlineNotificationsEnabledInput.checked,
+        }),
+      ),
+    );
+  } catch (error) {
+    renderDisplaySettings(displaySettings);
+    showNotice(error.message, "error");
+  }
+});
+
+for (const timingInput of [
+  elements.friendOnlineNotificationTimingAlwaysInput,
+  elements.friendOnlineNotificationTimingGameOnlyInput,
+]) {
+  timingInput.addEventListener("change", async () => {
+    if (!timingInput.checked) return;
+    try {
+      renderDisplaySettings(
+        await unwrap(
+          api.updateDisplaySettings({
+            friendOnlineNotificationTiming: timingInput.value,
+          }),
+        ),
+      );
+    } catch (error) {
+      renderDisplaySettings(displaySettings);
+      showNotice(error.message, "error");
+    }
+  });
+}
+
+elements.friendOnlineNotificationSoundInput.addEventListener("change", async () => {
+  const soundId = elements.friendOnlineNotificationSoundInput.value;
+  try {
+    renderDisplaySettings(
+      await unwrap(
+        api.updateDisplaySettings({ friendOnlineNotificationSound: soundId }),
+      ),
+    );
+  } catch (error) {
+    renderDisplaySettings(displaySettings);
+    showNotice(error.message, "error");
+  }
+});
+
+elements.previewFriendOnlineNotificationSoundButton.addEventListener("click", async () => {
+  const soundId = elements.friendOnlineNotificationSoundInput.value;
+  if (soundId === "none" || notificationSoundPreviewInFlight) return;
+  notificationSoundPreviewInFlight = true;
+  updateNotificationSoundPreviewControl();
+  updateFriendNotificationSampleControl();
+  try {
+    await unwrap(api.previewNotificationSound(soundId));
+  } catch (error) {
+    showNotice(error.message, "error");
+  } finally {
+    notificationSoundPreviewInFlight = false;
+    updateNotificationSoundPreviewControl();
+    updateFriendNotificationSampleControl();
+  }
+});
+
+elements.friendOnlineNotificationDurationInput.addEventListener(
+  "input",
+  updateFriendNotificationDurationOutput,
+);
+
+elements.friendOnlineNotificationDurationInput.addEventListener("change", async () => {
+  const durationSeconds = Number(elements.friendOnlineNotificationDurationInput.value);
+  try {
+    renderDisplaySettings(
+      await unwrap(
+        api.updateDisplaySettings({
+          friendOnlineNotificationDurationSeconds: durationSeconds,
+        }),
+      ),
+    );
+  } catch (error) {
+    renderDisplaySettings(displaySettings);
+    showNotice(error.message, "error");
+  }
+});
+
+elements.previewFriendOnlineNotificationButton.addEventListener("click", async () => {
+  if (friendNotificationSampleInFlight || notificationSoundPreviewInFlight) return;
+  friendNotificationSampleInFlight = true;
+  updateFriendNotificationSampleControl();
+  updateNotificationSoundPreviewControl();
+  try {
+    await unwrap(api.previewFriendNotification());
+  } catch (error) {
+    showNotice(error.message, "error");
+  } finally {
+    friendNotificationSampleInFlight = false;
+    updateFriendNotificationSampleControl();
+    updateNotificationSoundPreviewControl();
+  }
+});
+
+elements.friendOnlineNotificationOpacityInput.addEventListener(
+  "input",
+  updateFriendNotificationOpacityOutput,
+);
+
+elements.friendOnlineNotificationOpacityInput.addEventListener("change", async () => {
+  const backgroundOpacity = Number(elements.friendOnlineNotificationOpacityInput.value) / 100;
+  try {
+    renderDisplaySettings(
+      await unwrap(
+        api.updateDisplaySettings({
+          friendOnlineNotificationBackgroundOpacity: backgroundOpacity,
+        }),
+      ),
+    );
+  } catch (error) {
+    renderDisplaySettings(displaySettings);
+    showNotice(error.message, "error");
+  }
+});
+
+elements.friendOnlineNotificationVolumeInput.addEventListener("input", () => {
+  updateFriendNotificationVolumeOutput();
+  updateNotificationSoundPreviewControl();
+});
+
+elements.friendOnlineNotificationVolumeInput.addEventListener("change", async () => {
+  const volume = Number(elements.friendOnlineNotificationVolumeInput.value) / 100;
+  try {
+    renderDisplaySettings(
+      await unwrap(
+        api.updateDisplaySettings({ friendOnlineNotificationVolume: volume }),
+      ),
+    );
+  } catch (error) {
+    renderDisplaySettings(displaySettings);
+    showNotice(error.message, "error");
+  }
 });
 
 elements.languageInput?.addEventListener("change", async () => {
