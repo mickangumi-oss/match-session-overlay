@@ -40,6 +40,14 @@ test("maintenance actions share a readable stable footprint", () => {
   assert.match(css, /\.options-category-grid\s*\{[\s\S]*?grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\);/);
 });
 
+test("required update keeps maintenance bright while dimming unrelated options", () => {
+  const css = read("src/renderer/style.css");
+  assert.match(css, /body\.update-required \.cockpit \.hud-panel > \*:not\(#optionsPanel\)/);
+  assert.match(css, /#optionsPanel \.options-category-card:not\(\.maintenance-card\)/);
+  assert.match(css, /\.options-category-card\.force-update[\s\S]*background:[\s\S]*#ff2b63/);
+  assert.match(css, /\.options-category-card\.force-update \.maintenance-action-button\.accent[\s\S]*#ff2b63/);
+});
+
 test("update states switch labels, prevent duplicate actions, and retain badges", () => {
   const renderer = read("src/renderer/renderer.js");
   const i18n = read("src/renderer/i18n.js");
