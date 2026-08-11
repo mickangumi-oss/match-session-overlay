@@ -49,10 +49,13 @@ test("ranking retry controller cancels one or every pending official request", (
   let calls = 0;
   controller.schedule("all", 5_000, () => { calls += 1; });
   controller.schedule("country", 5_000, () => { calls += 1; });
+  const requestGeneration = controller.generation();
+  assert.equal(controller.isCurrent(requestGeneration), true);
   controller.clear("all");
   assert.equal(controller.has("all"), false);
   assert.equal(controller.has("country"), true);
   controller.clearAll();
+  assert.equal(controller.isCurrent(requestGeneration), false);
   assert.equal(clock.pending.size, 0);
   assert.equal(controller.size(), 0);
   assert.equal(calls, 0);
