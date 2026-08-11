@@ -262,7 +262,14 @@ async function fetchRemoteManifest({ signal } = {}) {
   };
 }
 
-function createUpdater({ onState }) {
+function createUpdater({
+  onState,
+  appAdapter = app,
+  fetchManifest = fetchRemoteManifest,
+  downloadFile = downloadToFile,
+  hashFile = sha256File,
+  spawnInstaller = spawn,
+}) {
   let pendingUpdate = null;
   let checkInFlight = null;
   let remoteCache = { checkedAt: 0, manifest: null, error: null };
@@ -270,7 +277,7 @@ function createUpdater({ onState }) {
   const networkController = new AbortController();
   let state = {
     status: "idle",
-    currentVersion: app.getVersion(),
+    currentVersion: appAdapter.getVersion(),
     availableVersion: null,
     required: false,
     progress: 0,
@@ -282,7 +289,7 @@ function createUpdater({ onState }) {
   // A previous update may have left a verified installer behind after the
   // application exited. It is no longer needed once this process starts.
   try {
-    const stagingDirectory = path.join(app.getPath("userData"), "update-staging");
+    const stagingDirectory = path.join(appAdapter.getPath("userData"), "update-staging");
     for (const entry of fs.readdirSync(stagingDirectory)) {
       if (/\.exe(?:\.download)?$/i.test(entry)) {
         fs.rmSync(path.join(stagingDirectory, entry), { force: true });
@@ -310,7 +317,7 @@ function createUpdater({ onState }) {
       return remoteCache.manifest;
     }
     try {
-      const manifest = await fetchRemoteManifest({ signal: networkController.signal });
+      const manifest = await fetchManifest({ signal: networkController.signal });
       remoteCache = { checkedAt: Date.now(), manifest, error: null };
       nextCheckAllowedAt = 0;
       return manifest;
@@ -327,11 +334,12 @@ function createUpdater({ onState }) {
   };
 
   const check = async () => {
+      const requiredBeforeCheck = state.required === true;
       pendingUpdate = null;
       publish({
         status: "checking",
         availableVersion: null,
-        required: false,
+        required: requiredBeforeCheck,
         progress: 0,
         source: "github",
         messageKey: "updateChecking",
@@ -345,15 +353,16 @@ function createUpdater({ onState }) {
         return publish({
           status: "error",
           availableVersion: null,
+          required: requiredBeforeCheck,
           messageKey: "updateNetworkError",
           message: "GitHubから更新情報を取得できませんでした",
         });
       }
 
-      const versionAhead = compareVersions(manifest.version, app.getVersion()) > 0;
+      const versionAhead = compareVersions(manifest.version, appAdapter.getVersion()) > 0;
       const belowMinimum =
         manifest.minimumVersion !== null &&
-        compareVersions(app.getVersion(), manifest.minimumVersion) < 0;
+        compareVersions(appAdapter.getVersion(), manifest.minimumVersion) < 0;
       if (!versionAhead && !belowMinimum) {
         return publish({
           status: "current",
@@ -374,7 +383,7 @@ function createUpdater({ onState }) {
         source: "github",
         messageKey: required ? "updateSecurityRequired" : "updateReady",
         message: required
-          ? `セキュリティ更新が必要です（バージョン ${manifest.version}）`
+          ? `更新が必要です（バージョン ${manifest.version}）`
           : `バージョン ${manifest.version} に更新できます`,
       });
   };
@@ -397,10 +406,10 @@ function createUpdater({ onState }) {
       if (!pendingUpdate || state.status !== "ready") {
         throw new Error("UPDATE_NOT_READY");
       }
-      if (!app.isPackaged) {
+      if (!appAdapter.isPackaged) {
         throw new Error("UPDATE_INSTALL_DEVELOPMENT");
       }
-      const stagingDirectory = path.join(app.getPath("userData"), "update-staging");
+      const stagingDirectory = path.join(appAdapter.getPath("userData"), "update-staging");
       fs.mkdirSync(stagingDirectory, { recursive: true });
       const stagedInstallerPath = path.join(stagingDirectory, pendingUpdate.file);
       const temporaryPath = `${stagedInstallerPath}.download`;
@@ -413,14 +422,14 @@ function createUpdater({ onState }) {
         message: `バージョン ${pendingUpdate.version} をダウンロードしています…`,
       });
       try {
-        await downloadToFile(
+        await downloadFile(
           pendingUpdate.installerUrl,
           temporaryPath,
           (progress) => publish({ progress }),
           0,
           networkController.signal,
         );
-        const actualHash = await sha256File(temporaryPath);
+        const actualHash = await hashFile(temporaryPath);
         if (actualHash !== pendingUpdate.sha256) {
           throw new Error("UPDATE_HASH_MISMATCH");
         }
@@ -432,6 +441,7 @@ function createUpdater({ onState }) {
         publish({
           status: "error",
           availableVersion: null,
+          required: state.required === true,
           progress: 0,
           messageKey: error.message === "UPDATE_HASH_MISMATCH"
             ? "updateHashMismatch"
@@ -445,13 +455,29 @@ function createUpdater({ onState }) {
 
       pendingUpdate = null;
       publish({ status: "launching", progress: 100, messageKey: "updateReadyToInstall" });
-      const child = spawn(stagedInstallerPath, [], {
-        detached: true,
-        stdio: "ignore",
-        windowsHide: false,
-      });
+      let child;
+      try {
+        child = spawnInstaller(stagedInstallerPath, [], {
+          detached: true,
+          stdio: "ignore",
+          windowsHide: false,
+        });
+        await new Promise((resolve, reject) => {
+          child.once("spawn", resolve);
+          child.once("error", reject);
+        });
+      } catch (error) {
+        publish({
+          status: "error",
+          required: state.required === true,
+          progress: 0,
+          messageKey: "updateLaunchError",
+          message: "更新プログラムを起動できませんでした",
+        });
+        throw error;
+      }
       child.unref();
-      app.quit();
+      appAdapter.quit();
       return { started: true };
     },
   };

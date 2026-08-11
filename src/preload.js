@@ -18,6 +18,7 @@ contextBridge.exposeInMainWorld("matchOverlay", {
   clearHistoryProfile: () => ipcRenderer.invoke("history:clear-profile"),
   getSocialState: () => ipcRenderer.invoke("social:state"),
   refreshSocial: (kind) => ipcRenderer.invoke("social:refresh", { kind }),
+  reportSocialActivity: () => ipcRenderer.invoke("social:activity"),
   changeSocialPage: (kind, page) =>
     ipcRenderer.invoke("social:page", { kind, page }),
   openSocialProfile: (profileId) =>
