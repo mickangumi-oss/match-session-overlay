@@ -697,7 +697,13 @@ h3 {
   box-shadow: 0 0 10px rgba(255, 101, 125, 0.24);
 }
 
-body.update-required .cockpit .hud-panel > * {
+body.update-required .cockpit .hud-panel > *:not(#optionsPanel) {
+  opacity: 0.34;
+  pointer-events: none;
+}
+
+body.update-required #optionsPanel .options-category-card:not(.maintenance-card),
+body.update-required #optionsPanel .maintenance-card .local-data-row {
   opacity: 0.34;
   pointer-events: none;
 }
@@ -2240,15 +2246,36 @@ footer {
 }
 
 .options-category-card.force-update {
-  border-color: rgba(255, 101, 125, 0.9);
-  box-shadow: inset 3px 0 0 var(--red), 0 0 16px rgba(255, 101, 125, 0.2);
+  border-color: #ff6580;
+  background:
+    linear-gradient(110deg, rgba(255, 43, 99, 0.26), rgba(255, 101, 125, 0.1) 58%, rgba(255, 43, 99, 0.2)),
+    rgba(11, 10, 20, 0.98);
+  box-shadow:
+    inset 4px 0 0 #ff2b63,
+    inset 0 0 28px rgba(255, 43, 99, 0.16),
+    0 0 20px rgba(255, 43, 99, 0.48);
+}
+
+.options-category-card.force-update .update-title,
+.options-category-card.force-update .current-version-line,
+.options-category-card.force-update #updateMessage {
+  color: #fff4f7;
+  text-shadow: 0 0 8px rgba(255, 101, 125, 0.72);
+}
+
+.options-category-card.force-update .update-badge {
+  border-color: #ff8da0;
+  background: #ff2b63;
+  color: #ffffff;
+  box-shadow: 0 0 14px rgba(255, 43, 99, 0.72);
 }
 
 .options-category-card.force-update .maintenance-action-button.accent {
-  border-color: rgba(255, 101, 125, 0.92);
-  background: rgba(255, 101, 125, 0.18);
-  color: #ffd7dd;
-  box-shadow: 0 0 14px rgba(255, 101, 125, 0.3);
+  border-color: #ff9aaa;
+  background: linear-gradient(135deg, #ff2b63, #bd1747);
+  color: #ffffff;
+  box-shadow: 0 0 18px rgba(255, 43, 99, 0.68);
+  text-shadow: 0 1px 2px rgba(38, 0, 12, 0.9);
 }
 
 @media (max-width: 760px) {
