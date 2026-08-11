@@ -68,7 +68,10 @@
                   <button id="socialFollowingTab" role="tab" aria-selected="false" aria-controls="socialList" data-social-kind="following" data-i18n="following">FOLLOWING</button>
                 </div>
               </div>
-              <button class="icon-button" id="socialRefreshButton" data-i18n-title="refresh" title="更新">↻</button>
+              <div class="social-heading-actions">
+                <span class="social-monitoring-status hidden" id="socialMonitoringStatus" data-i18n="socialMonitoringSuspended">FRIENDS取得休止中</span>
+                <button class="icon-button" id="socialRefreshButton" data-i18n-title="refresh" title="更新">↻</button>
+              </div>
             </header>
             <p class="social-message hidden" id="socialError" data-i18n="socialLoadError">プレイヤー状態を取得できませんでした</p>
             <div class="social-list" id="socialList" role="tabpanel"></div>

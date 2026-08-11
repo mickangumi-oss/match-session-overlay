@@ -1,6 +1,6 @@
 {
   "name": "match-session-overlay",
-  "version": "1.3.0",
+  "version": "1.3.1",
   "private": true,
   "description": "Privacy-first local match session stats window with optional OBS overlay",
   "main": "src/main.js",
@@ -9,6 +9,7 @@
   "scripts": {
     "test": "node --test",
     "check": "node scripts/check-source.js",
+    "qa:force-update": "electron scripts/force-update-fixture.js",
     "build": "electron-builder --win nsis --publish never",
     "release:manifest": "node scripts/create-release-manifest.js"
   },

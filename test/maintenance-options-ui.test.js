@@ -78,7 +78,7 @@ test("maintenance copy names the version and the complete local-data scope", () 
   );
   assert.match(html, /data-i18n="currentAppVersion"[^>]*>[^<]*<\/span><strong id="currentAppVersion">/);
   assert.match(html, /data-i18n="localDataClearNote"/);
-  assert.match(updater, /currentVersion: app\.getVersion\(\)/);
+  assert.match(updater, /currentVersion: appAdapter\.getVersion\(\)/);
   assert.match(renderer, /elements\.currentAppVersion\.textContent = currentVersion \? `v\$\{currentVersion\}` : "—"/);
   const clearStart = main.indexOf("async function clearPrivateDataWithConfirmation");
   const clearEnd = main.indexOf("\nfunction wait(", clearStart);
