@@ -1336,6 +1336,8 @@ function buildCurrentPresentation({
     characterId: basePresentation.characterId,
     ratingType: basePresentation.ratingType,
     currentRating: basePresentation.currentRating,
+    baselineRating:
+      sourceState.stats?.ranked?.initialRating ?? sourceState.initialRating,
     homeKey: ranking.homeKey,
     currentRank: basePresentation.mrRank,
     rankingReady: ranking.status === "ready",

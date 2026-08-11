@@ -23,6 +23,7 @@ function updateSessionAchievements(previous, {
   characterId,
   ratingType,
   currentRating,
+  baselineRating,
   homeKey,
   currentRank,
   rankingReady = true,
@@ -37,14 +38,20 @@ function updateSessionAchievements(previous, {
     ? `${normalizedProfileId}:${normalizedCharacterId}:${normalizedRatingType}`
     : "";
   const rating = finitePositive(currentRating);
+  const baseline = finitePositive(baselineRating);
+  const peakCandidate = rating == null
+    ? baseline
+    : baseline == null
+      ? rating
+      : Math.max(rating, baseline);
 
   if (state.ratingScopeKey !== ratingScopeKey) {
     state.ratingScopeKey = ratingScopeKey;
-    state.peakRating = rating;
-  } else if (rating != null) {
+    state.peakRating = peakCandidate;
+  } else if (peakCandidate != null) {
     state.peakRating = state.peakRating == null
-      ? rating
-      : Math.max(Number(state.peakRating), rating);
+      ? peakCandidate
+      : Math.max(Number(state.peakRating), peakCandidate);
   }
 
   const normalizedHomeKey = normalizeIdentity(homeKey) || "all";

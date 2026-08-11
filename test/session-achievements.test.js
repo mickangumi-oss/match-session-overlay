@@ -34,6 +34,20 @@ test("session peak retains the highest official profile rating until reset", () 
   assert.equal(reset.rankDelta, 0);
 });
 
+test("restored session peak never falls below the retained rating baseline", () => {
+  const restored = update(createSessionAchievementState(), {
+    currentRating: 1422,
+    baselineRating: 1455,
+  });
+  assert.equal(restored.sessionPeakRating, 1455);
+
+  const laterDrop = update(restored.state, {
+    currentRating: 1400,
+    baselineRating: 1455,
+  });
+  assert.equal(laterDrop.sessionPeakRating, 1455);
+});
+
 test("ranking delta follows lower-is-better rank movement", () => {
   const first = update(createSessionAchievementState());
   assert.equal(first.rankDelta, 0);
