@@ -61,11 +61,14 @@ const {
   DEFAULT_RANKING_HOME,
   buildCharacterSlugCatalog,
   buildRankingHomeCatalog,
+  explicitOtherPlayerRankingAllowed,
   normalizeMasterRanking,
   rankingCharacterSlug,
   rankingCacheKey,
   rankingHomeLabel,
   rankingRequestQuery,
+  rankingRetryScopeMatches,
+  resolveRankingFetchResult,
   sanitizeRankingHomeKey,
   shouldRefreshRanking,
 } = require("./ranking-model");
@@ -391,6 +394,7 @@ const rankingCache = new Map();
 const rankingCatalogCache = new Map();
 const rankingCharacterSlugCache = new Map();
 const rankingInFlight = new Map();
+const rankingRetryTimers = new Map();
 let rankingState = {
   status: "idle",
   rank: null,
@@ -1275,6 +1279,7 @@ function publicRankingState(sourceState = trackerState) {
   const playerProfileId = String(player?.profileId ?? player?.userCode ?? "");
   const authenticatedId = String(authenticatedProfileId ?? "");
   const samePlayer =
+    Boolean(authenticatedId) &&
     playerProfileId === authenticatedId &&
     String(rankingState.profileId ?? "") === authenticatedId;
   const characterId = Number(sourceState?.characterId ?? player?.characterId) || null;
@@ -1288,8 +1293,11 @@ function publicRankingState(sourceState = trackerState) {
   // profile. HOME-specific ranking cannot be inferred for another account.
   const profileRank = Number(player?.mrRank);
   const otherProfileRanking =
-    Boolean(playerProfileId) &&
-    playerProfileId !== authenticatedId &&
+    explicitOtherPlayerRankingAllowed({
+      playerProfileId,
+      authenticatedProfileId: authenticatedId,
+      historyProfileId: historyViewPlayer?.profileId ?? historyViewPlayer?.userCode,
+    }) &&
     Number(player?.mr) > 0 &&
     Number.isFinite(profileRank) &&
     profileRank > 0;
@@ -1907,6 +1915,7 @@ function updateDisplaySettings(
     buildId = null;
     buildIdLocale = null;
     buildIdInFlight = null;
+    clearAllRankingRetryTimers();
     rankingState = {
       ...rankingState,
       status: "idle",
@@ -3006,6 +3015,7 @@ async function clearPrivateDataWithConfirmation() {
   rankingCatalogCache.clear();
   rankingCharacterSlugCache.clear();
   rankingInFlight.clear();
+  clearAllRankingRetryTimers();
   sessionAchievementState = createSessionAchievementState();
   historySessionAchievementState = createSessionAchievementState();
   socialRefreshInFlight.clear();
@@ -3260,6 +3270,55 @@ async function ensureRankingMetadata() {
   return request;
 }
 
+function clearRankingRetryTimer(cacheKey) {
+  const timer = rankingRetryTimers.get(cacheKey);
+  if (timer) clearTimeout(timer);
+  rankingRetryTimers.delete(cacheKey);
+}
+
+function clearAllRankingRetryTimers() {
+  for (const timer of rankingRetryTimers.values()) clearTimeout(timer);
+  rankingRetryTimers.clear();
+}
+
+function scheduleRankingPropagationRetry({
+  cacheKey,
+  retryDelayMs,
+  retryAttempt,
+  player,
+  characterId,
+  profileId,
+  locale,
+  homeKey,
+}) {
+  clearRankingRetryTimer(cacheKey);
+  const timer = setTimeout(() => {
+    rankingRetryTimers.delete(cacheKey);
+    const currentPlayer = trackerState.player ?? authenticatedPlayer;
+    const currentProfileId = String(
+      currentPlayer?.profileId ?? currentPlayer?.userCode ?? "",
+    ).trim();
+    if (!rankingRetryScopeMatches(
+      { profileId, characterId, locale, homeKey },
+      {
+        authenticatedProfileId,
+        playerProfileId: currentProfileId,
+        characterId: currentPlayer?.characterId,
+        locale: serviceLocale(),
+        homeKey: displaySettings.rankingHome,
+      },
+    )) {
+      return;
+    }
+    void refreshMasterRanking({
+      player,
+      characterId,
+      retryAttempt: retryAttempt + 1,
+    }).catch(() => {});
+  }, retryDelayMs);
+  rankingRetryTimers.set(cacheKey, timer);
+}
+
 function setRankingUnavailable(player, characterId, status = "idle") {
   rankingState = {
     status,
@@ -3279,6 +3338,7 @@ function setRankingUnavailable(player, characterId, status = "idle") {
 async function refreshMasterRanking({
   player = trackerState.player ?? authenticatedPlayer,
   characterId = trackerState.characterId ?? player?.characterId,
+  retryAttempt = 0,
 } = {}) {
   const profileId = String(player?.profileId ?? player?.userCode ?? "").trim();
   const expectedCharacterId = Number(characterId) || null;
@@ -3296,6 +3356,7 @@ async function refreshMasterRanking({
     homeKey,
     act: 1,
   });
+  if (retryAttempt === 0) clearRankingRetryTimer(cacheKey);
   if (rankingInFlight.has(cacheKey)) return rankingInFlight.get(cacheKey);
 
   const previous = rankingCache.get(cacheKey) ?? null;
@@ -3334,19 +3395,37 @@ async function refreshMasterRanking({
         return publicRankingState();
       }
       const now = Date.now();
-      const next = normalized
-        ? { ...normalized, updatedAt: now }
-        : { rank: null, rating: null, characterId: expectedCharacterId, updatedAt: now };
-      rankingCache.set(cacheKey, next);
+      const outcome = resolveRankingFetchResult({
+        normalized,
+        previous,
+        retryAttempt,
+        now,
+      });
+      if (outcome.cacheValue) rankingCache.set(cacheKey, outcome.cacheValue);
+      if (outcome.retryDelayMs != null) {
+        scheduleRankingPropagationRetry({
+          cacheKey,
+          retryDelayMs: outcome.retryDelayMs,
+          retryAttempt,
+          player,
+          characterId: expectedCharacterId,
+          profileId,
+          locale,
+          homeKey,
+        });
+      } else {
+        clearRankingRetryTimer(cacheKey);
+      }
+      const visible = outcome.cacheValue;
       if (
         locale === serviceLocale() &&
         homeKey === displaySettings.rankingHome &&
         String(authenticatedProfileId ?? "") === profileId
       ) {
         rankingState = {
-          status: "ready",
-          rank: next.rank,
-          rating: next.rating,
+          status: outcome.status,
+          rank: visible?.rank ?? null,
+          rating: visible?.rating ?? null,
           profileId,
           locale,
           characterId: expectedCharacterId,
@@ -3405,6 +3484,7 @@ function sendSocialState() {
 }
 
 function invalidateAuthenticationState() {
+  clearAllRankingRetryTimers();
   resetFriendNotificationBaseline(authenticatedProfileId);
   authenticatedProfileId = null;
   authenticatedPlayer = null;
@@ -3870,6 +3950,7 @@ async function checkAuthentication() {
     }
     if (!trackerState.active) {
       trackerState.ratingType = authenticatedRatingType;
+      trackerState.status = "停止中";
       trackerState.updatedAt = Date.now();
       sendTrackerState();
     }
@@ -4514,6 +4595,7 @@ function stopPolling() {
 
 function autoStopTracking(reason, status) {
   stopPolling();
+  clearAllRankingRetryTimers();
   trackingSessionId += 1;
   trackerState.active = false;
   trackerState.stopReason = reason;
@@ -4526,6 +4608,7 @@ function autoStopTracking(reason, status) {
 
 function stopTracking() {
   stopPolling();
+  clearAllRankingRetryTimers();
   trackingSessionId += 1;
   trackerState = createEmptyTrackerState();
   sessionAchievementState = createSessionAchievementState();
@@ -4924,6 +5007,7 @@ app.on("before-quit", () => {
   stopHistoryViewPolling();
   stopSocialRefresh();
   stopSocialIdleSuspendTimer();
+  clearAllRankingRetryTimers();
   dismissFriendNotification({ destroy: true });
   dismissFriendNotificationPreview({ destroy: true });
   clearInterval(gameMonitorTimer);

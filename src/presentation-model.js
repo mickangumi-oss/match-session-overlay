@@ -1,6 +1,7 @@
 "use strict";
 
 function finiteNumber(value) {
+  if (value == null || (typeof value === "string" && !value.trim())) return null;
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
 }

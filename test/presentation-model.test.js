@@ -63,3 +63,24 @@ test("changing match type builds a fresh mode-specific presentation", () => {
     { wins: 2, losses: 6, delta: null },
   );
 });
+
+test("null MR does not replace a valid LP value with zero", () => {
+  const presentation = buildPresentationState({
+    player: { mr: null, lp: 18_000 },
+    achievements: { rankDelta: null },
+  });
+  assert.equal(presentation.currentRating, 18_000);
+  assert.equal(presentation.ratingType, "LP");
+  assert.equal(presentation.mrRankDelta, null);
+});
+
+test("blank numeric values remain unavailable instead of becoming zero", () => {
+  const presentation = buildPresentationState({
+    player: { mr: "", lp: "  " },
+    sourceState: { currentRating: "" },
+    achievements: { sessionPeakRating: " ", rankDelta: "" },
+  });
+  assert.equal(presentation.currentRating, null);
+  assert.equal(presentation.sessionPeakRating, null);
+  assert.equal(presentation.mrRankDelta, null);
+});

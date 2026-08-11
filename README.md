@@ -11,13 +11,13 @@
 - 公式サイトへのログインと戦績取得に必要なインターネット接続
 - OBSで表示する場合のみ、OBS Studio（任意）
 
-公開版: v1.3.1
+公開版: v1.3.2
 
 ## ダウンロード
 
-[v1.3.1をダウンロード（GitHub Releases）](https://github.com/mickangumi-oss/match-session-overlay/releases/download/v1.3.1/Match-Session-Overlay-1.3.1-Setup.exe)
+[v1.3.2をダウンロード（GitHub Releases）](https://github.com/mickangumi-oss/match-session-overlay/releases/download/v1.3.2/Match-Session-Overlay-1.3.2-Setup.exe)
 
-開いたページの「Assets」から、`Match-Session-Overlay-1.3.1-Setup.exe`をダウンロードして実行してください。最新版以外のファイルや、配布元を確認できないファイルは使用しないでください。
+開いたページの「Assets」から、`Match-Session-Overlay-1.3.2-Setup.exe`をダウンロードして実行してください。最新版以外のファイルや、配布元を確認できないファイルは使用しないでください。
 
 詳しい操作手順は[`docs/usage.md`](docs/usage.md)、表示レイアウトは[`docs/window-layout.md`](docs/window-layout.md)、対戦履歴は[`docs/match-history.md`](docs/match-history.md)、フォントは[`docs/font-settings.md`](docs/font-settings.md)をご覧ください。
 
@@ -25,7 +25,7 @@
 
 正式な配布インストーラーは、公開前にMicrosoft DefenderおよびVirusTotalでセキュリティチェックを実施します。検査結果は公開時点のものであり、完全な安全性を保証するものではありません。インストーラーは必ずこのリポジトリの公式GitHub Releaseから取得し、各リリースノートに記載されたSHA-256と一致することを確認してください。
 
-`v1.3.1`はMicrosoft Defenderで検出なし、VirusTotalで`0 / 68`（検出なし）を確認しました。SHA-256は`4E01D02FA5DFD306A9BD1B9DD4B9BE498C759D3576E9B2A9EAA5272F62D99757`です。詳しくは[`v1.3.1リリースノート`](docs/release-notes/v1.3.1.md)をご覧ください。
+`v1.3.2`の検査結果とSHA-256は、最終インストーラーの確認後に掲載します。詳しくは[`v1.3.2リリースノート`](docs/release-notes/v1.3.2.md)をご覧ください。
 
 ## 画面イメージ
 
@@ -61,13 +61,19 @@ MR RANKと現在のキャラクター、セッション戦績、FRIENDS／FOLLOW
 
 ![合成データを表示した対戦履歴画面](docs/images/match-history-example.png)
 
-## v1.3.1の変更内容
+## v1.3.2の変更内容
 
-### プレイヤー状態
+### MASTERランキング
 
-- フレンドリストの手動更新と、プレイヤー状態の取得動作を調整しました。
+- 現在のキャラクターと、選択したHOME（すべて／地域／国）に対応する順位を正確に表示するよう調整しました。
+- 公式サイト側の順位反映に時間がかかる場合でも、直前の正常な順位を維持しながら再確認します。
+- ログイン状態とランキング表示の同期を改善しました。
 
-詳しい変更内容は[`v1.3.1リリースノート`](docs/release-notes/v1.3.1.md)をご覧ください。
+### MR／LP表示
+
+- LPでプレイしているキャラクターの現在値を正しく判定するよう調整しました。
+
+詳しい変更内容は[`v1.3.2リリースノート`](docs/release-notes/v1.3.2.md)をご覧ください。
 
 過去の変更内容は[`docs/release-notes`](docs/release-notes)をご覧ください。
 
