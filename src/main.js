@@ -3310,6 +3310,7 @@ function scheduleRankingPropagationRetry({
       player,
       characterId,
       retryAttempt: retryAttempt + 1,
+      retryGeneration: rankingRetryController.generation(),
     }).catch(() => {});
   });
 }
@@ -3334,6 +3335,7 @@ async function refreshMasterRanking({
   player = trackerState.player ?? authenticatedPlayer,
   characterId = trackerState.characterId ?? player?.characterId,
   retryAttempt = 0,
+  retryGeneration = rankingRetryController.generation(),
 } = {}) {
   const profileId = String(player?.profileId ?? player?.userCode ?? "").trim();
   const expectedCharacterId = Number(characterId) || null;
@@ -3386,6 +3388,9 @@ async function refreshMasterRanking({
         profileId,
         characterId: expectedCharacterId,
       });
+      if (!rankingRetryController.isCurrent(retryGeneration)) {
+        return publicRankingState();
+      }
       if (String(authenticatedProfileId ?? "") !== profileId) {
         return publicRankingState();
       }
@@ -3432,6 +3437,9 @@ async function refreshMasterRanking({
       }
       return publicRankingState();
     } catch {
+      if (!rankingRetryController.isCurrent(retryGeneration)) {
+        return publicRankingState();
+      }
       const fallback = rankingCache.get(cacheKey) ?? null;
       if (
         locale === serviceLocale() &&

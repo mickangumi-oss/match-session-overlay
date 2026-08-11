@@ -5,6 +5,7 @@ function createRankingRetryController({
   clearTimer = clearTimeout,
 } = {}) {
   const timers = new Map();
+  let generation = 0;
 
   function clear(key) {
     const timer = timers.get(key);
@@ -15,6 +16,7 @@ function createRankingRetryController({
   function clearAll() {
     for (const timer of timers.values()) clearTimer(timer);
     timers.clear();
+    generation += 1;
   }
 
   function schedule(key, delayMs, callback) {
@@ -32,6 +34,8 @@ function createRankingRetryController({
     clearAll,
     has: (key) => timers.has(key),
     size: () => timers.size,
+    generation: () => generation,
+    isCurrent: (value) => value === generation,
   };
 }
 
