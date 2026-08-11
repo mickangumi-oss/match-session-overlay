@@ -1,6 +1,7 @@
 "use strict";
 
 const DEFAULT_RANKING_HOME = "all";
+const RANKING_PROPAGATION_RETRY_DELAYS_MS = Object.freeze([5_000, 15_000]);
 
 function finitePositive(value) {
   const number = Number(value);
@@ -189,17 +190,74 @@ function shouldRefreshRanking({
   );
 }
 
+function explicitOtherPlayerRankingAllowed({
+  playerProfileId,
+  authenticatedProfileId,
+  historyProfileId,
+} = {}) {
+  const playerId = String(playerProfileId ?? "").trim();
+  const authenticatedId = String(authenticatedProfileId ?? "").trim();
+  const selectedHistoryId = String(historyProfileId ?? "").trim();
+  return Boolean(
+    playerId &&
+      authenticatedId &&
+      selectedHistoryId &&
+      playerId === selectedHistoryId &&
+      playerId !== authenticatedId,
+  );
+}
+
+function resolveRankingFetchResult({
+  normalized,
+  previous = null,
+  retryAttempt = 0,
+  now = Date.now(),
+} = {}) {
+  if (normalized?.rank != null) {
+    return {
+      cacheValue: { ...normalized, updatedAt: now },
+      status: "ready",
+      retryDelayMs: null,
+    };
+  }
+  const attempt = Math.max(0, Math.trunc(Number(retryAttempt) || 0));
+  const retryDelayMs = RANKING_PROPAGATION_RETRY_DELAYS_MS[attempt] ?? null;
+  return {
+    cacheValue: previous?.rank != null ? previous : null,
+    status: retryDelayMs == null ? "error" : "loading",
+    retryDelayMs,
+  };
+}
+
+function rankingRetryScopeMatches(expected = {}, current = {}) {
+  return Boolean(
+    String(expected.profileId ?? "").trim() &&
+      String(current.authenticatedProfileId ?? "").trim() ===
+        String(expected.profileId ?? "").trim() &&
+      String(current.playerProfileId ?? "").trim() ===
+        String(expected.profileId ?? "").trim() &&
+      Number(current.characterId) === Number(expected.characterId) &&
+      String(current.locale ?? "") === String(expected.locale ?? "") &&
+      sanitizeRankingHomeKey(current.homeKey) ===
+        sanitizeRankingHomeKey(expected.homeKey),
+  );
+}
+
 module.exports = {
   DEFAULT_RANKING_HOME,
+  RANKING_PROPAGATION_RETRY_DELAYS_MS,
   buildRankingHomeCatalog,
   buildCharacterSlugCatalog,
   characterSlugForId,
+  explicitOtherPlayerRankingAllowed,
   normalizeMasterRanking,
   rankingCharacterSlug,
   rankingCacheKey,
   rankingHomeLabel,
   rankingHomeSelection,
   rankingRequestQuery,
+  rankingRetryScopeMatches,
+  resolveRankingFetchResult,
   sanitizeRankingHomeKey,
   shouldRefreshRanking,
 };
