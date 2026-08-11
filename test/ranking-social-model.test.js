@@ -7,11 +7,14 @@ const path = require("node:path");
 const {
   DEFAULT_RANKING_HOME,
   buildRankingHomeCatalog,
+  explicitOtherPlayerRankingAllowed,
   normalizeMasterRanking,
   rankingCharacterSlug,
   rankingCacheKey,
   rankingHomeLabel,
   rankingRequestQuery,
+  rankingRetryScopeMatches,
+  resolveRankingFetchResult,
   shouldRefreshRanking,
 } = require("../src/ranking-model");
 const {
@@ -151,6 +154,107 @@ test("ranking result requires exact profile and character identity", () => {
     profileId: "synthetic-profile-a",
     characterId: 77,
   }), null);
+});
+
+test("profile ranking fallback requires an authenticated account and explicit other-player history", () => {
+  const valid = {
+    playerProfileId: "synthetic-history-player",
+    authenticatedProfileId: "synthetic-self-player",
+    historyProfileId: "synthetic-history-player",
+  };
+  assert.equal(explicitOtherPlayerRankingAllowed(valid), true);
+  assert.equal(explicitOtherPlayerRankingAllowed({
+    ...valid,
+    authenticatedProfileId: "",
+  }), false);
+  assert.equal(explicitOtherPlayerRankingAllowed({
+    ...valid,
+    historyProfileId: "",
+  }), false);
+  assert.equal(explicitOtherPlayerRankingAllowed({
+    ...valid,
+    playerProfileId: "synthetic-self-player",
+  }), false);
+});
+
+test("temporarily missing official ranking preserves only the same-scope last known value", () => {
+  const previous = {
+    rank: 12_345,
+    rating: 1_500,
+    characterId: 77,
+    updatedAt: 100,
+  };
+  const first = resolveRankingFetchResult({
+    normalized: null,
+    previous,
+    retryAttempt: 0,
+    now: 200,
+  });
+  assert.equal(first.cacheValue, previous);
+  assert.equal(first.status, "loading");
+  assert.equal(first.retryDelayMs, 5_000);
+
+  const second = resolveRankingFetchResult({
+    normalized: null,
+    previous,
+    retryAttempt: 1,
+    now: 300,
+  });
+  assert.equal(second.cacheValue, previous);
+  assert.equal(second.retryDelayMs, 15_000);
+
+  const exhausted = resolveRankingFetchResult({
+    normalized: null,
+    previous: null,
+    retryAttempt: 2,
+    now: 400,
+  });
+  assert.equal(exhausted.cacheValue, null);
+  assert.equal(exhausted.status, "error");
+  assert.equal(exhausted.retryDelayMs, null);
+
+  const recovered = resolveRankingFetchResult({
+    normalized: { rank: 11_111, rating: 1_510, characterId: 77 },
+    previous,
+    retryAttempt: 1,
+    now: 500,
+  });
+  assert.deepEqual(recovered, {
+    cacheValue: {
+      rank: 11_111,
+      rating: 1_510,
+      characterId: 77,
+      updatedAt: 500,
+    },
+    status: "ready",
+    retryDelayMs: null,
+  });
+});
+
+test("ranking retry scope rejects every stale identity or filter transition", () => {
+  const expected = {
+    profileId: "synthetic-self",
+    characterId: 77,
+    locale: "ja-jp",
+    homeKey: "country:41",
+  };
+  const current = {
+    authenticatedProfileId: "synthetic-self",
+    playerProfileId: "synthetic-self",
+    characterId: 77,
+    locale: "ja-jp",
+    homeKey: "country:41",
+  };
+  assert.equal(rankingRetryScopeMatches(expected, current), true);
+  for (const changed of [
+    { authenticatedProfileId: "" },
+    { playerProfileId: "synthetic-other" },
+    { characterId: 78 },
+    { locale: "en" },
+    { homeKey: "region:2" },
+  ]) {
+    assert.equal(rankingRetryScopeMatches(expected, { ...current, ...changed }), false);
+  }
 });
 
 test("ranking uses the official current-player slug for the exact character id", () => {

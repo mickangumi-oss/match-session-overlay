@@ -78,8 +78,14 @@ test("selecting another history player refreshes that profile once for its MR ra
     selectSource,
     /refreshProfilePlayer\(nextHistoryViewPlayer, \{\s*force: true,?\s*\}\)/,
   );
-  assert.match(rankingSource, /playerProfileId !== authenticatedId/);
+  assert.match(rankingSource, /explicitOtherPlayerRankingAllowed\(\{/);
+  assert.match(rankingSource, /historyProfileId: historyViewPlayer\?\.profileId/);
   assert.match(rankingSource, /Number\(player\?\.mr\) > 0/);
   assert.match(rankingSource, /profileRank > 0/);
   assert.match(rankingSource, /homeKey: otherProfileRanking \? profileHome\.value/);
+});
+
+test("stopping a session cancels delayed ranking refreshes", () => {
+  assert.match(functionSource(mainSource, "autoStopTracking"), /clearAllRankingRetryTimers\(\)/);
+  assert.match(functionSource(mainSource, "stopTracking"), /clearAllRankingRetryTimers\(\)/);
 });
