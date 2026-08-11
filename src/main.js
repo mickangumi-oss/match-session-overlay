@@ -53,6 +53,7 @@ const {
   visibleMetricCount,
 } = require("./display-settings");
 const { buildPresentationState } = require("./presentation-model");
+const { createRankingRetryController } = require("./ranking-retry-controller");
 const {
   createSessionAchievementState,
   updateSessionAchievements,
@@ -394,7 +395,7 @@ const rankingCache = new Map();
 const rankingCatalogCache = new Map();
 const rankingCharacterSlugCache = new Map();
 const rankingInFlight = new Map();
-const rankingRetryTimers = new Map();
+const rankingRetryController = createRankingRetryController();
 let rankingState = {
   status: "idle",
   rank: null,
@@ -3271,14 +3272,11 @@ async function ensureRankingMetadata() {
 }
 
 function clearRankingRetryTimer(cacheKey) {
-  const timer = rankingRetryTimers.get(cacheKey);
-  if (timer) clearTimeout(timer);
-  rankingRetryTimers.delete(cacheKey);
+  rankingRetryController.clear(cacheKey);
 }
 
 function clearAllRankingRetryTimers() {
-  for (const timer of rankingRetryTimers.values()) clearTimeout(timer);
-  rankingRetryTimers.clear();
+  rankingRetryController.clearAll();
 }
 
 function scheduleRankingPropagationRetry({
@@ -3291,9 +3289,7 @@ function scheduleRankingPropagationRetry({
   locale,
   homeKey,
 }) {
-  clearRankingRetryTimer(cacheKey);
-  const timer = setTimeout(() => {
-    rankingRetryTimers.delete(cacheKey);
+  rankingRetryController.schedule(cacheKey, retryDelayMs, () => {
     const currentPlayer = trackerState.player ?? authenticatedPlayer;
     const currentProfileId = String(
       currentPlayer?.profileId ?? currentPlayer?.userCode ?? "",
@@ -3315,8 +3311,7 @@ function scheduleRankingPropagationRetry({
       characterId,
       retryAttempt: retryAttempt + 1,
     }).catch(() => {});
-  }, retryDelayMs);
-  rankingRetryTimers.set(cacheKey, timer);
+  });
 }
 
 function setRankingUnavailable(player, characterId, status = "idle") {
