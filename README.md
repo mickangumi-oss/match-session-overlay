@@ -25,7 +25,7 @@
 
 正式な配布インストーラーは、公開前にMicrosoft DefenderおよびVirusTotalでセキュリティチェックを実施します。検査結果は公開時点のものであり、完全な安全性を保証するものではありません。インストーラーは必ずこのリポジトリの公式GitHub Releaseから取得し、各リリースノートに記載されたSHA-256と一致することを確認してください。
 
-`v1.3.1`はMicrosoft Defenderで検出なし、VirusTotalで`0 / 68`（検出なし）を確認しました。SHA-256は`40B584595190FD1DC1E7A6109B64EF3B23A66EB228508114D53B2702B03744F3`です。詳しくは[`v1.3.1リリースノート`](docs/release-notes/v1.3.1.md)をご覧ください。
+`v1.3.1`はMicrosoft Defenderで検出なし、VirusTotalで`0 / 68`（検出なし）を確認しました。SHA-256は`4E01D02FA5DFD306A9BD1B9DD4B9BE498C759D3576E9B2A9EAA5272F62D99757`です。詳しくは[`v1.3.1リリースノート`](docs/release-notes/v1.3.1.md)をご覧ください。
 
 ## 画面イメージ
 
