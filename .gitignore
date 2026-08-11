@@ -1,5 +1,7 @@
 node_modules/
 dist/
+release/
+test-build/
 dist-qa-next/
 dist-qa-*/
 out/
