@@ -40,6 +40,8 @@ let socialState = {
   following: { status: "idle", page: 1, totalPages: 1, players: [] },
 };
 let activeSocialKind = "friends";
+let socialRefreshCooldownTimer = null;
+let lastSocialActivityReportAt = 0;
 let notificationSoundPreviewInFlight = false;
 let friendNotificationSampleInFlight = false;
 
@@ -133,6 +135,7 @@ const elements = Object.fromEntries(
     "socialFriendsTab",
     "socialFollowingTab",
     "socialRefreshButton",
+    "socialMonitoringStatus",
     "socialList",
     "socialEmpty",
     "socialError",
@@ -1361,6 +1364,15 @@ function renderSocialState(state = socialState) {
   const tabState = socialState[activeSocialKind] ?? {
     status: "idle", page: 1, totalPages: 1, players: [],
   };
+  const monitoring = socialState.monitoring ?? {};
+  const suspended = monitoring.suspended === true;
+  elements.socialMonitoringStatus?.classList.toggle("hidden", !suspended);
+  if (elements.socialMonitoringStatus) {
+    elements.socialMonitoringStatus.title = t(
+      "socialMonitoringSuspendedNote",
+      "アプリ操作またはゲーム起動時に再開します",
+    );
+  }
   for (const button of [elements.socialFriendsTab, elements.socialFollowingTab]) {
     const active = button?.dataset.socialKind === activeSocialKind;
     button?.classList.toggle("active", active);
@@ -1404,7 +1416,20 @@ function renderSocialState(state = socialState) {
   const hasPlayers = (tabState.players ?? []).length > 0;
   elements.socialEmpty.classList.toggle("hidden", hasPlayers || tabState.status === "loading");
   elements.socialError.classList.toggle("hidden", tabState.status !== "error");
-  elements.socialRefreshButton.disabled = tabState.status === "loading";
+  clearTimeout(socialRefreshCooldownTimer);
+  socialRefreshCooldownTimer = null;
+  const refreshAvailableAt = Number(
+    monitoring.refreshAvailableAt?.[activeSocialKind],
+  ) || 0;
+  const cooldownRemaining = Math.max(0, refreshAvailableAt - Date.now());
+  elements.socialRefreshButton.disabled =
+    tabState.status === "loading" || cooldownRemaining > 0;
+  if (cooldownRemaining > 0) {
+    socialRefreshCooldownTimer = setTimeout(
+      () => renderSocialState(socialState),
+      cooldownRemaining + 50,
+    );
+  }
   const page = Math.max(1, Number(tabState.page) || 1);
   const totalPages = Math.max(page, Number(tabState.totalPages) || 1);
   elements.socialPageInfo.textContent = `${page} / ${totalPages}`;
@@ -1761,7 +1786,11 @@ function renderUpdateMessage(state) {
     .replace("{version}", String(state.availableVersion ?? ""));
 }
 
+let lastUpdateState = {};
+
 function renderUpdate(state) {
+  lastUpdateState = { ...lastUpdateState, ...state };
+  state = lastUpdateState;
   const currentVersion = String(state.currentVersion ?? "").trim().replace(/^v/i, "");
   if (elements.currentAppVersion) {
     elements.currentAppVersion.textContent = currentVersion ? `v${currentVersion}` : "—";
@@ -2105,6 +2134,17 @@ elements.socialRefreshButton?.addEventListener("click", async () => {
     showNotice(error.message, "error");
   }
 });
+
+for (const eventName of ["pointerdown", "keydown"]) {
+  window.addEventListener(eventName, () => {
+    const now = Date.now();
+    if (now - lastSocialActivityReportAt < 60_000) return;
+    lastSocialActivityReportAt = now;
+    void unwrap(api.reportSocialActivity?.())
+      .then((state) => state && renderSocialState(state))
+      .catch(() => {});
+  }, { capture: true });
+}
 
 elements.socialPreviousButton?.addEventListener("click", async () => {
   const page = Number(socialState[activeSocialKind]?.page) || 1;
@@ -2582,7 +2622,6 @@ elements.clearDataButton.addEventListener("click", async () => {
 elements.checkUpdateButton.addEventListener("click", async () => {
   renderUpdate({
     status: "checking",
-    required: false,
     progress: 0,
     messageKey: "updateChecking",
     message: t("updateChecking", "GitHub Releasesの更新を確認しています…"),

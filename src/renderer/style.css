@@ -2144,6 +2144,19 @@ footer {
   margin-top: 5px;
 }
 
+.social-heading-actions {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.social-monitoring-status {
+  max-width: 120px;
+  color: var(--lime);
+  font: 800 8px/1.25 "Cascadia Mono", monospace;
+  text-align: right;
+}
+
 .social-tabs button {
   padding: 4px 8px;
   border: 1px solid var(--line);

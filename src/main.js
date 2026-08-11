@@ -14,6 +14,7 @@ const {
   ipcMain,
   Menu,
   nativeImage,
+  powerMonitor,
   screen,
   session,
   Tray,
@@ -84,6 +85,14 @@ const {
 } = require("./friend-online-notifications");
 const { fetchCompleteFriendSnapshot } = require("./friend-snapshot");
 const {
+  SOCIAL_IDLE_SUSPEND_MS,
+  SOCIAL_MANUAL_COOLDOWN_MS,
+  SOCIAL_REFRESH_JITTER_MAX_MS,
+  manualSocialRefreshAllowed,
+  shouldSuspendSocialRefresh,
+  socialRefreshDelayMs,
+} = require("./social-refresh-policy");
+const {
   NO_NOTIFICATION_SOUND,
   listWindowsNotificationSounds,
   resolveWindowsNotificationSound,
@@ -91,6 +100,10 @@ const {
   sanitizeWindowsNotificationSound,
 } = require("./windows-notification-sounds");
 const { createUpdater } = require("./updater");
+const {
+  assertUpdateAllowed,
+  resolveUpdateRequirement,
+} = require("./update-policy");
 const {
   OWN_MATCH_HISTORY_LIMIT,
   matchHistoryRetentionLimit,
@@ -329,6 +342,7 @@ let serviceRetryBlockedUntil = 0;
 let privateDataGeneration = 0;
 let privateDataClearing = false;
 const serviceAbortControllers = new Set();
+const socialServiceAbortControllers = new Set();
 let displaySettingsWriteTimer;
 let gameMonitorTimer;
 let startupUpdateTimer;
@@ -389,6 +403,13 @@ let rankingState = {
   updatedAt: null,
 };
 let socialRefreshTimer = null;
+let socialIdleSuspendTimer = null;
+let socialLastActivityAt = Date.now();
+let socialSuspended = false;
+let socialSuspendReason = null;
+let socialMonitoringGeneration = 0;
+let socialRefreshConsecutiveFailures = 0;
+const socialManualRefreshAvailableAt = { friends: 0, following: 0 };
 const socialRefreshInFlight = new Map();
 let friendNotificationState = createFriendOnlineNotificationState();
 let friendNotificationSnapshotVersion = 0;
@@ -2137,6 +2158,7 @@ async function checkConfiguredGame() {
   syncMainWindowGameFocusMode();
 
   if (running) {
+    recordSocialActivity();
     overlayEditMode = false;
     updateDisplaySettings(
       { mode: "overlay" },
@@ -2166,6 +2188,7 @@ async function checkConfiguredGame() {
   if (autoGameSessionActive) {
     stopAutoGameSession();
   }
+  scheduleSocialIdleSuspend();
 }
 
 function configureLaunchAtLogin() {
@@ -2247,6 +2270,7 @@ function trayText(key) {
   const labels = {
     show: japanese ? "管理画面を表示" : "Show management window",
     stats: japanese ? "戦績ウィンドウを表示／非表示" : "Show / hide stats window",
+    socialPaused: japanese ? "FRIENDS取得休止中" : "FRIENDS updates paused",
     exit: japanese ? "終了" : "Exit",
   };
   return labels[key] ?? key;
@@ -2255,6 +2279,9 @@ function trayText(key) {
 function refreshTrayMenu() {
   if (!tray) return;
   tray.setContextMenu(Menu.buildFromTemplate([
+    ...(socialSuspended
+      ? [{ label: trayText("socialPaused"), enabled: false }, { type: "separator" }]
+      : []),
     {
       label: trayText("show"),
       click: () => showMainWindowFromTray(),
@@ -2754,7 +2781,10 @@ function createMainWindow() {
   mainWindow.once("ready-to-show", () => {
     if (!backgroundMode) mainWindow.show();
   });
-  mainWindow.on("show", () => scheduleSocialRefresh({ immediate: true }));
+  mainWindow.on("show", () => {
+    recordSocialActivity({ schedule: false });
+    scheduleSocialRefresh({ immediate: true });
+  });
   mainWindow.on("hide", () => {
     if (displaySettings.friendOnlineNotificationsEnabled) {
       scheduleSocialRefresh();
@@ -3042,11 +3072,15 @@ function serviceRateLimitError(retryAfterHeader = null) {
   return error;
 }
 
-function fetchServiceWithRateLimit(url, options) {
+function fetchServiceWithRateLimit(url, options, { scope = null } = {}) {
   const generation = privateDataGeneration;
   const request = serviceRequestQueue
     .catch(() => {})
     .then(async () => {
+      assertUpdateAllowed(updateRequired);
+      if (scope === "social" && socialSuspended) {
+        throw new Error("SOCIAL_REFRESH_SUSPENDED");
+      }
       assertPrivateDataGeneration(generation);
       if (Date.now() < serviceRetryBlockedUntil) {
         throw serviceRateLimitError();
@@ -3056,6 +3090,10 @@ function fetchServiceWithRateLimit(url, options) {
         lastServiceRequestAt + SERVICE_REQUEST_MIN_GAP_MS - Date.now(),
       );
       if (remainingDelay > 0) await wait(remainingDelay);
+      assertUpdateAllowed(updateRequired);
+      if (scope === "social" && socialSuspended) {
+        throw new Error("SOCIAL_REFRESH_SUSPENDED");
+      }
       assertPrivateDataGeneration(generation);
       if (Date.now() < serviceRetryBlockedUntil) {
         throw serviceRateLimitError();
@@ -3063,6 +3101,7 @@ function fetchServiceWithRateLimit(url, options) {
       lastServiceRequestAt = Date.now();
       const controller = new AbortController();
       serviceAbortControllers.add(controller);
+      if (scope === "social") socialServiceAbortControllers.add(controller);
       const timeout = setTimeout(
         () => controller.abort(),
         SERVICE_FETCH_TIMEOUT_MS,
@@ -3072,11 +3111,13 @@ function fetchServiceWithRateLimit(url, options) {
           ...options,
           signal: controller.signal,
         });
+        assertUpdateAllowed(updateRequired);
         assertPrivateDataGeneration(generation);
         return response;
       } finally {
         clearTimeout(timeout);
         serviceAbortControllers.delete(controller);
+        socialServiceAbortControllers.delete(controller);
       }
     });
   serviceRequestQueue = request.then(
@@ -3086,7 +3127,7 @@ function fetchServiceWithRateLimit(url, options) {
   return request;
 }
 
-async function loadBuildId(force = false) {
+async function loadBuildId(force = false, requestScope = null) {
   const generation = privateDataGeneration;
   const requestedLocale = serviceLocale();
   if (buildId && buildIdLocale === requestedLocale && !force) return buildId;
@@ -3099,6 +3140,7 @@ async function loadBuildId(force = false) {
         redirect: "follow",
         headers: { Accept: "text/html" },
       },
+      { scope: requestScope },
     );
     if (!response.ok) {
       if (response.status === 429) {
@@ -3124,8 +3166,16 @@ async function loadBuildId(force = false) {
   }
 }
 
-async function fetchServiceJson(relativePath, query = {}, retry = true) {
-  const currentBuildId = await loadBuildId();
+async function fetchServiceJson(
+  relativePath,
+  query = {},
+  retry = true,
+  requestScope = null,
+) {
+  const currentBuildId = await loadBuildId(false, requestScope);
+  if (requestScope === "social" && socialSuspended) {
+    throw new Error("SOCIAL_REFRESH_SUSPENDED");
+  }
   const url = new URL(
     `/6/buckler/_next/data/${currentBuildId}/${serviceLocale()}/${relativePath}`,
     SERVICE_ORIGIN,
@@ -3136,11 +3186,15 @@ async function fetchServiceJson(relativePath, query = {}, retry = true) {
     }
   }
 
-  const response = await fetchServiceWithRateLimit(url.toString(), {
-    credentials: "include",
-    redirect: "follow",
-    headers: { Accept: "application/json" },
-  });
+  const response = await fetchServiceWithRateLimit(
+    url.toString(),
+    {
+      credentials: "include",
+      redirect: "follow",
+      headers: { Accept: "application/json" },
+    },
+    { scope: requestScope },
+  );
 
   if (response.status === 429) {
     throw serviceRateLimitError(response.headers.get("retry-after"));
@@ -3148,9 +3202,9 @@ async function fetchServiceJson(relativePath, query = {}, retry = true) {
 
   if (response.status === 404 && retry) {
     if (buildId === currentBuildId) {
-      await loadBuildId(true);
+      await loadBuildId(true, requestScope);
     }
-    return fetchServiceJson(relativePath, query, false);
+    return fetchServiceJson(relativePath, query, false, requestScope);
   }
   if (
     response.status === 401 ||
@@ -3333,6 +3387,12 @@ function publicSocialState() {
     friends: { ...socialState.friends, players: [...socialState.friends.players] },
     following: { ...socialState.following, players: [...socialState.following.players] },
     updatedAt: socialState.updatedAt,
+    monitoring: {
+      suspended: socialSuspended,
+      reason: socialSuspendReason,
+      lastActivityAt: socialLastActivityAt,
+      refreshAvailableAt: { ...socialManualRefreshAvailableAt },
+    },
   };
 }
 
@@ -3435,6 +3495,7 @@ async function refreshSocialKind(kind, page = socialState[kind]?.page ?? 1) {
   const requestedPage = Math.max(1, Math.trunc(Number(page) || 1));
   const location = socialPageLocation(kind, requestedPage);
   const profileIdAtRequest = String(authenticatedProfileId ?? "");
+  const monitoringGeneration = socialMonitoringGeneration;
   const generation = privateDataGeneration;
   const requestKey = `${profileIdAtRequest}:${kind}:${location.sourcePage}:${serviceLocale()}`;
   if (socialRefreshInFlight.has(requestKey)) return socialRefreshInFlight.get(requestKey);
@@ -3450,7 +3511,10 @@ async function refreshSocialKind(kind, page = socialState[kind]?.page ?? 1) {
         page: location.sourcePage,
         order_type: "last_play",
         order_order: 0,
-      });
+      }, true, "social");
+      if (monitoringGeneration !== socialMonitoringGeneration) {
+        throw new Error("SOCIAL_REFRESH_SUSPENDED");
+      }
       assertPrivateDataGeneration(generation);
       if (String(authenticatedProfileId ?? "") !== profileIdAtRequest) {
         return publicSocialState();
@@ -3462,9 +3526,12 @@ async function refreshSocialKind(kind, page = socialState[kind]?.page ?? 1) {
     } catch (error) {
       if (
         generation === privateDataGeneration &&
+        monitoringGeneration === socialMonitoringGeneration &&
         String(authenticatedProfileId ?? "") === profileIdAtRequest
       ) {
-        socialState[kind] = { ...previous, status: "error" };
+        socialState[kind] = error?.message === "SOCIAL_REFRESH_SUSPENDED"
+          ? previous
+          : { ...previous, status: "error" };
       }
       throw error;
     } finally {
@@ -3500,6 +3567,7 @@ async function refreshAllFriendsForNotifications(
   const profileIdAtRequest = String(authenticatedProfileId ?? "");
   if (!profileIdAtRequest) throw new Error("SERVICE_AUTH_REQUIRED");
   const generation = privateDataGeneration;
+  const monitoringGeneration = socialMonitoringGeneration;
   const accountEpoch = getFriendNotificationAccountEpoch(
     friendNotificationState,
     profileIdAtRequest,
@@ -3516,11 +3584,17 @@ async function refreshAllFriendsForNotifications(
       const snapshot = await fetchCompleteFriendSnapshot({
         seedPage,
         fetchPage: async (sourcePage) => {
+          if (monitoringGeneration !== socialMonitoringGeneration) {
+            throw new Error("SOCIAL_REFRESH_SUSPENDED");
+          }
           const data = await fetchServiceJson("fighterslist/friend.json", {
             page: sourcePage,
             order_type: "last_play",
             order_order: 0,
-          });
+          }, true, "social");
+          if (monitoringGeneration !== socialMonitoringGeneration) {
+            throw new Error("SOCIAL_REFRESH_SUSPENDED");
+          }
           assertPrivateDataGeneration(generation);
           if (String(authenticatedProfileId ?? "") !== profileIdAtRequest) {
             throw new Error("PRIVATE_DATA_CLEARED");
@@ -3532,6 +3606,9 @@ async function refreshAllFriendsForNotifications(
       });
       const { pages, friends } = snapshot;
       const gameRunning = await isGameRunningForFriendNotification();
+      if (monitoringGeneration !== socialMonitoringGeneration) {
+        throw new Error("SOCIAL_REFRESH_SUSPENDED");
+      }
       assertPrivateDataGeneration(generation);
       if (String(authenticatedProfileId ?? "") !== profileIdAtRequest) {
         return publicSocialState();
@@ -3558,9 +3635,12 @@ async function refreshAllFriendsForNotifications(
     } catch (error) {
       if (
         generation === privateDataGeneration &&
+        monitoringGeneration === socialMonitoringGeneration &&
         String(authenticatedProfileId ?? "") === profileIdAtRequest
       ) {
-        socialState.friends = { ...previous, status: "error" };
+        socialState.friends = error?.message === "SOCIAL_REFRESH_SUSPENDED"
+          ? previous
+          : { ...previous, status: "error" };
       }
       throw error;
     } finally {
@@ -3594,6 +3674,9 @@ async function refreshSocialLists() {
     tasks.push(refreshSocialKind("following", socialState.following.page));
   }
   const results = await Promise.allSettled(tasks);
+  if (results[0]?.status === "rejected") {
+    throw results[0].reason;
+  }
   if (results.every((result) => result.status === "rejected")) {
     throw results[0].reason;
   }
@@ -3605,21 +3688,125 @@ function stopSocialRefresh() {
   socialRefreshTimer = null;
 }
 
+function stopSocialIdleSuspendTimer() {
+  clearTimeout(socialIdleSuspendTimer);
+  socialIdleSuspendTimer = null;
+}
+
+function socialRefreshShouldRun() {
+  return (
+    !updateRequired &&
+    (
+      (mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()) ||
+      displaySettings.friendOnlineNotificationsEnabled
+    )
+  );
+}
+
+function suspendSocialRefresh(reason = "idle") {
+  stopSocialRefresh();
+  stopSocialIdleSuspendTimer();
+  if (socialSuspended && socialSuspendReason === reason) return;
+  socialSuspended = true;
+  socialSuspendReason = reason;
+  socialMonitoringGeneration += 1;
+  for (const controller of socialServiceAbortControllers) controller.abort();
+  socialServiceAbortControllers.clear();
+  socialRefreshInFlight.clear();
+  resetFriendNotificationBaseline();
+  refreshTrayMenu();
+  sendSocialState();
+}
+
+function scheduleSocialIdleSuspend() {
+  stopSocialIdleSuspendTimer();
+  if (socialSuspended || trackerState.active || gameWasRunning) return;
+  const remaining = Math.max(
+    0,
+    socialLastActivityAt + SOCIAL_IDLE_SUSPEND_MS - Date.now(),
+  );
+  socialIdleSuspendTimer = setTimeout(() => {
+    socialIdleSuspendTimer = null;
+    if (shouldSuspendSocialRefresh({
+      lastActivityAt: socialLastActivityAt,
+      trackingActive: trackerState.active,
+      gameRunning: gameWasRunning,
+    })) {
+      suspendSocialRefresh("idle");
+    } else {
+      scheduleSocialIdleSuspend();
+    }
+  }, remaining);
+}
+
+function recordSocialActivity({ schedule = true } = {}) {
+  const wasSuspended = socialSuspended;
+  socialLastActivityAt = Date.now();
+  socialSuspended = false;
+  socialSuspendReason = null;
+  if (wasSuspended) resetFriendNotificationBaseline();
+  refreshTrayMenu();
+  scheduleSocialIdleSuspend();
+  sendSocialState();
+  if (schedule && wasSuspended) scheduleSocialRefresh({ immediate: true });
+  return publicSocialState();
+}
+
+async function manualRefreshSocial(kind) {
+  if (!['friends', 'following'].includes(kind)) throw new Error("SOCIAL_KIND_INVALID");
+  const now = Date.now();
+  recordSocialActivity({ schedule: false });
+  if (!manualSocialRefreshAllowed(socialManualRefreshAvailableAt[kind], now)) {
+    return publicSocialState();
+  }
+  socialManualRefreshAvailableAt[kind] = now + SOCIAL_MANUAL_COOLDOWN_MS;
+  stopSocialRefresh();
+  sendSocialState();
+  try {
+    const result = await refreshSocialKind(kind, socialState[kind]?.page);
+    socialRefreshConsecutiveFailures = 0;
+    return result;
+  } catch (error) {
+    socialRefreshConsecutiveFailures += 1;
+    throw error;
+  } finally {
+    scheduleSocialRefresh();
+  }
+}
+
 function scheduleSocialRefresh({ immediate = false } = {}) {
   stopSocialRefresh();
-  const shouldRun = () =>
-    (mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()) ||
-    displaySettings.friendOnlineNotificationsEnabled;
-  if (!shouldRun()) return;
+  scheduleSocialIdleSuspend();
+  if (!socialRefreshShouldRun() || socialSuspended) return;
   const run = async () => {
     socialRefreshTimer = null;
-    if (!shouldRun()) return;
-    if (authenticatedProfileId) await refreshSocialLists().catch(() => {});
-    if (shouldRun()) {
+    if (!socialRefreshShouldRun() || socialSuspended) return;
+    if (shouldSuspendSocialRefresh({
+      lastActivityAt: socialLastActivityAt,
+      trackingActive: trackerState.active,
+      gameRunning: gameWasRunning,
+    })) {
+      suspendSocialRefresh("idle");
+      return;
+    }
+    if (authenticatedProfileId) {
+      try {
+        await refreshSocialLists();
+        socialRefreshConsecutiveFailures = 0;
+      } catch {
+        socialRefreshConsecutiveFailures += 1;
+      }
+    }
+    if (socialRefreshShouldRun() && !socialSuspended) {
       scheduleSocialRefresh();
     }
   };
-  const delay = immediate ? 0 : displaySettings.pollIntervalSeconds * 1000;
+  const delay = socialRefreshDelayMs({
+    immediate,
+    lastSuccessfulAt: socialState.updatedAt,
+    consecutiveFailures: socialRefreshConsecutiveFailures,
+    jitterMs: Math.floor(Math.random() * (SOCIAL_REFRESH_JITTER_MAX_MS + 1)),
+  });
   socialRefreshTimer = setTimeout(run, delay);
 }
 
@@ -4156,7 +4343,9 @@ async function startTracking(player) {
   if (startTrackingInFlight) return startTrackingInFlight;
   startTrackingInFlight = startTrackingInternal(player);
   try {
-    return await startTrackingInFlight;
+    const state = await startTrackingInFlight;
+    recordSocialActivity();
+    return state;
   } finally {
     startTrackingInFlight = null;
   }
@@ -4329,6 +4518,7 @@ function autoStopTracking(reason, status) {
   trackerState.status = status;
   trackerState.updatedAt = Date.now();
   sendTrackerState();
+  scheduleSocialIdleSuspend();
   return publicTrackerState();
 }
 
@@ -4338,6 +4528,7 @@ function stopTracking() {
   trackerState = createEmptyTrackerState();
   sessionAchievementState = createSessionAchievementState();
   sendTrackerState();
+  scheduleSocialIdleSuspend();
   return publicTrackerState();
 }
 
@@ -4398,7 +4589,7 @@ function friendlyError(error) {
       "ログイン中のプレイヤー情報を自動取得できませんでした",
     INVALID_GAME_EXECUTABLE: "有効なゲーム実行ファイルを選択してください",
     DISPLAY_ITEM_REQUIRED: "表示項目は最低1つ選択してください",
-    UPDATE_REQUIRED: "セキュリティ更新が必要なため、更新後に利用できます",
+    UPDATE_REQUIRED: "更新が必要なため、更新後に利用できます",
   };
   if (messages[code]) return messages[code];
   if (code.startsWith("SERVICE_HTTP_")) {
@@ -4408,13 +4599,13 @@ function friendlyError(error) {
 }
 
 function ensureUpdateAllowed() {
-  if (updateRequired) throw new Error("UPDATE_REQUIRED");
+  assertUpdateAllowed(updateRequired);
 }
 
 function resultHandler(handler, { allowDuringUpdate = false } = {}) {
   return async (_event, payload) => {
     try {
-      if (!allowDuringUpdate) ensureUpdateAllowed();
+      assertUpdateAllowed(updateRequired, allowDuringUpdate);
       return { ok: true, data: await handler(payload ?? {}) };
     } catch (error) {
       return { ok: false, error: friendlyError(error) };
@@ -4460,9 +4651,11 @@ function registerIpcHandlers() {
   );
   ipcMain.handle(
     "social:refresh",
-    resultHandler(({ kind }) =>
-      kind ? refreshSocialKind(kind, socialState[kind]?.page) : refreshSocialLists(),
-    ),
+    resultHandler(({ kind }) => manualRefreshSocial(kind)),
+  );
+  ipcMain.handle(
+    "social:activity",
+    resultHandler(() => recordSocialActivity()),
   );
   ipcMain.handle(
     "social:page",
@@ -4531,11 +4724,17 @@ function registerIpcHandlers() {
   );
   ipcMain.handle(
     "update:check",
-    resultHandler(async () => updater.check(), { allowDuringUpdate: true }),
+    resultHandler(async () => ({
+      ...await updater.check(),
+      required: updateRequired,
+    }), { allowDuringUpdate: true }),
   );
   ipcMain.handle(
     "update:state",
-    resultHandler(async () => updater.getState(), { allowDuringUpdate: true }),
+    resultHandler(async () => ({
+      ...updater.getState(),
+      required: updateRequired,
+    }), { allowDuringUpdate: true }),
   );
   ipcMain.handle(
     "update:install",
@@ -4643,12 +4842,19 @@ app.whenReady().then(() => {
   configureRemoteSession(sourceSession);
   updater = createUpdater({
     onState: (state) => {
-      const requiredNow = state.required === true;
-      const becameRequired = requiredNow && !updateRequired;
+      const { required: requiredNow, becameRequired } =
+        resolveUpdateRequirement(updateRequired, state);
       updateRequired = requiredNow;
       if (becameRequired) {
         stopTracking();
         stopHistoryViewPolling("update");
+        stopSocialRefresh();
+        for (const controller of serviceAbortControllers) controller.abort();
+        serviceAbortControllers.clear();
+        dismissFriendNotification({ destroy: false });
+        dismissFriendNotificationPreview({ destroy: false });
+        clearInterval(gameMonitorTimer);
+        gameMonitorTimer = null;
         statsWindowDrag = null;
         if (loginWindow && !loginWindow.isDestroyed()) {
           loginWindow.close();
@@ -4662,10 +4868,17 @@ app.whenReady().then(() => {
         }
       }
       if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send("update:state", state);
+        mainWindow.webContents.send("update:state", {
+          ...state,
+          required: updateRequired,
+        });
       }
     },
   });
+  powerMonitor.on("lock-screen", () => suspendSocialRefresh("system"));
+  powerMonitor.on("suspend", () => suspendSocialRefresh("system"));
+  powerMonitor.on("unlock-screen", () => recordSocialActivity());
+  powerMonitor.on("resume", () => recordSocialActivity());
   registerIpcHandlers();
   startOverlayServer();
   createTray();
@@ -4708,6 +4921,7 @@ app.on("before-quit", () => {
   stopPolling();
   stopHistoryViewPolling();
   stopSocialRefresh();
+  stopSocialIdleSuspendTimer();
   dismissFriendNotification({ destroy: true });
   dismissFriendNotificationPreview({ destroy: true });
   clearInterval(gameMonitorTimer);
