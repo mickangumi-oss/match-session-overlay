@@ -13,7 +13,6 @@ function update(previous, overrides = {}) {
     characterId: 26,
     ratingType: "MR",
     currentRating: 1500,
-    homeKey: "region:asia",
     currentRank: 416,
     ...overrides,
   });
@@ -55,14 +54,14 @@ test("ranking delta follows lower-is-better rank movement", () => {
   assert.equal(update(first.state, { currentRank: 536 }).rankDelta, -120);
 });
 
-test("player character rating type and HOME isolate incomparable values", () => {
+test("player, character, and rating type isolate incomparable values", () => {
   const first = update(createSessionAchievementState(), {
     currentRating: 10_000_000,
     ratingType: "LP",
-    currentRank: null,
+    currentRank: 8_539,
   });
   assert.equal(first.sessionPeakRating, 10_000_000);
-  assert.equal(first.rankDelta, null);
+  assert.equal(first.rankDelta, 0);
 
   const playerChanged = update(first.state, {
     profileId: "synthetic-profile-b",
@@ -72,14 +71,7 @@ test("player character rating type and HOME isolate incomparable values", () => 
   assert.equal(playerChanged.sessionPeakRating, 1400);
   assert.equal(playerChanged.rankDelta, 0);
 
-  const homeChanged = update(playerChanged.state, {
-    profileId: "synthetic-profile-b",
-    homeKey: "all",
-    currentRank: 1200,
-  });
-  assert.equal(homeChanged.rankDelta, 0);
-
-  const characterChanged = update(homeChanged.state, {
+  const characterChanged = update(playerChanged.state, {
     profileId: "synthetic-profile-b",
     characterId: 1,
     currentRating: 1300,
@@ -89,17 +81,14 @@ test("player character rating type and HOME isolate incomparable values", () => 
   assert.equal(characterChanged.rankDelta, 0);
 });
 
-test("a cached loading rank never becomes a new HOME baseline", () => {
-  const first = update(createSessionAchievementState());
-  const loading = update(first.state, {
-    homeKey: "all",
+test("a cached loading rank never becomes a new session baseline", () => {
+  const loading = update(createSessionAchievementState(), {
     currentRank: 999,
     rankingReady: false,
   });
   assert.equal(loading.initialRank, null);
   assert.equal(loading.rankDelta, null);
   const ready = update(loading.state, {
-    homeKey: "all",
     currentRank: 1200,
     rankingReady: true,
   });

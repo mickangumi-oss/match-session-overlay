@@ -5,13 +5,11 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const {
-  DEFAULT_RANKING_HOME,
-  buildRankingHomeCatalog,
   explicitOtherPlayerRankingAllowed,
+  normalizeLeagueRanking,
   normalizeMasterRanking,
   rankingCharacterSlug,
   rankingCacheKey,
-  rankingHomeLabel,
   rankingRequestQuery,
   rankingRetryScopeMatches,
   resolveRankingFetchResult,
@@ -28,24 +26,43 @@ const {
 } = require("../src/display-settings");
 const { buildPresentationState } = require("../src/presentation-model");
 
-function fixtureRankingPage({ rank = 321, profileId = "synthetic-profile-a", characterId = 77 } = {}) {
+function fixtureRankingPage({
+  rank = 999_999,
+  filteredOrder = 321,
+  profileId = "synthetic-profile-a",
+  characterId = 22,
+  characterSlug = "character-synthetic",
+} = {}) {
   return {
     pageProps: {
-      home_category_id: [
-        { value: 0, label: "All homes" },
-        { value: 1, label: "Synthetic region one" },
-        { value: 7, label: "Country group" },
-      ],
-      home_id: [
-        { value: 0, label: "All countries" },
-        { value: 41, label: "Synthetic country" },
-      ],
-      character_id: [{ value: characterId, url_name: "character-synthetic" }],
       master_rating_ranking: {
         my_ranking_info: {
+          order: filteredOrder,
           master_rating_ranking: rank,
           rating: 1701,
           character_id: characterId,
+          character_tool_name: characterSlug,
+          fighter_banner_info: { personal_info: { short_id: profileId } },
+        },
+      },
+    },
+  };
+}
+
+function fixtureLeagueRankingPage({
+  rank = 8_539,
+  profileId = "synthetic-profile-a",
+  characterId = 22,
+  characterSlug = "character-synthetic",
+} = {}) {
+  return {
+    pageProps: {
+      league_point_ranking: {
+        my_ranking_info: {
+          order: rank,
+          league_point: 188_063,
+          character_id: characterId,
+          character_tool_name: characterSlug,
           fighter_banner_info: { personal_info: { short_id: profileId } },
         },
       },
@@ -97,63 +114,68 @@ function fixtureSocialEntry({
   return entry;
 }
 
-test("HOME catalog and official ranking query preserve grouped selections", () => {
-  const catalog = buildRankingHomeCatalog(fixtureRankingPage());
-  assert.deepEqual(catalog, {
-    all: { value: "all", label: "All homes" },
-    regions: [{ value: "region:1", label: "Synthetic region one" }],
-    countries: [{ value: "country:41", label: "Synthetic country" }],
-  });
-  assert.equal(rankingHomeLabel(catalog, "country:41"), "Synthetic country");
-  assert.equal(rankingHomeLabel(catalog, "unknown"), "All homes");
-
+test("official ranking query always forces all homes and platforms", () => {
   assert.deepEqual(rankingRequestQuery({
     characterSlug: "character-synthetic",
-    homeKey: "region:1",
   }), {
     character_filter: 4,
     character_id: "character-synthetic",
     platform: 1,
-    home_filter: 2,
-    home_category_id: 1,
+    home_filter: 1,
+    home_category_id: 0,
     home_id: 0,
     page: 1,
     season_type: 1,
   });
   assert.deepEqual(rankingRequestQuery({
     characterSlug: "CHARACTER-SYNTHETIC",
-    homeKey: "country:41",
   }), {
     character_filter: 4,
     character_id: "character-synthetic",
     platform: 1,
-    home_filter: 3,
-    home_category_id: 7,
-    home_id: 41,
+    home_filter: 1,
+    home_category_id: 0,
+    home_id: 0,
     page: 1,
     season_type: 1,
   });
-  assert.equal(DEFAULT_RANKING_HOME, "all");
 });
 
-test("ranking result requires exact profile and character identity", () => {
+test("MASTER ranking uses the character-filtered order and exact profile and character slug", () => {
   const page = fixtureRankingPage();
   assert.deepEqual(normalizeMasterRanking(page, {
     profileId: "synthetic-profile-a",
-    characterId: 77,
-  }), { rank: 321, rating: 1701, characterId: 77 });
+    characterSlug: "character-synthetic",
+  }), {
+    rank: 321,
+    rating: 1701,
+    characterId: 22,
+    characterSlug: "character-synthetic",
+  });
   assert.equal(normalizeMasterRanking(page, {
     profileId: "synthetic-profile-other",
-    characterId: 77,
+    characterSlug: "character-synthetic",
   }), null);
   assert.equal(normalizeMasterRanking(page, {
     profileId: "synthetic-profile-a",
-    characterId: 78,
+    characterSlug: "other-character",
   }), null);
-  assert.equal(normalizeMasterRanking(fixtureRankingPage({ rank: 0 }), {
+  assert.equal(normalizeMasterRanking(fixtureRankingPage({ filteredOrder: 0 }), {
     profileId: "synthetic-profile-a",
-    characterId: 77,
+    characterSlug: "character-synthetic",
   }), null);
+});
+
+test("league ranking uses filtered order and league points", () => {
+  assert.deepEqual(normalizeLeagueRanking(fixtureLeagueRankingPage(), {
+    profileId: "synthetic-profile-a",
+    characterSlug: "character-synthetic",
+  }), {
+    rank: 8_539,
+    rating: 188_063,
+    characterId: 22,
+    characterSlug: "character-synthetic",
+  });
 });
 
 test("profile ranking fallback requires an authenticated account and explicit other-player history", () => {
@@ -231,19 +253,19 @@ test("temporarily missing official ranking preserves only the same-scope last kn
   });
 });
 
-test("ranking retry scope rejects every stale identity or filter transition", () => {
+test("ranking retry scope rejects stale identity, character, locale, or rank type", () => {
   const expected = {
     profileId: "synthetic-self",
     characterId: 77,
     locale: "ja-jp",
-    homeKey: "country:41",
+    ratingType: "MR",
   };
   const current = {
     authenticatedProfileId: "synthetic-self",
     playerProfileId: "synthetic-self",
     characterId: 77,
     locale: "ja-jp",
-    homeKey: "country:41",
+    ratingType: "MR",
   };
   assert.equal(rankingRetryScopeMatches(expected, current), true);
   for (const changed of [
@@ -251,7 +273,7 @@ test("ranking retry scope rejects every stale identity or filter transition", ()
     { playerProfileId: "synthetic-other" },
     { characterId: 78 },
     { locale: "en" },
-    { homeKey: "region:2" },
+    { ratingType: "LP" },
   ]) {
     assert.equal(rankingRetryScopeMatches(expected, { ...current, ...changed }), false);
   }
@@ -272,12 +294,13 @@ test("ranking uses the official current-player slug for the exact character id",
   );
 });
 
-test("ranking cache keys isolate locale, player, character, HOME, and act", () => {
+test("ranking cache keys isolate locale, player, character slug, rank type, and act", () => {
   const base = {
     locale: "en",
     profileId: "synthetic-profile-a",
     characterId: 77,
-    homeKey: "all",
+    characterSlug: "character-synthetic",
+    ratingType: "MR",
     act: 1,
   };
   const baseKey = rankingCacheKey(base);
@@ -285,46 +308,38 @@ test("ranking cache keys isolate locale, player, character, HOME, and act", () =
     { locale: "ja-jp" },
     { profileId: "synthetic-profile-b" },
     { characterId: 78 },
-    { homeKey: "region:1" },
+    { characterSlug: "other-character" },
+    { ratingType: "LP" },
     { act: 2 },
   ]) {
     assert.notEqual(rankingCacheKey({ ...base, ...changed }), baseKey);
   }
 });
 
-test("ranking refresh only follows allowed Master-MR transitions", () => {
-  const master = { isMaster: true, previousMr: 1600, currentMr: 1600 };
-  assert.equal(shouldRefreshRanking({ ...master, initial: true }), true);
-  assert.equal(shouldRefreshRanking({ ...master, homeChanged: true }), true);
-  assert.equal(shouldRefreshRanking({ ...master, characterChanged: true }), true);
-  assert.equal(shouldRefreshRanking({ ...master, newRankedMatchCount: 1 }), false);
+test("ranking refresh runs initially and after every ranked match", () => {
+  const ranked = { currentRating: 1600 };
+  assert.equal(shouldRefreshRanking({ ...ranked, initial: true }), true);
+  assert.equal(shouldRefreshRanking({ ...ranked, characterChanged: true }), true);
+  assert.equal(shouldRefreshRanking({ ...ranked, newRankedMatchCount: 1 }), true);
   assert.equal(shouldRefreshRanking({
-    ...master,
-    currentMr: 1601,
+    currentRating: 188_063,
     newRankedMatchCount: 2,
   }), true);
   assert.equal(shouldRefreshRanking({
-    isMaster: true,
-    previousMr: null,
-    currentMr: 1500,
-    newRankedMatchCount: 1,
-  }), true);
-  assert.equal(shouldRefreshRanking({
-    ...master,
-    currentMr: 1601,
+    ...ranked,
     newRankedMatchCount: 0,
   }), false);
   assert.equal(shouldRefreshRanking({
     initial: true,
-    isMaster: false,
-    previousMr: 1600,
-    currentMr: 1601,
+    currentRating: null,
   }), false);
 });
 
-test("non-Master ranking stays null for the UI dash representation", () => {
-  const presentation = buildPresentationState({ ranking: { rank: null, status: "ready" } });
-  assert.equal(presentation.mrRank, null);
+test("presentation exposes character ranks for MASTER and league bands", () => {
+  const master = buildPresentationState({ ranking: { rank: 321, status: "ready", ratingType: "MR" } });
+  const league = buildPresentationState({ ranking: { rank: 8_539, status: "ready", ratingType: "LP" } });
+  assert.equal(master.mrRank, 321);
+  assert.equal(league.mrRank, 8_539);
   const statsSource = fs.readFileSync(
     path.join(__dirname, "..", "src", "renderer", "stats.js"),
     "utf8",
@@ -590,7 +605,7 @@ test("PLAYER STATUS names route the synthetic profile code to history with immed
   assert.match(rendererSource, /selectHistoryTarget\(userCode,\s*\{\s*autoFetch:\s*true\s*\}\)/);
 });
 
-test("MR RANK is a shared output item and management has independent visibility", () => {
+test("current ranking is a shared output item and management has independent visibility", () => {
   assert.ok(DISPLAY_ITEM_KEYS.includes("mrRank"));
   assert.equal(defaultDisplayItems().mrRank, true);
   const indexHtml = fs.readFileSync(
@@ -604,7 +619,16 @@ test("MR RANK is a shared output item and management has independent visibility"
   assert.match(indexHtml, /data-display-item="mrRank"/);
   assert.match(statsHtml, /data-display-card="mrRank"/);
   assert.match(indexHtml, /id="currentMrRank"/);
+  assert.doesNotMatch(indexHtml, /id="rankingHomeInput"/);
   assert.doesNotMatch(indexHtml, /data-display-card="mrRank"/);
+});
+
+test("removed ranking metadata initialization is not referenced during startup", () => {
+  const mainSource = fs.readFileSync(
+    path.join(__dirname, "..", "src", "main.js"),
+    "utf8",
+  );
+  assert.doesNotMatch(mainSource, /ensureRankingMetadata/);
 });
 
 test("management DOM contains every moved setting and ranking/social control exactly once", () => {
@@ -615,7 +639,6 @@ test("management DOM contains every moved setting and ranking/social control exa
   for (const id of [
     "currentMrRank",
     "currentMrRankHome",
-    "rankingHomeInput",
     "socialFriendsTab",
     "socialFollowingTab",
     "socialRefreshButton",

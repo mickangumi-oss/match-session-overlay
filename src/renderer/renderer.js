@@ -91,7 +91,6 @@ const elements = Object.fromEntries(
     "optionsPanel",
     "optionsUpdateBadge",
     "maintenanceSettingsCard",
-    "rankingHomeInput",
     "fontScaleInput",
     "fontScaleValue",
     "graphLabelScaleInput",
@@ -1590,44 +1589,12 @@ function renderDisplayItemVisibility(settings) {
   return displayItems;
 }
 
-function renderRankingHomeOptions(settings) {
-  if (!elements.rankingHomeInput) return;
-  const catalog = settings.rankingHomeOptions ?? {};
-  const selected = String(settings.rankingHome ?? "all");
-  elements.rankingHomeInput.replaceChildren();
-  const all = document.createElement("option");
-  all.value = String(catalog.all?.value ?? "all");
-  all.textContent = String(catalog.all?.label ?? t("rankingHomeAll", "すべて"));
-  elements.rankingHomeInput.append(all);
-  for (const [key, labelKey] of [
-    ["regions", "rankingRegions"],
-    ["countries", "rankingCountries"],
-  ]) {
-    const options = Array.isArray(catalog[key]) ? catalog[key] : [];
-    if (!options.length) continue;
-    const group = document.createElement("optgroup");
-    group.label = t(labelKey, key);
-    for (const entry of options) {
-      const option = document.createElement("option");
-      option.value = String(entry.value);
-      option.textContent = String(entry.label);
-      group.append(option);
-    }
-    elements.rankingHomeInput.append(group);
-  }
-  elements.rankingHomeInput.value = selected;
-  if (elements.rankingHomeInput.value !== selected) {
-    elements.rankingHomeInput.value = "all";
-  }
-}
-
 function renderDisplaySettings(settings) {
   const previousGraphMatchCount = Number(displaySettings.graphMatchCount);
   displaySettings = settings;
   const displayItems = renderDisplayItemVisibility(settings);
   const windowOrientation = settings.windowOrientation ?? "horizontal";
   applyLocale(settings.locale || "ja-jp");
-  renderRankingHomeOptions(settings);
   elements.fontScaleInput.value = String(Math.round(settings.fontScale * 100));
   elements.fontScaleValue.textContent = `${elements.fontScaleInput.value}%`;
   elements.graphLabelScaleInput.value = String(
@@ -2106,19 +2073,6 @@ for (const input of document.querySelectorAll("[data-display-item]")) {
     }
   });
 }
-
-elements.rankingHomeInput?.addEventListener("change", async () => {
-  try {
-    renderDisplaySettings(
-      await unwrap(api.updateDisplaySettings({
-        rankingHome: elements.rankingHomeInput.value,
-      })),
-    );
-  } catch (error) {
-    renderDisplaySettings(displaySettings);
-    showNotice(error.message, "error");
-  }
-});
 
 for (const button of [elements.socialFriendsTab, elements.socialFollowingTab]) {
   button?.addEventListener("click", () => {

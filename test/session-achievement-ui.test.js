@@ -26,7 +26,7 @@ test("management header keeps identity and achievements independent from output 
   }
   assert.match(html, /<span>CURRENT<\/span><span>CHARACTER<\/span>/);
   assert.match(html, /<span>SESSION<\/span><span>PEAK<\/span>/);
-  assert.match(html, /<span>MR<\/span><span>RANK<\/span>/);
+  assert.match(html, /<span>CHARACTER<\/span><span>RANK<\/span>/);
   assert.match(html, /data-display-item="sessionPeak"/);
   assert.doesNotMatch(html, /data-display-item="currentCharacter"/);
 });
@@ -53,7 +53,7 @@ test("numeric fitting includes large LP and six-digit rank output without horizo
   assert.doesNotMatch(css, /transform:\s*scaleX\(/);
 });
 
-test("rank movement stays centered inside the MR RANK card", () => {
+test("rank movement stays centered inside the CHARACTER RANK card", () => {
   const css = read("src/renderer/stats.css");
   assert.match(
     css,
