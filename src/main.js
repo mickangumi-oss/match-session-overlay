@@ -53,6 +53,12 @@ const {
   visibleMetricCount,
 } = require("./display-settings");
 const { buildPresentationState } = require("./presentation-model");
+const { applyCurrentProfileRatings } = require("./history-current-rating");
+const {
+  buildTrackerSessionPayload,
+  hasRetainedTrackerSession,
+  restoreTrackerSession,
+} = require("./tracker-session-state");
 const { createRankingRetryController } = require("./ranking-retry-controller");
 const {
   createSessionAchievementState,
@@ -289,6 +295,7 @@ const localDataRoot =
 const userDataPath = path.join(localDataRoot, "user-data");
 const sessionDataPath = path.join(localDataRoot, "session-data");
 const displaySettingsPath = path.join(userDataPath, "display-settings.json");
+const trackerSessionPath = path.join(userDataPath, "tracker-session.json");
 const matchHistoryDirectory = path.join(userDataPath, "match-history");
 const matchHistoryPath = path.join(userDataPath, "match-history.json");
 const MATCH_HISTORY_LIMIT = OWN_MATCH_HISTORY_LIMIT;
@@ -367,8 +374,9 @@ let statsWindowBounds = {
   overlay: null,
 };
 
-let trackerState = createEmptyTrackerState();
-let sessionAchievementState = createSessionAchievementState();
+const restoredTrackerSession = loadPersistedTrackerSession();
+let trackerState = restoredTrackerSession.trackerState;
+let sessionAchievementState = restoredTrackerSession.achievementState;
 let historySessionAchievementState = createSessionAchievementState();
 const matchHistoryStores = new Map();
 const historyProfileLookupCache = new Map();
@@ -876,31 +884,42 @@ function mergeMatchHistory(replays, profileId) {
   return true;
 }
 
-function applyCurrentProfileLpToHistory(player, { replayIds = [] } = {}) {
+function applyCurrentProfileRatingsToHistory(player, { replayIds = [] } = {}) {
   const profileId = normalizeHistoryProfileId(player?.profileId ?? player?.userCode);
-  const characterId = Number(player?.characterId) || null;
-  const lp = Number(player?.lp);
-  // This supplemental snapshot is required only for MASTER characters. LP-only
-  // characters already use LP as their primary stored rating.
-  if (!profileId || !characterId || Number(player?.mr) <= 0 || !Number.isFinite(lp) || lp <= 0) {
-    return false;
-  }
-  const replayIdSet = new Set(
-    (Array.isArray(replayIds) ? replayIds : [])
-      .map((value) => String(value ?? "").trim())
-      .filter(Boolean),
-  );
+  if (!profileId) return false;
   const store = loadMatchHistoryStore(profileId);
-  const candidate = store.records
-    .filter((record) => record.matchType === "ranked")
-    .filter((record) => Number(record.characterId) === characterId)
-    .filter((record) => !replayIdSet.size || replayIdSet.has(record.replayId))
-    .sort((left, right) => Number(right.uploadedAt) - Number(left.uploadedAt))[0];
-  if (!candidate || Number(candidate.ownLp) === lp) return false;
-  candidate.ownLp = lp;
+  if (!applyCurrentProfileRatings(store.records, player, { replayIds })) return false;
   persistMatchHistoryStore(profileId, store);
   sendHistoryState();
   return true;
+}
+
+function loadPersistedTrackerSession() {
+  const emptyTrackerState = createEmptyTrackerState();
+  const emptyAchievementState = createSessionAchievementState();
+  try {
+    const payload = JSON.parse(fs.readFileSync(trackerSessionPath, "utf8"));
+    return restoreTrackerSession(payload, emptyTrackerState, emptyAchievementState);
+  } catch {
+    return {
+      trackerState: emptyTrackerState,
+      achievementState: emptyAchievementState,
+      restored: false,
+    };
+  }
+}
+
+function persistTrackerSession() {
+  const payload = buildTrackerSessionPayload(trackerState, sessionAchievementState);
+  try {
+    if (!payload) {
+      fs.rmSync(trackerSessionPath, { force: true });
+      return;
+    }
+    fs.writeFileSync(trackerSessionPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+  } catch {
+    // A session save failure must not interrupt match monitoring.
+  }
 }
 
 function publicHistoryState(
@@ -1046,7 +1065,7 @@ async function runHistoryViewPoll(sessionId) {
       historyViewPlayer = await refreshProfilePlayer(playerHint, {
         force: true,
       });
-      applyCurrentProfileLpToHistory(historyViewPlayer, {
+      applyCurrentProfileRatingsToHistory(historyViewPlayer, {
         replayIds: newReplays
           .filter((replay) => replay.matchType === "ranked")
           .map((replay) => replay.replayId),
@@ -1478,6 +1497,7 @@ function broadcastOverlayState() {
 
 function sendTrackerState() {
   const state = publicTrackerState();
+  persistTrackerSession();
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send("tracker:state", state);
   }
@@ -2943,7 +2963,7 @@ async function clearPrivateDataWithConfirmation() {
       type: "warning",
       title: "ローカルデータを消去",
       message:
-        "公式サイトのログインセッション、Cookie、キャッシュをこのPCから削除します。",
+        "公式サイトのログインセッション、保存した対戦履歴・セッション戦績、Cookie、キャッシュをこのPCから削除します。",
       detail: "この操作は元に戻せません。",
       buttons: ["消去", "キャンセル"],
       defaultId: 1,
@@ -2959,7 +2979,7 @@ async function clearPrivateDataWithConfirmation() {
   privateDataGeneration += 1;
   for (const controller of serviceAbortControllers) controller.abort();
   serviceAbortControllers.clear();
-  stopTracking();
+  stopTracking({ discard: true });
   stopHistoryViewPolling();
   stopSocialRefresh();
   matchHistoryFetchInFlight = null;
@@ -3010,6 +3030,7 @@ async function clearPrivateDataWithConfirmation() {
     fs.rmSync(matchHistoryDirectory, { recursive: true, force: true });
     fs.mkdirSync(matchHistoryDirectory, { recursive: true });
     fs.rmSync(matchHistoryPath, { force: true });
+    fs.rmSync(trackerSessionPath, { force: true });
   } catch {
     // Continue clearing the authenticated browser session even if the local
     // history file is temporarily locked by another process.
@@ -4190,7 +4211,7 @@ async function fetchLocalMatchHistory() {
     const fetchedStore = loadMatchHistoryStore(player.profileId);
     fetchedStore.lastFetchedAt = Date.now();
     persistMatchHistoryStore(player.profileId, fetchedStore);
-    applyCurrentProfileLpToHistory(player);
+    applyCurrentProfileRatingsToHistory(player);
     if (
       historyViewPlayer &&
       historyViewPlayer.profileId === player.profileId &&
@@ -4251,7 +4272,7 @@ async function selectHistoryProfile(userCode) {
     nextHistoryViewPlayer = await refreshProfilePlayer(nextHistoryViewPlayer, {
       force: true,
     });
-    applyCurrentProfileLpToHistory(nextHistoryViewPlayer);
+    applyCurrentProfileRatingsToHistory(nextHistoryViewPlayer);
     assertPrivateDataGeneration(generation);
   }
   assertPrivateDataGeneration(generation);
@@ -4286,8 +4307,9 @@ async function startTrackingInternal(player) {
   player = await refreshProfilePlayer(player);
   const resumable =
     !trackerState.active &&
-    trackerState.stopReason === "idle" &&
-    trackerState.player?.profileId === player.profileId;
+    ["idle", "manual", "restart"].includes(trackerState.stopReason) &&
+    trackerState.player?.profileId === player.profileId &&
+    hasRetainedTrackerSession(trackerState);
   const sessionId = ++trackingSessionId;
   stopPolling();
   const replays = await fetchRankedReplays(player.profileId);
@@ -4295,7 +4317,7 @@ async function startTrackingInternal(player) {
   // Keep the existing session counter semantics while also enriching the
   // local history when the tracker already made this request.
   mergeMatchHistory(replays, player.profileId);
-  applyCurrentProfileLpToHistory(player, {
+  applyCurrentProfileRatingsToHistory(player, {
     replayIds: replays
       .filter((replay) => replay.matchType === "ranked")
       .map((replay) => replay.replayId),
@@ -4504,7 +4526,7 @@ async function refreshTracking(sessionId = trackingSessionId) {
       return publicTrackerState();
     }
     trackerState.player = refreshedPlayer;
-    applyCurrentProfileLpToHistory(refreshedPlayer, {
+    applyCurrentProfileRatingsToHistory(refreshedPlayer, {
       replayIds: newRankedReplays.map((replay) => replay.replayId),
     });
     trackerState = syncCurrentPlayerRatingState(
@@ -4558,12 +4580,19 @@ function autoStopTracking(reason, status) {
   return publicTrackerState();
 }
 
-function stopTracking() {
+function stopTracking({ discard = false } = {}) {
   stopPolling();
   clearAllRankingRetryTimers();
   trackingSessionId += 1;
-  trackerState = createEmptyTrackerState();
-  sessionAchievementState = createSessionAchievementState();
+  if (discard || !hasRetainedTrackerSession(trackerState)) {
+    trackerState = createEmptyTrackerState();
+    sessionAchievementState = createSessionAchievementState();
+  } else {
+    trackerState.active = false;
+    trackerState.stopReason = "manual";
+    trackerState.status = "停止中";
+    trackerState.updatedAt = Date.now();
+  }
   sendTrackerState();
   scheduleSocialIdleSuspend();
   return publicTrackerState();
@@ -4581,7 +4610,7 @@ function stopAutoGameSession() {
 }
 
 function resetTrackingStats() {
-  if (!trackerState.active) {
+  if (!hasRetainedTrackerSession(trackerState)) {
     return publicTrackerState();
   }
   const stats = createEmptyMatchStats();
@@ -4605,6 +4634,7 @@ function resetTrackingStats() {
     consecutiveFailures: 0,
     stats,
     characterStates: {},
+    stopReason: trackerState.active ? null : "reset",
   };
   snapshotCurrentCharacter(trackerState);
   if (!pollInFlight) schedulePolling();
@@ -4956,6 +4986,7 @@ app.on("before-quit", () => {
   clearTimeout(startupUpdateTimer);
   startupUpdateTimer = null;
   stopPolling();
+  persistTrackerSession();
   stopHistoryViewPolling();
   stopSocialRefresh();
   stopSocialIdleSuspendTimer();

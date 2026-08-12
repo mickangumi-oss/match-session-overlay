@@ -78,7 +78,7 @@ test("a missing potential rating never becomes a zero chart baseline", () => {
 
 test("live and read-only history presentations use separate achievement state", () => {
   const main = read("src/main.js");
-  assert.match(main, /let sessionAchievementState = createSessionAchievementState\(\)/);
+  assert.match(main, /let sessionAchievementState = restoredTrackerSession\.achievementState/);
   assert.match(main, /let historySessionAchievementState = createSessionAchievementState\(\)/);
   assert.match(main, /historyView:\s*Boolean\(viewState\)/);
   assert.match(main, /historyView\s*\?\s*historySessionAchievementState\s*:\s*sessionAchievementState/);

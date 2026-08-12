@@ -78,11 +78,11 @@ test("maintenance copy names the version and the complete local-data scope", () 
   assert.match(i18n, /currentAppVersion: "現在のアプリバージョン"/);
   assert.match(
     i18n,
-    /localDataClearNote: "Clears the official-site login session, saved match history, and temporary profile, ranking, and FRIENDS data\. Display settings remain\. Your ID and password are never stored\."/,
+    /localDataClearNote: "Clears the official-site login session, saved match history and session stats, and temporary profile, ranking, and FRIENDS data\. Display settings remain\. Your ID and password are never stored\."/,
   );
   assert.match(
     i18n,
-    /localDataClearNote: "公式サイトのログイン状態、保存した対戦履歴、プロフィール・ランキング・FRIENDSなどの一時キャッシュを削除します。表示設定は残ります。ID・パスワード自体は保存していません。"/,
+    /localDataClearNote: "公式サイトのログイン状態、保存した対戦履歴・セッション戦績、プロフィール・ランキング・FRIENDSなどの一時キャッシュを削除します。表示設定は残ります。ID・パスワード自体は保存していません。"/,
   );
   assert.match(html, /data-i18n="currentAppVersion"[^>]*>[^<]*<\/span><strong id="currentAppVersion">/);
   assert.match(html, /data-i18n="localDataClearNote"/);

@@ -45,7 +45,7 @@ test("history storage and charts keep MASTER LP separate from the primary MR dis
   assert.match(main, /ownMr:\s*finiteOrNull\(/);
   assert.match(main, /ownLp:\s*finiteOrNull\(/);
   assert.match(main, /ownLp:\s*replay\?\.ownLp \?\? replay\?\.lp \?\? previous\?\.ownLp/);
-  assert.match(main, /function applyCurrentProfileLpToHistory/);
+  assert.match(main, /function applyCurrentProfileRatingsToHistory/);
   assert.match(renderer, /function historyRatingValue/);
   assert.match(renderer, /normalizedType === "MR" \? record\?\.ownMr : record\?\.ownLp/);
   assert.match(renderer, /record\.ownRating == null \? "—" : `\$\{record\.ownRatingType \|\| ""\} \$\{record\.ownRating\}`/);

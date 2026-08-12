@@ -19,7 +19,8 @@ const i18nSource = fs.readFileSync(
 function functionSource(source, name) {
   const start = source.indexOf(`function ${name}`);
   assert.notEqual(start, -1, `${name} must exist`);
-  const bodyStart = source.indexOf("{", start);
+  const bodyStart = source.indexOf(") {", start) + 2;
+  assert.ok(bodyStart > 1, `${name} must have a function body`);
   let depth = 0;
   for (let index = bodyStart; index < source.length; index += 1) {
     if (source[index] === "{") depth += 1;
