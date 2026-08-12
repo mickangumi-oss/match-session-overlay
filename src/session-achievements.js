@@ -24,7 +24,6 @@ function updateSessionAchievements(previous, {
   ratingType,
   currentRating,
   baselineRating,
-  homeKey,
   currentRank,
   rankingReady = true,
 } = {}) {
@@ -54,10 +53,7 @@ function updateSessionAchievements(previous, {
       : Math.max(Number(state.peakRating), peakCandidate);
   }
 
-  const normalizedHomeKey = normalizeIdentity(homeKey) || "all";
-  const rankingScopeKey = ratingScopeKey && normalizedRatingType === "MR"
-    ? `${normalizedProfileId}:${normalizedCharacterId}:${normalizedHomeKey}`
-    : "";
+  const rankingScopeKey = ratingScopeKey;
   const rank = finitePositive(currentRank);
   if (state.rankingScopeKey !== rankingScopeKey) {
     state.rankingScopeKey = rankingScopeKey;

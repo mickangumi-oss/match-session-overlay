@@ -47,6 +47,7 @@ test("notification BrowserWindow is compact, click-through, and non-focusing", (
     /friendNotificationPreviewLoadInFlight[\s\S]*?await friendNotificationPreviewLoadInFlight/,
   );
   assert.match(main, /showInactive\(\)/);
+  assert.match(main, /function friendNotificationDisplay\(\)[\s\S]*?screen\.getPrimaryDisplay\(\)/);
   assert.match(main, /positionFriendNotification\(latestView\.count > 1 \? 100 : 72\)/);
   assert.match(main, /const margin = 20/);
   assert.doesNotMatch(html + renderer, /<audio|Audio\(|\.play\(/i);

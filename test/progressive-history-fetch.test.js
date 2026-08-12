@@ -82,7 +82,7 @@ test("selecting another history player refreshes that profile once for its MR ra
   assert.match(rankingSource, /historyProfileId: historyViewPlayer\?\.profileId/);
   assert.match(rankingSource, /Number\(player\?\.mr\) > 0/);
   assert.match(rankingSource, /profileRank > 0/);
-  assert.match(rankingSource, /homeKey: otherProfileRanking \? profileHome\.value/);
+  assert.match(rankingSource, /homeKey: "all"/);
 });
 
 test("stopping a session cancels delayed ranking refreshes", () => {
