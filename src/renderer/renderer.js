@@ -1503,9 +1503,11 @@ function renderTracker(state) {
   );
   elements.startTrackingButton.disabled = Boolean(state.readOnly) || !selectedPlayer || state.active;
   elements.startTrackingLabel.textContent =
-    state.stopReason === "idle" ? t("resumeMeasure", "計測を再開") : t("startMeasure", "計測を開始");
+    ["idle", "manual", "restart"].includes(state.stopReason)
+      ? t("resumeMeasure", "計測を再開")
+      : t("startMeasure", "計測を開始");
   elements.stopTrackingButton.disabled = Boolean(state.readOnly) || !state.active;
-  elements.resetTrackingButton.disabled = Boolean(state.readOnly) || !state.active;
+  elements.resetTrackingButton.disabled = Boolean(state.readOnly) || !state.startedAt;
   renderNextUpdate();
 }
 
