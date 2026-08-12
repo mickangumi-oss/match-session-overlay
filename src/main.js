@@ -59,18 +59,14 @@ const {
   updateSessionAchievements,
 } = require("./session-achievements");
 const {
-  DEFAULT_RANKING_HOME,
-  buildCharacterSlugCatalog,
-  buildRankingHomeCatalog,
   explicitOtherPlayerRankingAllowed,
+  normalizeLeagueRanking,
   normalizeMasterRanking,
   rankingCharacterSlug,
   rankingCacheKey,
-  rankingHomeLabel,
   rankingRequestQuery,
   rankingRetryScopeMatches,
   resolveRankingFetchResult,
-  sanitizeRankingHomeKey,
   shouldRefreshRanking,
 } = require("./ranking-model");
 const {
@@ -392,8 +388,6 @@ let historyViewEffectivePollIntervalSeconds = null;
 let historyViewConsecutiveFailures = 0;
 let historyViewStopReason = null;
 const rankingCache = new Map();
-const rankingCatalogCache = new Map();
-const rankingCharacterSlugCache = new Map();
 const rankingInFlight = new Map();
 const rankingRetryController = createRankingRetryController();
 let rankingState = {
@@ -403,7 +397,8 @@ let rankingState = {
   profileId: null,
   locale: null,
   characterId: null,
-  homeKey: DEFAULT_RANKING_HOME,
+  ratingType: "MR",
+  homeKey: "all",
   homeLabel: "All",
   updatedAt: null,
 };
@@ -461,7 +456,6 @@ let displaySettings = {
   backgroundOpacity: 0.94,
   displayItems: defaultDisplayItems(),
   potentialLineVisible: true,
-  rankingHome: DEFAULT_RANKING_HOME,
   fontFamily: "street",
   fontStyle: "normal",
   textColor: "#f7f8ff",
@@ -551,7 +545,6 @@ try {
   if (typeof savedSettings.potentialLineVisible === "boolean") {
     displaySettings.potentialLineVisible = savedSettings.potentialLineVisible;
   }
-  displaySettings.rankingHome = sanitizeRankingHomeKey(savedSettings.rankingHome);
   const savedFontFamily = normalizeFontFamily(savedSettings.fontFamily);
   if (savedFontFamily) displaySettings.fontFamily = savedFontFamily;
   if (["normal", "italic"].includes(savedSettings.fontStyle)) {
@@ -1265,16 +1258,6 @@ function publicGraphData(sourceState) {
   };
 }
 
-function currentRankingCatalog() {
-  return (
-    rankingCatalogCache.get(serviceLocale()) ?? {
-      all: { value: DEFAULT_RANKING_HOME, label: "All" },
-      regions: [],
-      countries: [],
-    }
-  );
-}
-
 function publicRankingState(sourceState = trackerState) {
   const player = sourceState?.player ?? authenticatedPlayer;
   const playerProfileId = String(player?.profileId ?? player?.userCode ?? "");
@@ -1284,14 +1267,16 @@ function publicRankingState(sourceState = trackerState) {
     playerProfileId === authenticatedId &&
     String(rankingState.profileId ?? "") === authenticatedId;
   const characterId = Number(sourceState?.characterId ?? player?.characterId) || null;
+  const ratingType = Number(player?.mr) > 0 ? "MR" : "LP";
   const sameCharacter = Number(rankingState.characterId) === characterId;
   const sameLocale = rankingState.locale === serviceLocale();
-  const sameHome = rankingState.homeKey === displaySettings.rankingHome;
-  const exactRanking = samePlayer && sameCharacter && sameLocale && sameHome;
+  const sameRatingType = rankingState.ratingType === ratingType;
+  const exactRanking = samePlayer && sameCharacter && sameLocale && sameRatingType;
   // Ranking pages expose `my_ranking_info` only for the authenticated player.
   // For a different player selected in match history, use the exact current-
   // character overall rank returned by that player's freshly fetched official
-  // profile. HOME-specific ranking cannot be inferred for another account.
+  // profile. Ranking pages expose the signed-in player's entry only, so a
+  // different history player can use only the exact profile-provided MR rank.
   const profileRank = Number(player?.mrRank);
   const otherProfileRanking =
     explicitOtherPlayerRankingAllowed({
@@ -1302,19 +1287,14 @@ function publicRankingState(sourceState = trackerState) {
     Number(player?.mr) > 0 &&
     Number.isFinite(profileRank) &&
     profileRank > 0;
-  const profileHome = currentRankingCatalog().all ?? {
-    value: DEFAULT_RANKING_HOME,
-    label: "All",
-  };
   return {
     status: exactRanking ? rankingState.status : otherProfileRanking ? "ready" : "idle",
     rank: exactRanking ? rankingState.rank : otherProfileRanking ? profileRank : null,
     rating: exactRanking ? rankingState.rating : otherProfileRanking ? player.mr : null,
     characterId,
-    homeKey: otherProfileRanking ? profileHome.value : displaySettings.rankingHome,
-    homeLabel: otherProfileRanking
-      ? profileHome.label
-      : rankingHomeLabel(currentRankingCatalog(), displaySettings.rankingHome),
+    ratingType: exactRanking ? rankingState.ratingType : "MR",
+    homeKey: "all",
+    homeLabel: displaySettings.locale === "ja-jp" ? "すべて" : "All",
     updatedAt: exactRanking
       ? rankingState.updatedAt
       : otherProfileRanking
@@ -1347,7 +1327,6 @@ function buildCurrentPresentation({
     currentRating: basePresentation.currentRating,
     baselineRating:
       sourceState.stats?.ranked?.initialRating ?? sourceState.initialRating,
-    homeKey: ranking.homeKey,
     currentRank: basePresentation.mrRank,
     rankingReady: ranking.status === "ready",
   });
@@ -1516,7 +1495,6 @@ function publicDisplaySettings({ statsWindowVisible } = {}) {
   return {
     ...displaySettings,
     friendOnlineNotificationSoundOptions: windowsNotificationSounds,
-    rankingHomeOptions: currentRankingCatalog(),
     overlayInteractionLocked: !overlayEditMode,
     statsWindowVisible: statsWindowVisible ?? actualStatsWindowVisible,
   };
@@ -1821,7 +1799,6 @@ function updateDisplaySettings(
   const previousMatchType = displaySettings.matchType;
   const previousLocale = displaySettings.locale;
   const previousPollInterval = displaySettings.pollIntervalSeconds;
-  const previousRankingHome = displaySettings.rankingHome;
   const previousLaunchAtLogin = displaySettings.launchAtLogin;
   const previousAutoDetectGame = displaySettings.autoDetectGame;
   const previousGameExecutable = displaySettings.gameExecutableName;
@@ -1889,9 +1866,6 @@ function updateDisplaySettings(
   if (typeof nextSettings.potentialLineVisible === "boolean") {
     displaySettings.potentialLineVisible = nextSettings.potentialLineVisible;
   }
-  if (Object.hasOwn(nextSettings, "rankingHome")) {
-    displaySettings.rankingHome = sanitizeRankingHomeKey(nextSettings.rankingHome);
-  }
   const displayItemsChanging = !displayItemsEqual(
     previousDisplayItems,
     displaySettings.displayItems,
@@ -1923,13 +1897,14 @@ function updateDisplaySettings(
       rank: null,
       rating: null,
       locale: displaySettings.locale,
+      ratingType: Number((trackerState.player ?? authenticatedPlayer)?.mr) > 0 ? "MR" : "LP",
       homeLabel: "—",
       updatedAt: null,
     };
     sendTrackerState();
     if (trackerState.player || historyViewPlayer || authenticatedPlayer) {
       void refreshTrackedPlayerForLocale().then(() =>
-        refreshMasterRanking().catch(() => {}),
+        refreshCurrentRanking().catch(() => {}),
       );
     }
     if (mainWindow?.isVisible()) scheduleSocialRefresh({ immediate: true });
@@ -2012,9 +1987,6 @@ function updateDisplaySettings(
     mainWindow?.isVisible()
   ) {
     scheduleSocialRefresh();
-  }
-  if (previousRankingHome !== displaySettings.rankingHome) {
-    void refreshMasterRanking().catch(() => {});
   }
   if (previousLaunchAtLogin !== displaySettings.launchAtLogin) {
     configureLaunchAtLogin();
@@ -2350,9 +2322,6 @@ function resetFriendNotificationBaseline(accountId = authenticatedProfileId) {
 }
 
 function friendNotificationDisplay() {
-  // Process-name detection does not expose the game window bounds. Until a
-  // reliable native bounds source exists, use the specified primary-display
-  // fallback instead of guessing from an independently movable stats window.
   return screen.getPrimaryDisplay();
 }
 
@@ -2781,7 +2750,6 @@ function createMainWindow() {
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   loadRendererFile(mainWindow, path.join(__dirname, "renderer", "index.html"));
   mainWindow.webContents.once("did-finish-load", () => {
-    void ensureRankingMetadata().catch(() => {});
     checkAuthentication()
       .then(({ player }) => {
         if (mainWindow && !mainWindow.isDestroyed()) {
@@ -3013,8 +2981,6 @@ async function clearPrivateDataWithConfirmation() {
   profileRefreshInFlight.clear();
   profileCharacterNameCache.clear();
   rankingCache.clear();
-  rankingCatalogCache.clear();
-  rankingCharacterSlugCache.clear();
   rankingInFlight.clear();
   clearAllRankingRetryTimers();
   sessionAchievementState = createSessionAchievementState();
@@ -3029,7 +2995,8 @@ async function clearPrivateDataWithConfirmation() {
     profileId: null,
     locale: null,
     characterId: null,
-    homeKey: displaySettings.rankingHome,
+    ratingType: "MR",
+    homeKey: "all",
     homeLabel: "All",
     updatedAt: null,
   };
@@ -3244,33 +3211,6 @@ function openSocialProfile(profileId) {
   return { opened: true };
 }
 
-async function ensureRankingMetadata() {
-  const generation = privateDataGeneration;
-  const locale = serviceLocale();
-  const cachedCatalog = rankingCatalogCache.get(locale);
-  const cachedCharacters = rankingCharacterSlugCache.get(locale);
-  if (cachedCatalog && cachedCharacters) {
-    return { catalog: cachedCatalog, characters: cachedCharacters };
-  }
-  const metadataKey = `metadata:${locale}`;
-  if (rankingInFlight.has(metadataKey)) return rankingInFlight.get(metadataKey);
-  const request = (async () => {
-    const data = await fetchServiceJson("ranking/master.json", {
-      page: 1,
-      season_type: 1,
-    });
-    assertPrivateDataGeneration(generation);
-    const catalog = buildRankingHomeCatalog(data);
-    const characters = buildCharacterSlugCatalog(data);
-    rankingCatalogCache.set(locale, catalog);
-    rankingCharacterSlugCache.set(locale, characters);
-    sendDisplaySettings();
-    return { catalog, characters };
-  })().finally(() => rankingInFlight.delete(metadataKey));
-  rankingInFlight.set(metadataKey, request);
-  return request;
-}
-
 function clearRankingRetryTimer(cacheKey) {
   rankingRetryController.clear(cacheKey);
 }
@@ -3287,7 +3227,7 @@ function scheduleRankingPropagationRetry({
   characterId,
   profileId,
   locale,
-  homeKey,
+  ratingType,
 }) {
   rankingRetryController.schedule(cacheKey, retryDelayMs, () => {
     const currentPlayer = trackerState.player ?? authenticatedPlayer;
@@ -3295,18 +3235,18 @@ function scheduleRankingPropagationRetry({
       currentPlayer?.profileId ?? currentPlayer?.userCode ?? "",
     ).trim();
     if (!rankingRetryScopeMatches(
-      { profileId, characterId, locale, homeKey },
+      { profileId, characterId, locale, ratingType },
       {
         authenticatedProfileId,
         playerProfileId: currentProfileId,
         characterId: currentPlayer?.characterId,
         locale: serviceLocale(),
-        homeKey: displaySettings.rankingHome,
+        ratingType: Number(currentPlayer?.mr) > 0 ? "MR" : "LP",
       },
     )) {
       return;
     }
-    void refreshMasterRanking({
+    void refreshCurrentRanking({
       player,
       characterId,
       retryAttempt: retryAttempt + 1,
@@ -3316,6 +3256,7 @@ function scheduleRankingPropagationRetry({
 }
 
 function setRankingUnavailable(player, characterId, status = "idle") {
+  const ratingType = Number(player?.mr) > 0 ? "MR" : "LP";
   rankingState = {
     status,
     rank: null,
@@ -3323,15 +3264,16 @@ function setRankingUnavailable(player, characterId, status = "idle") {
     profileId: String(player?.profileId ?? player?.userCode ?? ""),
     locale: serviceLocale(),
     characterId: Number(characterId) || null,
-    homeKey: displaySettings.rankingHome,
-    homeLabel: rankingHomeLabel(currentRankingCatalog(), displaySettings.rankingHome),
+    ratingType,
+    homeKey: "all",
+    homeLabel: displaySettings.locale === "ja-jp" ? "すべて" : "All",
     updatedAt: Date.now(),
   };
   sendTrackerState();
   return publicRankingState();
 }
 
-async function refreshMasterRanking({
+async function refreshCurrentRanking({
   player = trackerState.player ?? authenticatedPlayer,
   characterId = trackerState.characterId ?? player?.characterId,
   retryAttempt = 0,
@@ -3339,18 +3281,24 @@ async function refreshMasterRanking({
 } = {}) {
   const profileId = String(player?.profileId ?? player?.userCode ?? "").trim();
   const expectedCharacterId = Number(characterId) || null;
-  const isMaster = Number(player?.mr) > 0;
-  if (!profileId || !expectedCharacterId || !isMaster) {
+  const ratingType = Number(player?.mr) > 0
+    ? "MR"
+    : Number(player?.lp) > 0
+      ? "LP"
+      : null;
+  if (!profileId || !expectedCharacterId || !ratingType) {
     return setRankingUnavailable(player, expectedCharacterId);
   }
 
   const locale = serviceLocale();
-  const homeKey = sanitizeRankingHomeKey(displaySettings.rankingHome);
+  const characterSlug = rankingCharacterSlug(player, expectedCharacterId);
+  if (!characterSlug) return setRankingUnavailable(player, expectedCharacterId, "error");
   const cacheKey = rankingCacheKey({
     locale,
     profileId,
     characterId: expectedCharacterId,
-    homeKey,
+    characterSlug,
+    ratingType,
     act: 1,
   });
   if (retryAttempt === 0) clearRankingRetryTimer(cacheKey);
@@ -3364,29 +3312,28 @@ async function refreshMasterRanking({
     profileId,
     locale,
     characterId: expectedCharacterId,
-    homeKey,
-    homeLabel: rankingHomeLabel(currentRankingCatalog(), homeKey),
+    ratingType,
+    homeKey: "all",
+    homeLabel: locale === "ja-jp" ? "すべて" : "All",
     updatedAt: previous?.updatedAt ?? null,
   };
   sendTrackerState();
 
   const request = (async () => {
     try {
-      const { catalog, characters } = await ensureRankingMetadata();
       if (locale !== serviceLocale()) return publicRankingState();
-      const characterSlug = rankingCharacterSlug(
-        player,
-        expectedCharacterId,
-        characters,
-      );
-      if (!characterSlug) throw new Error("RANKING_CHARACTER_NOT_FOUND");
+      const endpoint = ratingType === "LP"
+        ? "ranking/league.json"
+        : "ranking/master.json";
       const data = await fetchServiceJson(
-        "ranking/master.json",
-        rankingRequestQuery({ characterSlug, homeKey }),
+        endpoint,
+        rankingRequestQuery({ characterSlug }),
       );
-      const normalized = normalizeMasterRanking(data, {
+      const normalized = (ratingType === "LP"
+        ? normalizeLeagueRanking
+        : normalizeMasterRanking)(data, {
         profileId,
-        characterId: expectedCharacterId,
+        characterSlug,
       });
       if (!rankingRetryController.isCurrent(retryGeneration)) {
         return publicRankingState();
@@ -3411,7 +3358,7 @@ async function refreshMasterRanking({
           characterId: expectedCharacterId,
           profileId,
           locale,
-          homeKey,
+          ratingType,
         });
       } else {
         clearRankingRetryTimer(cacheKey);
@@ -3419,7 +3366,7 @@ async function refreshMasterRanking({
       const visible = outcome.cacheValue;
       if (
         locale === serviceLocale() &&
-        homeKey === displaySettings.rankingHome &&
+        (Number((trackerState.player ?? authenticatedPlayer)?.mr) > 0 ? "MR" : "LP") === ratingType &&
         String(authenticatedProfileId ?? "") === profileId
       ) {
         rankingState = {
@@ -3429,8 +3376,9 @@ async function refreshMasterRanking({
           profileId,
           locale,
           characterId: expectedCharacterId,
-          homeKey,
-          homeLabel: rankingHomeLabel(catalog, homeKey),
+          ratingType,
+          homeKey: "all",
+          homeLabel: locale === "ja-jp" ? "すべて" : "All",
           updatedAt: now,
         };
         sendTrackerState();
@@ -3443,7 +3391,7 @@ async function refreshMasterRanking({
       const fallback = rankingCache.get(cacheKey) ?? null;
       if (
         locale === serviceLocale() &&
-        homeKey === displaySettings.rankingHome &&
+        (Number((trackerState.player ?? authenticatedPlayer)?.mr) > 0 ? "MR" : "LP") === ratingType &&
         String(authenticatedProfileId ?? "") === profileId
       ) {
         rankingState = {
@@ -3453,8 +3401,9 @@ async function refreshMasterRanking({
           profileId,
           locale,
           characterId: expectedCharacterId,
-          homeKey,
-          homeLabel: rankingHomeLabel(currentRankingCatalog(), homeKey),
+          ratingType,
+          homeKey: "all",
+          homeLabel: locale === "ja-jp" ? "すべて" : "All",
           updatedAt: fallback?.updatedAt ?? null,
         };
         sendTrackerState();
@@ -3958,7 +3907,7 @@ async function checkAuthentication() {
       sendTrackerState();
     }
     const postAuthenticationTasks = [
-      refreshMasterRanking({ player, characterId: player?.characterId }),
+      refreshCurrentRanking({ player, characterId: player?.characterId }),
     ];
     if (displaySettings.friendOnlineNotificationsEnabled) {
       postAuthenticationTasks.push(
@@ -4414,7 +4363,7 @@ async function startTrackingInternal(player) {
   sendTrackerState();
   openStatsWindow();
 
-  await refreshMasterRanking({
+  await refreshCurrentRanking({
     player: trackerState.player,
     characterId: trackerState.characterId,
   }).catch(() => {});
@@ -4520,7 +4469,6 @@ async function refreshTracking(sessionId = trackingSessionId) {
   }
   const previousReplayIds = new Set(trackerState.seenReplayIds);
   const previousCharacterId = trackerState.characterId;
-  const previousMr = trackerState.player?.mr ?? null;
   const replays = await fetchRankedReplays(trackerState.player.profileId);
   if (sessionId !== trackingSessionId || !trackerState.active) {
     return publicTrackerState();
@@ -4568,15 +4516,16 @@ async function refreshTracking(sessionId = trackingSessionId) {
   if (shouldRefreshRanking({
     characterChanged,
     newRankedMatchCount: newRankedReplays.length,
-    previousMr,
-    currentMr: trackerState.player?.mr ?? null,
-    isMaster: Number(trackerState.player?.mr) > 0,
+    currentRating: trackerState.player?.mr ?? trackerState.player?.lp ?? null,
   })) {
-    await refreshMasterRanking({
+    await refreshCurrentRanking({
       player: trackerState.player,
       characterId: trackerState.characterId,
     }).catch(() => {});
-  } else if (Number(trackerState.player?.mr) <= 0) {
+  } else if (
+    Number(trackerState.player?.mr) <= 0 &&
+    Number(trackerState.player?.lp) <= 0
+  ) {
     setRankingUnavailable(trackerState.player, trackerState.characterId);
   }
   const now = Date.now();

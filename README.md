@@ -1,6 +1,6 @@
 # Match Session Overlay
 
-ストリートファイター6の対戦データを取得し、セッション中の勝敗、勝率、MR／LP、増減、現在のキャラクター、MASTERランキングなどを表示するWindows向けツールです。通常ウィンドウ、ゲーム上のオーバーレイ、OBSブラウザソースで利用できます。
+ストリートファイター6の対戦データを取得し、セッション中の勝敗、勝率、MR／LP、増減、現在のキャラクター、キャラクター順位などを表示するWindows向けツールです。通常ウィンドウ、ゲーム上のオーバーレイ、OBSブラウザソースで利用できます。
 
 > [!IMPORTANT]
 > 非公式のツールです。公式サイトの仕様変更などにより、予告なく戦績を取得できなくなる場合があります。
@@ -11,13 +11,13 @@
 - 公式サイトへのログインと戦績取得に必要なインターネット接続
 - OBSで表示する場合のみ、OBS Studio（任意）
 
-公開版: v1.3.2
+公開版: v1.4.0
 
 ## ダウンロード
 
-[v1.3.2をダウンロード（GitHub Releases）](https://github.com/mickangumi-oss/match-session-overlay/releases/download/v1.3.2/Match-Session-Overlay-1.3.2-Setup.exe)
+[v1.4.0をダウンロード（GitHub Releases）](https://github.com/mickangumi-oss/match-session-overlay/releases/download/v1.4.0/Match-Session-Overlay-1.4.0-Setup.exe)
 
-開いたページの「Assets」から、`Match-Session-Overlay-1.3.2-Setup.exe`をダウンロードして実行してください。最新版以外のファイルや、配布元を確認できないファイルは使用しないでください。
+開いたページの「Assets」から、`Match-Session-Overlay-1.4.0-Setup.exe`をダウンロードして実行してください。最新版以外のファイルや、配布元を確認できないファイルは使用しないでください。
 
 詳しい操作手順は[`docs/usage.md`](docs/usage.md)、表示レイアウトは[`docs/window-layout.md`](docs/window-layout.md)、対戦履歴は[`docs/match-history.md`](docs/match-history.md)、フォントは[`docs/font-settings.md`](docs/font-settings.md)をご覧ください。
 
@@ -25,7 +25,7 @@
 
 正式な配布インストーラーは、公開前にMicrosoft DefenderおよびVirusTotalでセキュリティチェックを実施します。検査結果は公開時点のものであり、完全な安全性を保証するものではありません。インストーラーは必ずこのリポジトリの公式GitHub Releaseから取得し、各リリースノートに記載されたSHA-256と一致することを確認してください。
 
-`v1.3.2`はMicrosoft Defenderで検出なし、VirusTotalで`0 / 58`（悪意あるファイルの検出なし）を確認しました。SHA-256と公開レポートは[`v1.3.2リリースノート`](docs/release-notes/v1.3.2.md)をご覧ください。
+`v1.4.0`はMicrosoft Defenderで検出なし、VirusTotalで`0 / 66`（悪意あるファイルの検出なし）を確認しました。SHA-256と公開レポートは[`v1.4.0リリースノート`](docs/release-notes/v1.4.0.md)をご覧ください。
 
 ## 画面イメージ
 
@@ -33,7 +33,7 @@
 
 ### 管理画面
 
-MR RANKと現在のキャラクター、セッション戦績、FRIENDS／FOLLOWINGのプレイヤー状態をまとめて確認できます。
+CHARACTER RANKと現在のキャラクター、セッション戦績、FRIENDS／FOLLOWINGのプレイヤー状態をまとめて確認できます。
 
 ![合成データを表示した新しい管理画面](docs/images/management-overview.png)
 
@@ -41,7 +41,7 @@ MR RANKと現在のキャラクター、セッション戦績、FRIENDS／FOLLOW
 
 選択した戦績カードを横に並べ、MR／LPグラフと一緒に表示できます。
 
-![戦績カード、MR RANK、グラフを表示した横表示ウィンドウ](docs/images/window-horizontal.png)
+![戦績カード、CHARACTER RANK、グラフを表示した横表示ウィンドウ](docs/images/window-horizontal.png)
 
 ### 縦表示オーバーレイ
 
@@ -61,19 +61,16 @@ MR RANKと現在のキャラクター、セッション戦績、FRIENDS／FOLLOW
 
 ![合成データを表示した対戦履歴画面](docs/images/match-history-example.png)
 
-## v1.3.2の変更内容
+## v1.4.0の変更内容
 
-### MASTERランキング
+### CHARACTER RANK
 
-- 現在のキャラクターと、選択したHOME（すべて／地域／国）に対応する順位を正確に表示するよう調整しました。
-- 公式サイト側の順位反映に時間がかかる場合でも、直前の正常な順位を維持しながら再確認します。
-- ログイン状態とランキング表示の同期を改善しました。
+- 順位表示を`CHARACTER RANK`へ変更し、現在のキャラクターで絞り込んだ全プラットフォーム・全HOMEの順位であることを明確にしました。
+- MASTERだけでなく、LP帯のキャラクターでも順位を表示できるようになりました。
+- 新しいランクマッチを取得した後に順位を更新し、セッション開始時またはリセット時からの順位変動を確認しやすくしました。
+- HOME（地域・国）を選択する設定を廃止し、ランキング条件を統一しました。
 
-### MR／LP表示
-
-- LPでプレイしているキャラクターの現在値を正しく判定するよう調整しました。
-
-詳しい変更内容は[`v1.3.2リリースノート`](docs/release-notes/v1.3.2.md)をご覧ください。
+詳しい変更内容は[`v1.4.0リリースノート`](docs/release-notes/v1.4.0.md)をご覧ください。
 
 過去の変更内容は[`docs/release-notes`](docs/release-notes)をご覧ください。
 
@@ -108,8 +105,7 @@ OBSでは、管理画面に表示されるブラウザソースURLをOBSの「�
 ### 表示内容
 
 - 対戦モード: ランク／バトルハブ／カジュアル
-- 表示する戦績項目: W／L、WIN RATE、CURRENT MR／LP、MR／LP DELTA、POTENTIAL MR／LP、SESSION PEAK MR／LP、MR RANK、グラフ
-- HOME: MASTERランキングの「すべて」、地域、国
+- 表示する戦績項目: W／L、WIN RATE、CURRENT MR／LP、MR／LP DELTA、POTENTIAL MR／LP、SESSION PEAK MR／LP、CHARACTER RANK、グラフ
 
 表示項目は通常ウィンドウ、オーバーレイ、OBSで共通です。変更はすぐに反映され、最低1項目は常に表示されます。管理画面の戦績モニターは確認用として全項目を表示し、この設定の影響を受けません。
 
@@ -170,7 +166,7 @@ OBSでは、管理画面に表示されるブラウザソースURLをOBSの「�
 - ランク、バトルハブ、カジュアルの戦績を切り替えて表示
 - 勝敗、勝率、現在のMR／LP、計測開始後の増減を表示
 - 同じキャラクターの直近20試合の中央値を、参考値の`POTENTIAL MR／POTENTIAL LP`として表示
-- 現在のキャラクターのMASTERランキング順位をHOME条件付きで表示。非MASTERは`—`表示
+- 現在のキャラクター内の順位を`CHARACTER RANK`として表示
 - 表示言語に対応した公式プロフィールのキャラクター名を表示
 - FRIENDS／FOLLOWINGをオンライン優先・最終ログイン順で表示し、1ページ10件でページ分割。プレイヤー名から対戦履歴へ移動
 - FRIENDSがOFFLINEからONLINEへ変わったとき、操作を妨げない右下通知を表示。Windows標準サウンドも選択可能

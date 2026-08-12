@@ -50,8 +50,11 @@ for (const file of filesUnder(path.join(root, "src", "renderer"), new Set([".htm
 
 const readme = fs.readFileSync(path.join(root, "README.md"), "utf8");
 const packageJson = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
-if (!readme.includes(`公開版: v${packageJson.version}`)) {
-  throw new Error("README public version does not match package.json");
+if (
+  !readme.includes(`公開版: v${packageJson.version}`) &&
+  !readme.includes(`開発版: v${packageJson.version}（未公開・動作確認用）`)
+) {
+  throw new Error("README public or development version does not match package.json");
 }
 for (const match of readme.matchAll(/!\[[^\]]*\]\(([^)]+)\)/g)) {
   const target = match[1].split("#")[0];
