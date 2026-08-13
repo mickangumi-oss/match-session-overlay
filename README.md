@@ -1,5 +1,7 @@
 # Match Session Overlay
 
+[日本語](README.md) | [English](README.en.md)
+
 ストリートファイター6の対戦データを取得し、セッション中の勝敗、勝率、MR／LP、増減、現在のキャラクター、キャラクター順位などを表示するWindows向けツールです。通常ウィンドウ、ゲーム上のオーバーレイ、OBSブラウザソースで利用できます。
 
 > [!IMPORTANT]
