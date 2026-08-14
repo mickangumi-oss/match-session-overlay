@@ -8,6 +8,7 @@ const { URL } = require("node:url");
 const { spawn } = require("node:child_process");
 const { app } = require("electron");
 const { retryAfterMilliseconds } = require("./poll-policy");
+const { validateSignedManifest } = require("./update-signature");
 
 // The release manifest is a static GitHub Release asset.  The application
 // never sends credentials, cookies, or player data to GitHub.
@@ -28,10 +29,6 @@ const REQUEST_TIMEOUT_MS = 30_000;
 const REMOTE_CHECK_MIN_INTERVAL_MS = 5 * 60 * 1000;
 const MAX_UPDATE_RETRY_DELAY_MS = 24 * 60 * 60 * 1000;
 
-function isReleaseVersion(value) {
-  return typeof value === "string" && /^\d+\.\d+\.\d+$/.test(value);
-}
-
 function compareVersions(left, right) {
   const parse = (value) =>
     String(value)
@@ -45,31 +42,6 @@ function compareVersions(left, right) {
     if (difference !== 0) return Math.sign(difference);
   }
   return 0;
-}
-
-function validateManifest(manifest) {
-  if (
-    !manifest ||
-    !isReleaseVersion(manifest.version) ||
-    typeof manifest.file !== "string" ||
-    path.basename(manifest.file) !== manifest.file ||
-    !manifest.file.toLowerCase().endsWith(".exe") ||
-    !/^[0-9a-f]{64}$/i.test(manifest.sha256) ||
-    (manifest.force !== undefined && typeof manifest.force !== "boolean") ||
-    (manifest.minimumVersion !== undefined &&
-      !isReleaseVersion(manifest.minimumVersion)) ||
-    (isReleaseVersion(manifest.minimumVersion) &&
-      compareVersions(manifest.minimumVersion, manifest.version) > 0)
-  ) {
-    throw new Error("UPDATE_MANIFEST_INVALID");
-  }
-  return {
-    version: manifest.version,
-    file: manifest.file,
-    sha256: manifest.sha256.toUpperCase(),
-    force: manifest.force === true,
-    minimumVersion: manifest.minimumVersion ?? null,
-  };
 }
 
 function validateRemoteUrl(rawUrl) {
@@ -251,7 +223,7 @@ async function fetchRemoteManifest({ signal } = {}) {
   } catch {
     throw new Error("UPDATE_MANIFEST_INVALID");
   }
-  const validated = validateManifest(manifest);
+  const validated = validateSignedManifest(manifest);
   return {
     ...validated,
     installerUrl: new URL(
@@ -490,5 +462,5 @@ module.exports = {
   createUpdater,
   fetchRemoteManifest,
   sha256File,
-  validateManifest,
+  validateManifest: validateSignedManifest,
 };
