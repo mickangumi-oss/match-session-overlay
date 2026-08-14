@@ -2,7 +2,11 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { normalizeProfilePlayer } = require("../src/source-client");
+const {
+  normalizeProfilePlayer,
+  profileCacheLookup,
+  shareInFlightRequest,
+} = require("../src/source-client");
 
 function syntheticProfile(characterNames) {
   return {
@@ -36,6 +40,31 @@ test("Japanese and English official profile names are preserved verbatim", () =>
   );
   assert.equal(japanese.characterDisplayName, "豪鬼");
   assert.equal(english.characterDisplayName, "AKUMA");
+});
+
+test("profile selection reuses only the exact fresh scope and shares in-flight work", async () => {
+  const key = "ja-jp:synthetic-profile:26";
+  const player = { profileId: "synthetic-profile", characterId: 26, mr: 1500 };
+  const cache = new Map([[key, { fetchedAt: 1_000, player }]]);
+  assert.deepEqual(profileCacheLookup(cache, key, 90_999, 90_000), {
+    hit: true,
+    player,
+  });
+  assert.equal(profileCacheLookup(cache, key, 91_000, 90_000).hit, false);
+  assert.equal(profileCacheLookup(cache, "en:synthetic-profile:26", 2_000, 90_000).hit, false);
+  assert.equal(profileCacheLookup(cache, key, 2_000, 90_000, true).hit, false);
+
+  const flights = new Map();
+  let calls = 0;
+  const factory = async () => {
+    calls += 1;
+    return player;
+  };
+  const first = shareInFlightRequest(flights, key, factory);
+  const second = shareInFlightRequest(flights, key, factory);
+  assert.strictEqual(first, second);
+  assert.strictEqual(await first, player);
+  assert.equal(calls, 1);
 });
 
 test("character id matching prevents another character name from leaking", () => {

@@ -13,13 +13,13 @@
 - 公式サイトへのログインと戦績取得に必要なインターネット接続
 - OBSで表示する場合のみ、OBS Studio（任意）
 
-公開版: v1.4.0
+公開版: v1.5.0
 
 ## ダウンロード
 
-[v1.4.0をダウンロード（GitHub Releases）](https://github.com/mickangumi-oss/match-session-overlay/releases/download/v1.4.0/Match-Session-Overlay-1.4.0-Setup.exe)
+[v1.5.0をダウンロード（GitHub Releases）](https://github.com/mickangumi-oss/match-session-overlay/releases/download/v1.5.0/Match-Session-Overlay-1.5.0-Setup.exe)
 
-開いたページの「Assets」から、`Match-Session-Overlay-1.4.0-Setup.exe`をダウンロードして実行してください。最新版以外のファイルや、配布元を確認できないファイルは使用しないでください。
+開いたページの「Assets」から、`Match-Session-Overlay-1.5.0-Setup.exe`をダウンロードして実行してください。最新版以外のファイルや、配布元を確認できないファイルは使用しないでください。
 
 詳しい操作手順は[`docs/usage.md`](docs/usage.md)、表示レイアウトは[`docs/window-layout.md`](docs/window-layout.md)、対戦履歴は[`docs/match-history.md`](docs/match-history.md)、フォントは[`docs/font-settings.md`](docs/font-settings.md)をご覧ください。
 
@@ -27,7 +27,7 @@
 
 正式な配布インストーラーは、公開前にMicrosoft DefenderおよびVirusTotalでセキュリティチェックを実施します。検査結果は公開時点のものであり、完全な安全性を保証するものではありません。インストーラーは必ずこのリポジトリの公式GitHub Releaseから取得し、各リリースノートに記載されたSHA-256と一致することを確認してください。
 
-`v1.4.0`はMicrosoft Defenderで検出なし、VirusTotalで`0 / 67`（悪意あるファイルの検出なし）を確認しました。SHA-256と公開レポートは[`v1.4.0リリースノート`](docs/release-notes/v1.4.0.md)をご覧ください。
+`v1.5.0`の検査結果は、公開時に[`v1.5.0リリースノート`](docs/release-notes/v1.5.0.md)へ記載します。
 
 ## 画面イメージ
 
@@ -63,24 +63,17 @@ CHARACTER RANKと現在のキャラクター、セッション戦績、FRIENDS�
 
 ![合成データを表示した対戦履歴画面](docs/images/match-history-example.png)
 
-## v1.4.0の変更内容
+## v1.5.0の変更内容
 
-### CHARACTER RANK
+- 初回起動時に日本語／Englishを選択できるようにしました。オプション内の言語設定名も`Language`へ統一しました。
+- ウィンドウとオーバーレイの初期サイズを約10％縮小し、表示項目の追加・削除時は現在のサイズをできるだけ維持するようにしました。
+- 縦表示でグラフをOFFにした際に残っていた余白を解消し、リサイズ処理を調整しました。
+- フォントサイズの設定範囲を30％からに変更しました。
+- 対戦履歴の取得中に、取得できたページから一覧・集計・グラフへ順次反映するようにしました。
+- 表示・取得処理のパフォーマンスを改善しました。公式サイトへの通信間隔と通信回数の制限は従来どおりです。
+- 英語版READMEと英語版利用ガイドを追加しました。
 
-- 順位表示を`CHARACTER RANK`へ変更し、現在のキャラクターで絞り込んだ全プラットフォーム・全HOMEの順位であることを明確にしました。
-- MASTERだけでなく、LP帯のキャラクターでも順位を表示できるようになりました。
-- 新しいランクマッチを取得した後に順位を更新し、セッション開始時またはリセット時からの順位変動を確認しやすくしました。
-- HOME（地域・国）を選択する設定を廃止し、ランキング条件を統一しました。
-
-### 対戦履歴グラフ
-
-- MR／LP推移グラフの最終試合には、公式プロフィールから取得した現在のMR／LPを反映するようにしました。
-
-### セッション戦績
-
-- アプリの終了や再起動、計測の自動停止後も前回のセッション戦績を保持し、次回は続きから計測できるようにしました。戦績はリセットボタンで任意に消去できます。
-
-詳しい変更内容は[`v1.4.0リリースノート`](docs/release-notes/v1.4.0.md)をご覧ください。
+詳しい変更内容は[`v1.5.0リリースノート`](docs/release-notes/v1.5.0.md)をご覧ください。
 
 過去の変更内容は[`docs/release-notes`](docs/release-notes)をご覧ください。
 
@@ -165,7 +158,7 @@ OBSでは、管理画面に表示されるブラウザソースURLをOBSの「�
 
 ### アプリ設定・メンテナンス
 
-- 表示言語
+- Language
 - Windowsサインイン時の自動起動
 - ゲーム起動検知によるオーバーレイ表示
 - ローカルデータの消去

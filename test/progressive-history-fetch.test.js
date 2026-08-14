@@ -36,7 +36,7 @@ test("paginated history fetch publishes each synthetic page before deciding whet
   const stopIndex = source.indexOf("if (result.rawCount < MATCH_HISTORY_PAGE_SIZE) break;");
 
   assert.match(source, /for \(let page = 1; page <= MATCH_HISTORY_MAX_PAGES; page \+= 1\)/);
-  assert.match(source, /const result = await fetchRankedReplaysPage\(profileId, page\)/);
+  assert.match(source, /const result = await fetchRankedReplaysPage\(profileId, page, "history"\)/);
   assert.notEqual(callbackIndex, -1, "the page callback must receive only that page's records");
   assert.notEqual(stopIndex, -1, "the final short page must stop pagination");
   assert.ok(callbackIndex < stopIndex, "a short final page must still be published");
@@ -48,8 +48,10 @@ test("each fetched page merges records and publishes cumulative progress, then c
   assert.match(source, /matchHistoryFetchProgress = \{[\s\S]*?page: 0,[\s\S]*?fetchedCount: 0,/);
   assert.match(source, /fetchedCount \+= replays\.length/);
   assert.match(source, /matchHistoryFetchProgress = \{[\s\S]*?page,[\s\S]*?maxPages: MATCH_HISTORY_MAX_PAGES,[\s\S]*?fetchedCount,/);
-  assert.match(source, /const changed = mergeMatchHistory\(replays, player\.profileId\);/);
+  assert.match(source, /const changed = mergeMatchHistory\(replays, player\.profileId, \{[\s\S]*?persist: false/);
   assert.match(source, /if \(!changed\) sendHistoryState\(\);/);
+  assert.match(source, /sendTrackerState\(\{ persist: false \}\)/);
+  assert.match(source, /persistedDataWriter\.flush\(historyStorePath\(player\.profileId\)\)/);
   assert.match(source, /finally \{[\s\S]*?matchHistoryFetchInFlight = null;[\s\S]*?matchHistoryFetchProgress = null;[\s\S]*?sendHistoryState\(\);/);
 });
 
@@ -71,13 +73,13 @@ test("English and Japanese include loading and fetched-count history messages", 
   assert.match(i18nSource, /historyFetchProgress: "読み込み中：\{page\}\/\{max\}ページ・\{count\}件取得済み"/);
 });
 
-test("selecting another history player refreshes that profile once for its MR rank", () => {
+test("selecting another history player reuses the scoped profile cooldown", () => {
   const selectSource = functionSource(mainSource, "selectHistoryProfile");
   const rankingSource = functionSource(mainSource, "publicRankingState");
 
   assert.match(
     selectSource,
-    /refreshProfilePlayer\(nextHistoryViewPlayer, \{\s*force: true,?\s*\}\)/,
+    /refreshProfilePlayer\(nextHistoryViewPlayer\)/,
   );
   assert.match(rankingSource, /explicitOtherPlayerRankingAllowed\(\{/);
   assert.match(rankingSource, /historyProfileId: historyViewPlayer\?\.profileId/);
