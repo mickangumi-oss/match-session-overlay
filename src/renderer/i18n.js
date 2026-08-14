@@ -275,7 +275,7 @@ const JA = {
   fontNormal: "通常",
   fontItalic: "斜体",
   language: "LANGUAGE",
-  languageHeading: "表示言語",
+  languageHeading: "Language",
   fontStreet: "ストリート",
   fontCondensed: "コンデンス",
   fontSystem: "標準",

@@ -29,6 +29,9 @@ let trackerState = null;
 let displaySettings = { matchType: "ranked" };
 let historyState = { records: [], canFetch: false, authenticated: false, cooldownSeconds: 0 };
 let historyPanelOpen = false;
+let pendingHistoryRenderState = null;
+let historyRenderFrame = null;
+let pendingHistoryPageReset = false;
 const HISTORY_PAGE_SIZE = 10;
 const RECENT_HISTORY_PREVIEW_LIMIT = 5;
 let historyPage = 0;
@@ -131,6 +134,9 @@ const elements = Object.fromEntries(
     "updateProgressBar",
     "notice",
     "languageInput",
+    "initialLanguageLayer",
+    "initialLanguageInput",
+    "confirmInitialLanguageButton",
     "socialFriendsTab",
     "socialFollowingTab",
     "socialRefreshButton",
@@ -718,6 +724,28 @@ function renderHistoryState(nextState = historyState) {
     elements.historyNextButton.disabled = !totalPages || historyPage >= totalPages - 1;
   }
   renderHistoryFetchStatus();
+}
+
+function scheduleHistoryRender(nextState = historyState, { resetPage = false } = {}) {
+  const previousProfileId = historyState?.profileId ?? null;
+  historyState = nextState || { records: [], canFetch: false, authenticated: false, cooldownSeconds: 0 };
+  pendingHistoryRenderState = historyState;
+  pendingHistoryPageReset = pendingHistoryPageReset || resetPage ||
+    previousProfileId !== (historyState?.profileId ?? null);
+  if (!historyPanelOpen) {
+    if (pendingHistoryPageReset) historyPage = 0;
+    pendingHistoryPageReset = false;
+    return;
+  }
+  if (historyRenderFrame != null) return;
+  historyRenderFrame = requestAnimationFrame(() => {
+    historyRenderFrame = null;
+    if (pendingHistoryPageReset) historyPage = 0;
+    pendingHistoryPageReset = false;
+    const latest = pendingHistoryRenderState;
+    pendingHistoryRenderState = null;
+    renderHistoryState(latest);
+  });
 }
 
 function setHistoryPanelOpen(open) {
@@ -1597,6 +1625,15 @@ function renderDisplaySettings(settings) {
   const displayItems = renderDisplayItemVisibility(settings);
   const windowOrientation = settings.windowOrientation ?? "horizontal";
   applyLocale(settings.locale || "ja-jp");
+  if (elements.initialLanguageLayer) {
+    elements.initialLanguageLayer.classList.toggle(
+      "hidden",
+      settings.initialLanguageSelectionRequired !== true,
+    );
+  }
+  if (elements.initialLanguageInput && settings.locale) {
+    elements.initialLanguageInput.value = settings.locale;
+  }
   elements.fontScaleInput.value = String(Math.round(settings.fontScale * 100));
   elements.fontScaleValue.textContent = `${elements.fontScaleInput.value}%`;
   elements.graphLabelScaleInput.value = String(
@@ -1867,12 +1904,12 @@ async function selectHistoryTarget(userCode, { autoFetch = false } = {}) {
   try {
     const result = await unwrap(api.selectHistoryProfile(normalizedCode));
     historyPage = 0;
-    renderHistoryState(result.history);
+    scheduleHistoryRender(result.history, { resetPage: true });
     let currentHistory = result.history;
     if (autoFetch && currentHistory?.viewingOther && currentHistory.canFetch) {
       currentHistory = await unwrap(api.fetchHistory());
       historyPage = 0;
-      renderHistoryState(currentHistory);
+      scheduleHistoryRender(currentHistory, { resetPage: true });
     }
     showNotice(
       currentHistory?.viewingOther
@@ -1903,7 +1940,7 @@ elements.clearHistoryTargetButton?.addEventListener("click", async () => {
   elements.clearHistoryTargetButton.disabled = true;
   try {
     historyPage = 0;
-    renderHistoryState(await unwrap(api.clearHistoryProfile()));
+    scheduleHistoryRender(await unwrap(api.clearHistoryProfile()), { resetPage: true });
     showNotice(t("historyViewingSelf", "Viewing your player"), "success");
   } catch (error) {
     showNotice(error.message, "error");
@@ -1944,7 +1981,7 @@ elements.fetchHistoryButton?.addEventListener("click", async () => {
   elements.fetchHistoryButton.disabled = true;
   try {
     historyPage = 0;
-    renderHistoryState(await unwrap(api.fetchHistory()));
+    scheduleHistoryRender(await unwrap(api.fetchHistory()), { resetPage: true });
     showNotice(t("historyFetched", "Match history imported locally"), "success");
   } catch (error) {
     showNotice(error.message, "error");
@@ -2474,6 +2511,32 @@ elements.languageInput?.addEventListener("change", async () => {
   }
 });
 
+if (elements.initialLanguageInput && localeApi?.LOCALES) {
+  for (const [value, label] of Object.entries(localeApi.LOCALES)) {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = label;
+    elements.initialLanguageInput.append(option);
+  }
+}
+
+elements.initialLanguageInput?.addEventListener("change", () => {
+  applyLocale(elements.initialLanguageInput.value);
+});
+
+elements.confirmInitialLanguageButton?.addEventListener("click", async () => {
+  const locale = elements.initialLanguageInput.value;
+  elements.confirmInitialLanguageButton.disabled = true;
+  try {
+    renderDisplaySettings(await unwrap(api.updateDisplaySettings({ locale })));
+    await populateInstalledFonts(displaySettings.fontFamily);
+  } catch (error) {
+    elements.confirmInitialLanguageButton.disabled = false;
+    applyLocale(displaySettings.locale || "ja-jp");
+    showNotice(error.message, "error");
+  }
+});
+
 elements.chooseGameButton.addEventListener("click", async () => {
   try {
     const previousExecutable = displaySettings.gameExecutableName;
@@ -2603,8 +2666,7 @@ elements.installUpdateButton.addEventListener("click", async () => {
 
 api.onState(renderTracker);
 api.onHistoryState?.((state) => {
-  historyPage = 0;
-  renderHistoryState(state);
+  scheduleHistoryRender(state);
 });
 api.onSocialState?.(renderSocialState);
 api.onUpdateState(renderUpdate);

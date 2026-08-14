@@ -48,7 +48,7 @@ test("graph-only output has readable orientation-specific minimum sizes", () => 
   assert.match(mainSource, /const graphOnly = metricCount === 0 && graphVisible/);
 });
 
-test("horizontal cards with a graph cannot shrink below a readable size", () => {
+test("horizontal graph layouts keep thin readable cards in both window modes", () => {
   const mainSource = fs.readFileSync(
     path.join(__dirname, "..", "src", "main.js"),
     "utf8",
@@ -56,7 +56,7 @@ test("horizontal cards with a graph cannot shrink below a readable size", () => 
 
   assert.match(
     mainSource,
-    /const HORIZONTAL_GRAPH_WITH_METRICS_MINIMUM_SIZE = \{\s*width:\s*520,\s*height:\s*240,\s*\}/,
+    /const HORIZONTAL_GRAPH_WITH_METRICS_MINIMUM_SIZE = \{\s*window:\s*\{ width: 520, height: 229 \},\s*overlay:\s*\{ width: 520, height: 229 \},\s*\}/,
   );
   assert.match(
     mainSource,
@@ -64,7 +64,11 @@ test("horizontal cards with a graph cannot shrink below a readable size", () => 
   );
   assert.match(
     mainSource,
-    /horizontalGraphWithMetrics\s*\? HORIZONTAL_GRAPH_WITH_METRICS_MINIMUM_SIZE\.height/,
+    /HORIZONTAL_GRAPH_WITH_METRICS_MINIMUM_SIZE\[isOverlay \? "overlay" : "window"\]/,
+  );
+  assert.match(
+    mainSource,
+    /horizontalGraphWithMetrics\s*\? horizontalGraphWithMetricsMinimum\.height/,
   );
   assert.match(mainSource, /const minimumCardWidth = 104/);
 });

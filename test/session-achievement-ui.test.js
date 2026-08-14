@@ -44,6 +44,18 @@ test("window and overlay omit identity and supplemental labels but show achievem
   assert.match(renderer, /elements\.sessionPeakRating\.textContent/);
 });
 
+test("window and overlay show CHARACTER RANK as digits only", () => {
+  const stats = read("src/renderer/stats.js");
+  const management = read("src/renderer/renderer.js");
+  assert.match(
+    stats,
+    /elements\.mrRank\.textContent = Number\.isFinite\(mrRank\)[\s\S]*?new Intl\.NumberFormat\(locale\)\.format\(mrRank\)/,
+  );
+  assert.doesNotMatch(stats, /format\(mrRank\)\}位/);
+  assert.doesNotMatch(stats, /#\$\{new Intl\.NumberFormat\(locale\)\.format\(mrRank\)\}/);
+  assert.match(management, /format\(rank\)\}位/);
+});
+
 test("numeric fitting includes large LP and six-digit rank output without horizontal transforms", () => {
   const renderer = read("src/renderer/stats.js");
   const css = read("src/renderer/stats.css");

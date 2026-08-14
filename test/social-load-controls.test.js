@@ -16,8 +16,8 @@ test("main process pauses forgotten FRIENDS polling and exposes resume activity"
   assert.match(main, /resetFriendNotificationBaseline\(\);[\s\S]*?scheduleSocialRefresh\(\{ immediate: true \}\)/);
   assert.match(main, /socialMonitoringGeneration \+= 1;[\s\S]*?socialServiceAbortControllers[\s\S]*?controller\.abort\(\)/);
   assert.match(main, /scope === "social" && socialSuspended/);
-  assert.match(main, /loadBuildId\(false, requestScope\)/);
-  assert.match(main, /fetchServiceWithRateLimit\([\s\S]*?\{ scope: requestScope \}/);
+  assert.match(main, /loadBuildId\(false, requestScope, requestPriority\)/);
+  assert.match(main, /fetchServiceWithRateLimit\([\s\S]*?\{ scope: requestScope, priority: requestPriority \}/);
   assert.match(main, /"social:activity"[\s\S]{0,120}recordSocialActivity\(\)/);
   assert.match(main, /socialPaused: japanese \? "FRIENDS取得休止中"/);
 });

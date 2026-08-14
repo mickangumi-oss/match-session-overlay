@@ -1478,8 +1478,9 @@ body.remote-overlay {
 .stats-window.vertical .summary > .record-group,
 .stats-window.vertical .summary > .metric-group {
   width: 100%;
-  height: 100% !important;
+  height: auto !important;
   min-height: 54px !important;
+  align-self: stretch;
   padding: 7px 9px !important;
 }
 
@@ -1631,4 +1632,53 @@ body.remote-overlay {
 .remote-overlay .floating-window-actions,
 .stats-window.overlay.locked .floating-window-actions {
   display: none !important;
+}
+
+/* When metrics and the graph are visible together, resizing the window should
+   make the metric cards easier to read instead of stretching the graph into a
+   large empty panel. Graph-only output still fills the complete window and
+   no-chart output still gives all available height to the cards. */
+.stats-window:not(.no-chart):not(.no-metrics) {
+  --stats-chart-track-height: 160px;
+  grid-template-rows:
+    minmax(44px, 1fr)
+    minmax(70px, var(--stats-chart-track-height)) !important;
+}
+
+.stats-window.overlay:not(.vertical):not(.no-chart):not(.no-metrics) {
+  --stats-chart-track-height: 160px;
+}
+
+.stats-window:not(.vertical):not(.no-chart):not(.no-metrics) .summary > .metric-group,
+.stats-window:not(.vertical):not(.no-chart):not(.no-metrics) .summary > .record-group {
+  min-height: 44px !important;
+}
+
+.stats-window:not(.vertical):not(.no-chart):not(.no-metrics) .summary {
+  grid-template-rows: minmax(44px, 1fr) !important;
+}
+
+.stats-window.vertical:not(.no-chart):not(.no-metrics) {
+  --stats-chart-track-height: 210px;
+}
+
+.stats-window.vertical.overlay:not(.no-chart):not(.no-metrics) {
+  --stats-chart-track-height: 210px;
+}
+
+.stats-window.vertical:not(.no-chart):not(.no-metrics) .summary,
+.stats-window.vertical.overlay:not(.no-chart):not(.no-metrics) .summary {
+  grid-template-rows:
+    repeat(var(--visible-card-count, 1), minmax(68px, 1fr)) !important;
+  align-content: stretch;
+}
+
+.stats-window.vertical.no-chart:not(.no-metrics) .summary {
+  grid-template-rows:
+    repeat(var(--visible-card-count, 1), minmax(68px, 1fr)) !important;
+  align-content: stretch;
+}
+
+.stats-window:not(.no-chart):not(.no-metrics) .stats-chart {
+  height: 100% !important;
 }

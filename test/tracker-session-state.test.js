@@ -92,7 +92,7 @@ test("main and management UI keep stopped sessions until an explicit reset or lo
   const renderer = fs.readFileSync(path.join(root, "src/renderer/renderer.js"), "utf8");
 
   assert.match(main, /trackerSessionPath = path\.join\(userDataPath, "tracker-session\.json"\)/);
-  assert.match(main, /function sendTrackerState\(\) \{\s*const state = publicTrackerState\(\);\s*persistTrackerSession\(\)/);
+  assert.match(main, /function sendTrackerState\(\{ persist = true \} = \{\}\) \{\s*const state = publicTrackerState\(\);\s*if \(persist\) persistTrackerSession\(\)/);
   assert.match(main, /function stopTracking\(\{ discard = false \} = \{\}\)/);
   assert.match(main, /\["idle", "manual", "restart"\]\.includes\(trackerState\.stopReason\)/);
   assert.match(main, /stopTracking\(\{ discard: true \}\)/);
