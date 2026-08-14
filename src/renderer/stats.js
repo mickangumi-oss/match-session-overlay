@@ -557,9 +557,7 @@ function renderTracker(state) {
   const mrRank = Number(presentation.mrRank ?? state?.ranking?.rank);
   const locale = displaySettings?.locale || "ja-jp";
   elements.mrRank.textContent = Number.isFinite(mrRank) && mrRank > 0
-    ? locale === "ja-jp"
-      ? `${new Intl.NumberFormat(locale).format(mrRank)}位`
-      : `#${new Intl.NumberFormat(locale).format(mrRank)}`
+    ? new Intl.NumberFormat(locale).format(mrRank)
     : (presentation.mrRankLoading ?? state?.ranking?.status === "loading")
       ? "…"
       : "—";

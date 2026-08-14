@@ -13,6 +13,8 @@ This guide covers the basic steps after installing Match Session Overlay.
 
 If Windows shows a warning, check both the source and the filename. Do not run a redistributed installer from an unknown source.
 
+On the first launch, choose Japanese or English. You can change it later from **Language** in **Options**.
+
 ## 2. Sign in to the official website
 
 In **Player Connection**, select **Open Official Website** and sign in on the official website's sign-in page. Match Session Overlay does not read or store your ID or password.
@@ -67,7 +69,7 @@ The settings screen includes:
 - Graph visibility, match count, axis size, and POTENTIAL reference line
 - Background transparency, font, size, style, and colors
 - Match retrieval interval and OBS browser-source URL
-- Display language, Windows startup, and game-launch detection
+- Language, Windows startup, and game-launch detection
 - Friend online notification timing, sound, volume, duration, and background
 - Local-data deletion and update checks
 

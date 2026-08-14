@@ -52,6 +52,13 @@ const {
   sanitizeDisplayItems,
   visibleMetricCount,
 } = require("./display-settings");
+const {
+  compactStatsWindowInitialSize,
+  expandBoundsToMinimumHeight,
+  resizeBoundsForGraphVisibility,
+  statsWindowSizeConstraints,
+} = require("./stats-window-size");
+const { suggestedInitialLocale } = require("./initial-language");
 const { buildPresentationState } = require("./presentation-model");
 const { applyCurrentProfileRatings } = require("./history-current-rating");
 const {
@@ -106,6 +113,8 @@ const {
   sanitizeWindowsNotificationSound,
 } = require("./windows-notification-sounds");
 const { createUpdater } = require("./updater");
+const { createDebouncedAtomicWriter } = require("./debounced-atomic-writer");
+const { ServiceRequestScheduler } = require("./service-request-scheduler");
 const {
   assertUpdateAllowed,
   resolveUpdateRequirement,
@@ -184,8 +193,8 @@ const GRAPH_ONLY_MINIMUM_SIZE = {
   vertical: { width: 360, height: 220 },
 };
 const HORIZONTAL_GRAPH_WITH_METRICS_MINIMUM_SIZE = {
-  width: 520,
-  height: 240,
+  window: { width: 520, height: 229 },
+  overlay: { width: 520, height: 229 },
 };
 const FONT_KEYS = new Set(["street", "condensed", "system", "japanese", "mono"]);
 const FONT_FAMILY_PATTERN = /^[\p{L}\p{M}\p{N}\p{Zs}._&'()\-+#@]{1,100}$/u;
@@ -319,6 +328,7 @@ const PROFILE_REFRESH_COOLDOWN_MS = 90 * 1000;
 fs.mkdirSync(userDataPath, { recursive: true });
 fs.mkdirSync(sessionDataPath, { recursive: true });
 fs.mkdirSync(matchHistoryDirectory, { recursive: true });
+const persistedDataWriter = createDebouncedAtomicWriter({ delayMs: 350 });
 app.setPath("userData", userDataPath);
 app.setPath("sessionData", sessionDataPath);
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
@@ -343,11 +353,14 @@ let startTrackingInFlight = null;
 let authenticationInFlight = null;
 let localeRefreshInFlight = null;
 let trackingSessionId = 0;
-let serviceRequestQueue = Promise.resolve();
-let lastServiceRequestAt = 0;
+const serviceRequestScheduler = new ServiceRequestScheduler({
+  minStartGapMs: SERVICE_REQUEST_MIN_GAP_MS,
+  maxPriorityBurst: 3,
+});
 let serviceRetryBlockedUntil = 0;
 let privateDataGeneration = 0;
 let privateDataClearing = false;
+let persistenceReadyForQuit = false;
 const serviceAbortControllers = new Set();
 const socialServiceAbortControllers = new Set();
 let displaySettingsWriteTimer;
@@ -362,6 +375,7 @@ let applyingStatsBounds = false;
 let overlayEditMode = false;
 let overlayEditPreference = false;
 let hasPersistedDisplaySettings = fs.existsSync(displaySettingsPath);
+let initialLanguageSelectionRequired = true;
 let statsWindowDrag = null;
 let updater;
 let updateRequired = false;
@@ -379,6 +393,9 @@ let trackerState = restoredTrackerSession.trackerState;
 let sessionAchievementState = restoredTrackerSession.achievementState;
 let historySessionAchievementState = createSessionAchievementState();
 const matchHistoryStores = new Map();
+const matchHistoryRevisions = new Map();
+const historyDerivedCache = new Map();
+const historySummaryCache = new Map();
 const historyProfileLookupCache = new Map();
 const profileRefreshCache = new Map();
 const profileRefreshInFlight = new Map();
@@ -529,7 +546,7 @@ try {
   if (Number.isFinite(Number(savedSettings.fontScale))) {
     displaySettings.fontScale = Math.min(
       2,
-      Math.max(0.75, Number(savedSettings.fontScale)),
+      Math.max(0.3, Number(savedSettings.fontScale)),
     );
   }
   if (Number.isFinite(Number(savedSettings.graphLabelScale))) {
@@ -566,6 +583,7 @@ try {
   }
   if (LOCALE_KEYS.has(savedSettings.locale)) {
     displaySettings.locale = savedSettings.locale;
+    initialLanguageSelectionRequired = false;
   }
   const legacyAutoLaunch = savedSettings.autoLaunchWithGame === true;
   displaySettings.launchAtLogin =
@@ -753,6 +771,19 @@ function emptyMatchHistoryStore() {
   return { version: 1, lastFetchedAt: 0, records: [] };
 }
 
+function historyRevision(profileId) {
+  const normalizedProfileId = normalizeHistoryProfileId(profileId);
+  return normalizedProfileId ? matchHistoryRevisions.get(normalizedProfileId) ?? 0 : 0;
+}
+
+function bumpHistoryRevision(profileId) {
+  const normalizedProfileId = normalizeHistoryProfileId(profileId);
+  if (!normalizedProfileId) return;
+  matchHistoryRevisions.set(normalizedProfileId, historyRevision(normalizedProfileId) + 1);
+  historyDerivedCache.delete(normalizedProfileId);
+  historySummaryCache.delete(normalizedProfileId);
+}
+
 function normalizeMatchHistoryStore(value) {
   const records = Array.isArray(value) ? value : value?.records;
   const deduplicated = new Map(
@@ -794,17 +825,10 @@ function persistMatchHistoryStore(profileId, store = loadMatchHistoryStore(profi
   const filePath = historyStorePath(normalizedProfileId);
   if (!normalizedProfileId || !filePath || !store) return false;
   trimMatchHistoryStore(normalizedProfileId, store);
-  try {
-    fs.writeFileSync(
-      filePath,
-      JSON.stringify(store, null, 2),
-      "utf8",
-    );
-    return true;
-  } catch {
-    // Local history is an enhancement; a full disk must not stop tracking.
-    return false;
-  }
+  persistedDataWriter
+    .schedule(filePath, JSON.stringify(store, null, 2))
+    .catch(() => {});
+  return true;
 }
 
 function migrateLegacyMatchHistory() {
@@ -832,7 +856,14 @@ function migrateLegacyMatchHistory() {
       matchHistoryStores.set(profileId, merged);
       migrated = persistMatchHistoryStore(profileId, merged) && migrated;
     }
-    if (migrated) fs.rmSync(matchHistoryPath, { force: true });
+    if (migrated) {
+      persistedDataWriter
+        .flushAll()
+        .then(() => fs.promises.rm(matchHistoryPath, { force: true }))
+        .catch(() => {
+          // Keep the legacy file when an atomic target write cannot complete.
+        });
+    }
   } catch {
     // Leave the legacy file in place if migration cannot be completed.
   }
@@ -846,7 +877,11 @@ function activeHistoryProfileId() {
   );
 }
 
-function mergeMatchHistory(replays, profileId) {
+function mergeMatchHistory(
+  replays,
+  profileId,
+  { persist = true } = {},
+) {
   const normalizedProfileId = normalizeHistoryProfileId(profileId);
   if (!normalizedProfileId || !Array.isArray(replays)) return false;
   const store = loadMatchHistoryStore(normalizedProfileId);
@@ -879,7 +914,8 @@ function mergeMatchHistory(replays, profileId) {
   const retentionChanged = retained.length !== existing.size;
   if (!changed && !retentionChanged) return false;
   store.records = retained;
-  persistMatchHistoryStore(normalizedProfileId, store);
+  bumpHistoryRevision(normalizedProfileId);
+  if (persist) persistMatchHistoryStore(normalizedProfileId, store);
   sendHistoryState();
   return true;
 }
@@ -889,6 +925,7 @@ function applyCurrentProfileRatingsToHistory(player, { replayIds = [] } = {}) {
   if (!profileId) return false;
   const store = loadMatchHistoryStore(profileId);
   if (!applyCurrentProfileRatings(store.records, player, { replayIds })) return false;
+  bumpHistoryRevision(profileId);
   persistMatchHistoryStore(profileId, store);
   sendHistoryState();
   return true;
@@ -911,15 +948,16 @@ function loadPersistedTrackerSession() {
 
 function persistTrackerSession() {
   const payload = buildTrackerSessionPayload(trackerState, sessionAchievementState);
-  try {
-    if (!payload) {
-      fs.rmSync(trackerSessionPath, { force: true });
-      return;
-    }
-    fs.writeFileSync(trackerSessionPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
-  } catch {
+  if (privateDataClearing) return;
+  const operation = payload
+    ? persistedDataWriter.schedule(
+        trackerSessionPath,
+        `${JSON.stringify(payload, null, 2)}\n`,
+      )
+    : persistedDataWriter.remove(trackerSessionPath);
+  operation.catch(() => {
     // A session save failure must not interrupt match monitoring.
-  }
+  });
 }
 
 function publicHistoryState(
@@ -1064,6 +1102,7 @@ async function runHistoryViewPoll(sessionId) {
       );
       historyViewPlayer = await refreshProfilePlayer(playerHint, {
         force: true,
+        priority: "live",
       });
       applyCurrentProfileRatingsToHistory(historyViewPlayer, {
         replayIds: newReplays
@@ -1111,8 +1150,22 @@ async function runHistoryViewPoll(sessionId) {
 
 function historyViewTrackerState() {
   if (!historyViewPlayer) return null;
-  const records = loadMatchHistoryStore(historyViewPlayer.profileId).records;
-  const summary = buildHistoryRatingState(records, historyViewPlayer);
+  const profileId = normalizeHistoryProfileId(historyViewPlayer.profileId);
+  const records = loadMatchHistoryStore(profileId).records;
+  const summaryKey = [
+    historyRevision(profileId),
+    Number(historyViewPlayer.characterId) || 0,
+    Number(historyViewPlayer.mr) || 0,
+    Number(historyViewPlayer.lp) || 0,
+    String(historyViewPlayer.ratingSource ?? ""),
+  ].join(":");
+  const cachedSummary = historySummaryCache.get(profileId);
+  const summary = cachedSummary?.key === summaryKey
+    ? cachedSummary.value
+    : buildHistoryRatingState(records, historyViewPlayer);
+  if (cachedSummary?.key !== summaryKey) {
+    historySummaryCache.set(profileId, { key: summaryKey, value: summary });
+  }
   return {
     ...createEmptyTrackerState(),
     active: historyViewPollingActive,
@@ -1172,24 +1225,10 @@ function publicMedianRating(sourceState) {
   const characterId = Number(
     sourceState?.characterId ?? sourceState?.player?.characterId ?? authenticatedPlayer?.characterId,
   ) || null;
-  let values = [];
-  if (profileId) {
-    const records = loadMatchHistoryStore(profileId).records
-      .filter(
-        (record) =>
-          record.matchType === "ranked" &&
-          record.ownRatingType === ratingType &&
-          (characterId == null || Number(record.characterId) === characterId),
-      )
-      .sort(
-        (a, b) => Number(a.playedAt ?? a.uploadedAt) - Number(b.playedAt ?? b.uploadedAt),
-      );
-    values = records
-      .map((record) => Number(record.ownRating))
-      .filter(Number.isFinite)
-      .filter((value) => ratingType !== "LP" || value > 0)
-      .slice(-MEDIAN_RATING_SAMPLE_LIMIT);
-  }
+  let values = profileId
+    ? rankedHistorySeries(profileId, characterId, ratingType).values
+        .slice(-MEDIAN_RATING_SAMPLE_LIMIT)
+    : [];
   if (values.length < 2) {
     const history = Array.isArray(sourceState?.stats?.ranked?.ratingHistory)
       ? sourceState.stats.ranked.ratingHistory
@@ -1208,6 +1247,34 @@ function publicMedianRating(sourceState) {
   };
 }
 
+function rankedHistorySeries(profileId, characterId, ratingType) {
+  const normalizedProfileId = normalizeHistoryProfileId(profileId);
+  if (!normalizedProfileId) return { records: [], values: [] };
+  const normalizedCharacterId = Number(characterId) || null;
+  const normalizedRatingType = ratingType === "LP" ? "LP" : "MR";
+  const cacheKey = `${historyRevision(normalizedProfileId)}:${normalizedCharacterId ?? "all"}:${normalizedRatingType}`;
+  const cached = historyDerivedCache.get(normalizedProfileId);
+  if (cached?.key === cacheKey) return cached.value;
+  const records = loadMatchHistoryStore(normalizedProfileId).records
+    .filter(
+      (record) =>
+        record.matchType === "ranked" &&
+        record.ownRatingType === normalizedRatingType &&
+        Number.isFinite(Number(record.ownRating)) &&
+        (normalizedRatingType !== "LP" || Number(record.ownRating) > 0) &&
+        (normalizedCharacterId == null || Number(record.characterId) === normalizedCharacterId),
+    )
+    .sort(
+      (a, b) => Number(a.playedAt ?? a.uploadedAt) - Number(b.playedAt ?? b.uploadedAt),
+    );
+  const value = {
+    records,
+    values: records.map((record) => Number(record.ownRating)),
+  };
+  historyDerivedCache.set(normalizedProfileId, { key: cacheKey, value });
+  return value;
+}
+
 function publicGraphData(sourceState) {
   const profileId = normalizeHistoryProfileId(
     sourceState?.player?.profileId ?? authenticatedProfileId,
@@ -1216,22 +1283,12 @@ function publicGraphData(sourceState) {
     sourceState?.characterId ?? sourceState?.player?.characterId,
   ) || null;
   const ratingType = sourceState?.ratingType === "LP" ? "LP" : "MR";
-  const localRecords = profileId
-    ? loadMatchHistoryStore(profileId).records
-        .filter(
-          (record) =>
-            record.matchType === "ranked" &&
-            record.ownRatingType === ratingType &&
-            Number.isFinite(Number(record.ownRating)) &&
-            (ratingType !== "LP" || Number(record.ownRating) > 0) &&
-            (characterId == null || Number(record.characterId) === characterId),
-        )
-        .sort(
-          (a, b) => Number(a.playedAt ?? a.uploadedAt) - Number(b.playedAt ?? b.uploadedAt),
-        )
-    : [];
+  const localSeries = profileId
+    ? rankedHistorySeries(profileId, characterId, ratingType)
+    : { records: [], values: [] };
+  const localRecords = localSeries.records;
   if (localRecords.length) {
-    const values = localRecords.map((record) => Number(record.ownRating));
+    const values = localSeries.values;
     // Keep the same visual convention as the live session graph: the first
     // point is the baseline and each following point represents one match.
     return {
@@ -1495,9 +1552,9 @@ function broadcastOverlayState() {
   }
 }
 
-function sendTrackerState() {
+function sendTrackerState({ persist = true } = {}) {
   const state = publicTrackerState();
-  persistTrackerSession();
+  if (persist) persistTrackerSession();
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send("tracker:state", state);
   }
@@ -1515,6 +1572,7 @@ function publicDisplaySettings({ statsWindowVisible } = {}) {
   return {
     ...displaySettings,
     friendOnlineNotificationSoundOptions: windowsNotificationSounds,
+    initialLanguageSelectionRequired,
     overlayInteractionLocked: !overlayEditMode,
     statsWindowVisible: statsWindowVisible ?? actualStatsWindowVisible,
   };
@@ -1620,12 +1678,21 @@ function statsWindowPresetFor(mode = displaySettings.mode) {
   const graphOnlyMinimum = GRAPH_ONLY_MINIMUM_SIZE[
     isVertical ? "vertical" : "horizontal"
   ];
+  const horizontalGraphWithMetricsMinimum =
+    HORIZONTAL_GRAPH_WITH_METRICS_MINIMUM_SIZE[isOverlay ? "overlay" : "window"];
   if (isVertical) {
     const cardHeight = isOverlay ? 76 : 86;
     const cardArea = metricCount
       ? metricCount * cardHeight + Math.max(0, metricCount - 1) * 8
       : 0;
     const graphArea = graphVisible ? (isOverlay ? 184 : 230) : 0;
+    const minimumCardArea = metricCount
+      ? metricCount * 68 + Math.max(0, metricCount - 1) * 8
+      : 0;
+    const fixedGraphArea = graphVisible ? 210 : 0;
+    const fixedLayoutMinimumHeight = metricCount && graphVisible
+      ? minimumCardArea + fixedGraphArea + 7 + 18
+      : 0;
     const contentGap = metricCount && graphVisible ? 8 : 0;
     const outerAllowance = metricCount || !graphVisible ? 20 : 8;
     const height = Math.min(
@@ -1641,7 +1708,14 @@ function statsWindowPresetFor(mode = displaySettings.mode) {
       minWidth: graphOnly ? graphOnlyMinimum.width : 300,
       minHeight: graphOnly
         ? graphOnlyMinimum.height
-        : Math.min(height, Math.max(82, cardArea + (graphVisible ? 130 : 0) + 12)),
+        : Math.min(
+            height,
+            Math.max(
+              82,
+              cardArea + (graphVisible ? 130 : 0) + 12,
+              fixedLayoutMinimumHeight,
+            ),
+          ),
       maxWidth: 600,
       maxHeight: 1100,
     };
@@ -1662,7 +1736,7 @@ function statsWindowPresetFor(mode = displaySettings.mode) {
     1000,
     Math.max(
       horizontalGraphWithMetrics
-        ? HORIZONTAL_GRAPH_WITH_METRICS_MINIMUM_SIZE.width
+        ? horizontalGraphWithMetricsMinimum.width
         : graphVisible
           ? 380
           : 300,
@@ -1681,9 +1755,9 @@ function statsWindowPresetFor(mode = displaySettings.mode) {
     height,
     minWidth: graphOnly ? Math.max(minWidth, graphOnlyMinimum.width) : minWidth,
     minHeight: graphOnly
-      ? graphOnlyMinimum.height
-      : horizontalGraphWithMetrics
-        ? HORIZONTAL_GRAPH_WITH_METRICS_MINIMUM_SIZE.height
+        ? graphOnlyMinimum.height
+        : horizontalGraphWithMetrics
+        ? horizontalGraphWithMetricsMinimum.height
         : Math.max(
             68,
             Math.min(
@@ -1697,7 +1771,36 @@ function statsWindowPresetFor(mode = displaySettings.mode) {
 }
 
 function currentStatsWindowPreset() {
-  return statsWindowPresetFor(displaySettings.mode);
+  const preset = statsWindowPresetFor(displaySettings.mode);
+  return {
+    ...preset,
+    ...compactStatsWindowInitialSize(preset),
+  };
+}
+
+function applyStatsWindowSizeConstraints({ preserveCurrentSize = false } = {}) {
+  if (!statsWindow || statsWindow.isDestroyed()) return;
+  const preset = currentStatsWindowPreset();
+  const currentBounds = preserveCurrentSize ? statsWindow.getBounds() : null;
+  const constraints = statsWindowSizeConstraints(preset, currentBounds);
+  statsWindow.setMinimumSize(constraints.minWidth, constraints.minHeight);
+  statsWindow.setMaximumSize(constraints.maxWidth, constraints.maxHeight);
+}
+
+function resizeStatsWindowForGraphVisibility(previousPreset) {
+  if (!statsWindow || statsWindow.isDestroyed()) return;
+  const nextPreset = statsWindowPresetFor(displaySettings.mode);
+  const nextBounds = resizeBoundsForGraphVisibility(
+    statsWindow.getBounds(),
+    previousPreset,
+    nextPreset,
+  );
+  const constraints = statsWindowSizeConstraints(nextPreset, nextBounds);
+  statsWindow.setMinimumSize(constraints.minWidth, constraints.minHeight);
+  statsWindow.setMaximumSize(constraints.maxWidth, constraints.maxHeight);
+  applyingStatsBounds = true;
+  statsWindow.setBounds(nextBounds, true);
+  applyingStatsBounds = false;
 }
 
 function sendDisplaySettings() {
@@ -1778,8 +1881,7 @@ function applyDisplayMode({
     statsWindow.hide();
   }
   const preset = currentStatsWindowPreset();
-  statsWindow.setMinimumSize(preset.minWidth, preset.minHeight);
-  statsWindow.setMaximumSize(preset.maxWidth, preset.maxHeight);
+  applyStatsWindowSizeConstraints();
   if (resizeToPreset) {
     const savedBounds = restoreSavedBounds
       ? savedStatsWindowBounds()
@@ -1813,9 +1915,11 @@ function updateDisplaySettings(
   { forceOverlayLocked = false } = {},
 ) {
   ensureUpdateAllowed();
+  const wasInitialLanguageSelectionRequired = initialLanguageSelectionRequired;
   const previousMode = displaySettings.mode;
   const previousOrientation = displaySettings.windowOrientation;
   const previousDisplayItems = { ...displaySettings.displayItems };
+  const previousStatsPreset = statsWindowPresetFor(previousMode);
   const previousMatchType = displaySettings.matchType;
   const previousLocale = displaySettings.locale;
   const previousPollInterval = displaySettings.pollIntervalSeconds;
@@ -1853,7 +1957,7 @@ function updateDisplaySettings(
   if (Number.isFinite(Number(nextSettings.fontScale))) {
     displaySettings.fontScale = Math.min(
       2,
-      Math.max(0.75, Number(nextSettings.fontScale)),
+      Math.max(0.3, Number(nextSettings.fontScale)),
     );
   }
   if (Number.isFinite(Number(nextSettings.graphLabelScale))) {
@@ -1890,6 +1994,8 @@ function updateDisplaySettings(
     previousDisplayItems,
     displaySettings.displayItems,
   );
+  const graphVisibilityChanging =
+    previousDisplayItems.graph !== displaySettings.displayItems.graph;
   const nextFontFamily = normalizeFontFamily(nextSettings.fontFamily);
   if (nextFontFamily) displaySettings.fontFamily = nextFontFamily;
   if (["normal", "italic"].includes(nextSettings.fontStyle)) {
@@ -1903,6 +2009,7 @@ function updateDisplaySettings(
   }
   if (LOCALE_KEYS.has(nextSettings.locale)) {
     displaySettings.locale = nextSettings.locale;
+    initialLanguageSelectionRequired = false;
   }
   if (previousLocale !== displaySettings.locale) {
     // The Next.js build id and data route are locale-scoped. Do not reuse a
@@ -1978,17 +2085,46 @@ function updateDisplaySettings(
       Math.max(0, Number(nextSettings.friendOnlineNotificationVolume)),
     );
   }
+  const layoutModeChanging =
+    previousMode !== displaySettings.mode ||
+    previousOrientation !== displaySettings.windowOrientation;
   applyDisplayMode({
-    resizeToPreset:
-      previousMode !== displaySettings.mode ||
-      previousOrientation !== displaySettings.windowOrientation ||
-      displayItemsChanging,
-    restoreSavedBounds:
-      previousMode !== displaySettings.mode ||
-      previousOrientation !== displaySettings.windowOrientation,
+    resizeToPreset: layoutModeChanging,
+    restoreSavedBounds: layoutModeChanging,
   });
+  if (!layoutModeChanging && graphVisibilityChanging) {
+    // Preserve the selected width and position, but remove or add the graph's
+    // real content height so vertical layouts never retain an empty panel.
+    resizeStatsWindowForGraphVisibility(previousStatsPreset);
+  } else if (!layoutModeChanging && displayItemsChanging) {
+    // Adding or removing cards changes the recommended constraints, but it must
+    // not replace the size and position explicitly chosen by the user. When
+    // cards are added, however, expand only the height needed to keep the
+    // fixed graph row below the complete vertical card stack.
+    const currentBounds = statsWindow.getBounds();
+    const expandedBounds = expandBoundsToMinimumHeight(
+      currentBounds,
+      statsWindowPresetFor(displaySettings.mode),
+    );
+    if (expandedBounds.height !== currentBounds.height) {
+      applyingStatsBounds = true;
+      statsWindow.setBounds(expandedBounds, true);
+      applyingStatsBounds = false;
+    }
+    applyStatsWindowSizeConstraints({ preserveCurrentSize: true });
+  }
   scheduleSettingsWrite();
   sendDisplaySettings();
+  if (wasInitialLanguageSelectionRequired && !initialLanguageSelectionRequired) {
+    checkAuthentication()
+      .then(({ player }) => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send("auth:player", player);
+        }
+      })
+      .catch(() => {});
+    if (mainWindow?.isVisible()) scheduleSocialRefresh({ immediate: true });
+  }
   if (previousMatchType !== displaySettings.matchType) {
     // The shared presentation model includes match-type-specific W/L and
     // delta values. Push a fresh model with the settings event so the
@@ -2770,6 +2906,7 @@ function createMainWindow() {
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   loadRendererFile(mainWindow, path.join(__dirname, "renderer", "index.html"));
   mainWindow.webContents.once("did-finish-load", () => {
+    if (initialLanguageSelectionRequired) return;
     checkAuthentication()
       .then(({ player }) => {
         if (mainWindow && !mainWindow.isDestroyed()) {
@@ -2783,6 +2920,7 @@ function createMainWindow() {
   });
   mainWindow.on("show", () => {
     recordSocialActivity({ schedule: false });
+    if (initialLanguageSelectionRequired) return;
     scheduleSocialRefresh({ immediate: true });
   });
   mainWindow.on("hide", () => {
@@ -2976,7 +3114,12 @@ async function clearPrivateDataWithConfirmation() {
   if (response !== 0) return { cleared: false };
 
   privateDataClearing = true;
+  const clearedGeneration = privateDataGeneration;
   privateDataGeneration += 1;
+  serviceRequestScheduler.cancel({
+    generation: clearedGeneration,
+    reason: "Private data was cleared.",
+  });
   for (const controller of serviceAbortControllers) controller.abort();
   serviceAbortControllers.clear();
   stopTracking({ discard: true });
@@ -2995,7 +3138,11 @@ async function clearPrivateDataWithConfirmation() {
     privateDataClearing = false;
     throw error;
   }
+  await persistedDataWriter.cancelAll();
   matchHistoryStores.clear();
+  matchHistoryRevisions.clear();
+  historyDerivedCache.clear();
+  historySummaryCache.clear();
   historyProfileLookupCache.clear();
   profileRefreshCache.clear();
   profileRefreshInFlight.clear();
@@ -3073,11 +3220,14 @@ function serviceRateLimitError(retryAfterHeader = null) {
   return error;
 }
 
-function fetchServiceWithRateLimit(url, options, { scope = null } = {}) {
+function fetchServiceWithRateLimit(
+  url,
+  options,
+  { scope = null, priority = "interactive" } = {},
+) {
   const generation = privateDataGeneration;
-  const request = serviceRequestQueue
-    .catch(() => {})
-    .then(async () => {
+  return serviceRequestScheduler.enqueue(
+    async () => {
       assertUpdateAllowed(updateRequired);
       if (scope === "social" && socialSuspended) {
         throw new Error("SOCIAL_REFRESH_SUSPENDED");
@@ -3086,20 +3236,6 @@ function fetchServiceWithRateLimit(url, options, { scope = null } = {}) {
       if (Date.now() < serviceRetryBlockedUntil) {
         throw serviceRateLimitError();
       }
-      const remainingDelay = Math.max(
-        0,
-        lastServiceRequestAt + SERVICE_REQUEST_MIN_GAP_MS - Date.now(),
-      );
-      if (remainingDelay > 0) await wait(remainingDelay);
-      assertUpdateAllowed(updateRequired);
-      if (scope === "social" && socialSuspended) {
-        throw new Error("SOCIAL_REFRESH_SUSPENDED");
-      }
-      assertPrivateDataGeneration(generation);
-      if (Date.now() < serviceRetryBlockedUntil) {
-        throw serviceRateLimitError();
-      }
-      lastServiceRequestAt = Date.now();
       const controller = new AbortController();
       serviceAbortControllers.add(controller);
       if (scope === "social") socialServiceAbortControllers.add(controller);
@@ -3120,15 +3256,16 @@ function fetchServiceWithRateLimit(url, options, { scope = null } = {}) {
         serviceAbortControllers.delete(controller);
         socialServiceAbortControllers.delete(controller);
       }
-    });
-  serviceRequestQueue = request.then(
-    () => undefined,
-    () => undefined,
+    },
+    { priority, scope, generation },
   );
-  return request;
 }
 
-async function loadBuildId(force = false, requestScope = null) {
+async function loadBuildId(
+  force = false,
+  requestScope = null,
+  requestPriority = "interactive",
+) {
   const generation = privateDataGeneration;
   const requestedLocale = serviceLocale();
   if (buildId && buildIdLocale === requestedLocale && !force) return buildId;
@@ -3141,7 +3278,7 @@ async function loadBuildId(force = false, requestScope = null) {
         redirect: "follow",
         headers: { Accept: "text/html" },
       },
-      { scope: requestScope },
+      { scope: requestScope, priority: requestPriority },
     );
     if (!response.ok) {
       if (response.status === 429) {
@@ -3172,8 +3309,9 @@ async function fetchServiceJson(
   query = {},
   retry = true,
   requestScope = null,
+  requestPriority = "interactive",
 ) {
-  const currentBuildId = await loadBuildId(false, requestScope);
+  const currentBuildId = await loadBuildId(false, requestScope, requestPriority);
   if (requestScope === "social" && socialSuspended) {
     throw new Error("SOCIAL_REFRESH_SUSPENDED");
   }
@@ -3194,7 +3332,7 @@ async function fetchServiceJson(
       redirect: "follow",
       headers: { Accept: "application/json" },
     },
-    { scope: requestScope },
+    { scope: requestScope, priority: requestPriority },
   );
 
   if (response.status === 429) {
@@ -3203,9 +3341,15 @@ async function fetchServiceJson(
 
   if (response.status === 404 && retry) {
     if (buildId === currentBuildId) {
-      await loadBuildId(true, requestScope);
+      await loadBuildId(true, requestScope, requestPriority);
     }
-    return fetchServiceJson(relativePath, query, false, requestScope);
+    return fetchServiceJson(
+      relativePath,
+      query,
+      false,
+      requestScope,
+      requestPriority,
+    );
   }
   if (
     response.status === 401 ||
@@ -3349,6 +3493,9 @@ async function refreshCurrentRanking({
       const data = await fetchServiceJson(
         endpoint,
         rankingRequestQuery({ characterSlug }),
+        true,
+        null,
+        "ranking",
       );
       const normalized = (ratingType === "LP"
         ? normalizeLeagueRanking
@@ -3566,7 +3713,7 @@ async function refreshSocialKind(kind, page = socialState[kind]?.page ?? 1) {
         page: location.sourcePage,
         order_type: "last_play",
         order_order: 0,
-      }, true, "social");
+      }, true, "social", "social");
       if (monitoringGeneration !== socialMonitoringGeneration) {
         throw new Error("SOCIAL_REFRESH_SUSPENDED");
       }
@@ -3646,7 +3793,7 @@ async function refreshAllFriendsForNotifications(
             page: sourcePage,
             order_type: "last_play",
             order_order: 0,
-          }, true, "social");
+          }, true, "social", "social");
           if (monitoringGeneration !== socialMonitoringGeneration) {
             throw new Error("SOCIAL_REFRESH_SUSPENDED");
           }
@@ -3765,6 +3912,9 @@ function suspendSocialRefresh(reason = "idle") {
   socialSuspended = true;
   socialSuspendReason = reason;
   socialMonitoringGeneration += 1;
+  serviceRequestScheduler.cancelScope("social", {
+    reason: "Social refresh was suspended.",
+  });
   for (const controller of socialServiceAbortControllers) controller.abort();
   socialServiceAbortControllers.clear();
   socialRefreshInFlight.clear();
@@ -3870,7 +4020,7 @@ async function checkAuthenticationInternal(generation) {
     page: 1,
     order_type: "last_play",
     order_order: 0,
-  });
+  }, true, null, "auth");
   assertPrivateDataGeneration(generation);
   if (!data?.pageProps) {
     throw new Error("SERVICE_AUTH_REQUIRED");
@@ -3882,7 +4032,7 @@ async function checkAuthenticationInternal(generation) {
   }
   let player;
   try {
-    player = await searchPlayer(userCode);
+    player = await searchPlayer(userCode, { priority: "auth" });
     assertPrivateDataGeneration(generation);
   } catch (error) {
     if (error.message === "PLAYER_NOT_FOUND") {
@@ -3890,7 +4040,7 @@ async function checkAuthenticationInternal(generation) {
     }
     throw error;
   }
-  player = await refreshProfilePlayer(player);
+  player = await refreshProfilePlayer(player, { priority: "auth" });
   assertPrivateDataGeneration(generation);
   return { authenticated: true, player, friendPage: normalizeSocialPage(data, "friends") };
 }
@@ -3953,7 +4103,7 @@ async function checkAuthentication() {
   }
 }
 
-async function searchPlayer(userCode) {
+async function searchPlayer(userCode, { priority = "interactive" } = {}) {
   const normalizedCode = String(userCode ?? "").replace(/\s/g, "");
   if (!/^\d{4,12}$/.test(normalizedCode)) {
     throw new Error("INVALID_USER_CODE");
@@ -3964,7 +4114,7 @@ async function searchPlayer(userCode) {
     page: 1,
     order_type: "last_play",
     order_order: 0,
-  });
+  }, true, null, priority);
   const fighters = (data?.pageProps?.fighter_banner_list ?? [])
     .map(normalizeFighter)
     .filter(Boolean);
@@ -3976,7 +4126,10 @@ async function searchPlayer(userCode) {
   return exact;
 }
 
-async function refreshProfilePlayer(player, { force = false } = {}) {
+async function refreshProfilePlayer(
+  player,
+  { force = false, priority = "interactive" } = {},
+) {
   const generation = privateDataGeneration;
   const profileId = normalizeHistoryProfileId(player?.profileId ?? player?.userCode);
   if (!profileId) return player;
@@ -4015,6 +4168,10 @@ async function refreshProfilePlayer(player, { force = false } = {}) {
       // time, so it must never overwrite the current profile value.
       const data = await fetchServiceJson(
         `profile/${encodeURIComponent(profileId)}.json`,
+        {},
+        true,
+        null,
+        priority,
       );
       assertPrivateDataGeneration(generation);
       if (requestedLocale !== serviceLocale()) return player;
@@ -4116,10 +4273,17 @@ async function refreshTrackedPlayerForLocale() {
   return request;
 }
 
-async function fetchRankedReplaysPage(profileId, page = 1) {
+async function fetchRankedReplaysPage(
+  profileId,
+  page = 1,
+  priority = "live",
+) {
   const data = await fetchServiceJson(
     `profile/${encodeURIComponent(profileId)}/battlelog.json`,
     { page },
+    true,
+    null,
+    priority,
   );
   const rawReplays = Array.isArray(data?.pageProps?.replay_list)
     ? data.pageProps.replay_list
@@ -4139,7 +4303,7 @@ async function fetchRankedReplays(profileId) {
 async function fetchMatchHistoryPages(profileId, onPage = null) {
   const replays = [];
   for (let page = 1; page <= MATCH_HISTORY_MAX_PAGES; page += 1) {
-    const result = await fetchRankedReplaysPage(profileId, page);
+    const result = await fetchRankedReplaysPage(profileId, page, "history");
     replays.push(...result.replays);
     if (typeof onPage === "function") {
       await onPage({ ...result, page, replays: [...result.replays] });
@@ -4201,11 +4365,14 @@ async function fetchLocalMatchHistory() {
         maxPages: MATCH_HISTORY_MAX_PAGES,
         fetchedCount,
       };
-      // Persist and notify after every page. This lets the renderer update
-      // the summary, charts, and table while later pages remain queued.
-      const changed = mergeMatchHistory(replays, player.profileId);
+      // Publish every page immediately so the renderer updates its summary,
+      // charts, and table. Disk writes are intentionally deferred until the
+      // import completes so progressive display does not block the next page.
+      const changed = mergeMatchHistory(replays, player.profileId, {
+        persist: false,
+      });
       if (!changed) sendHistoryState();
-      sendTrackerState();
+      sendTrackerState({ persist: false });
     });
     assertPrivateDataGeneration(generation);
     const fetchedStore = loadMatchHistoryStore(player.profileId);
@@ -4224,6 +4391,10 @@ async function fetchLocalMatchHistory() {
     }
     sendHistoryState();
     sendTrackerState();
+    await Promise.allSettled([
+      persistedDataWriter.flush(historyStorePath(player.profileId)),
+      persistedDataWriter.flush(trackerSessionPath),
+    ]);
     return publicHistoryState(player.profileId);
   })();
   matchHistoryFetchInFlight = request;
@@ -4265,13 +4436,10 @@ async function selectHistoryProfile(userCode) {
       });
       nextHistoryViewPlayer = player;
     }
-    // Selecting a history target is an explicit lookup action. Refresh the
-    // official profile once here even if a recent cached search result exists,
-    // so CURRENT MR and the current character's overall MR rank are visible
-    // before the 100-match history fetch starts.
-    nextHistoryViewPlayer = await refreshProfilePlayer(nextHistoryViewPlayer, {
-      force: true,
-    });
+    // Reuse the locale/profile/character-scoped 90-second profile cache when
+    // the same target is selected repeatedly. New ranked matches, character
+    // changes, and locale changes still use their force-refresh paths.
+    nextHistoryViewPlayer = await refreshProfilePlayer(nextHistoryViewPlayer);
     applyCurrentProfileRatingsToHistory(nextHistoryViewPlayer);
     assertPrivateDataGeneration(generation);
   }
@@ -4282,6 +4450,7 @@ async function selectHistoryProfile(userCode) {
     const selectedProfileId = normalizeHistoryProfileId(historyViewPlayer.profileId);
     const selectedStore = loadMatchHistoryStore(selectedProfileId);
     if (trimMatchHistoryStore(selectedProfileId, selectedStore)) {
+      bumpHistoryRevision(selectedProfileId);
       persistMatchHistoryStore(selectedProfileId, selectedStore);
     }
     startHistoryViewPolling();
@@ -4521,6 +4690,7 @@ async function refreshTracking(sessionId = trackingSessionId) {
     );
     const refreshedPlayer = await refreshProfilePlayer(playerHint, {
       force: true,
+      priority: "live",
     });
     if (sessionId !== trackingSessionId || !trackerState.active) {
       return publicTrackerState();
@@ -4905,6 +5075,9 @@ function startOverlayServer() {
 
 app.whenReady().then(() => {
   if (!hasSingleInstanceLock) return;
+  if (initialLanguageSelectionRequired) {
+    displaySettings.locale = suggestedInitialLocale(app.getLocale());
+  }
   sourceSession = session.fromPartition(LOGIN_PARTITION);
   configureRemoteSession(sourceSession);
   updater = createUpdater({
@@ -4916,6 +5089,7 @@ app.whenReady().then(() => {
         stopTracking();
         stopHistoryViewPolling("update");
         stopSocialRefresh();
+        serviceRequestScheduler.cancel({ reason: "Update is required." });
         for (const controller of serviceAbortControllers) controller.abort();
         serviceAbortControllers.clear();
         dismissFriendNotification({ destroy: false });
@@ -4980,7 +5154,7 @@ app.on("window-all-closed", () => {
   if (!tray) app.quit();
 });
 
-app.on("before-quit", () => {
+app.on("before-quit", (event) => {
   isQuitting = true;
   updater?.cancel?.();
   clearTimeout(startupUpdateTimer);
@@ -5004,9 +5178,24 @@ app.on("before-quit", () => {
   } catch {
     // 終了時の設定保存に失敗しても、アプリ終了は妨げない。
   }
-  if (overlayServer) overlayServer.close();
+  if (overlayServer) {
+    overlayServer.close();
+    overlayServer = null;
+  }
   if (tray) {
     tray.destroy();
     tray = null;
+  }
+  if (!persistenceReadyForQuit) {
+    event.preventDefault();
+    persistedDataWriter
+      .flushAll()
+      .catch(() => {
+        // A final save failure must not trap the user in the application.
+      })
+      .finally(() => {
+        persistenceReadyForQuit = true;
+        app.quit();
+      });
   }
 });
