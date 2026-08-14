@@ -2,8 +2,16 @@
 
 const crypto = require("node:crypto");
 const fs = require("node:fs");
+const os = require("node:os");
 const path = require("node:path");
 const { MANIFEST_NAME } = require("../src/updater");
+const {
+  UPDATE_SIGNATURE_ALGORITHM,
+  UPDATE_SIGNATURE_KEY_ID,
+  canonicalManifestPayload,
+  normalizeUpdateManifest,
+  validateSignedManifest,
+} = require("../src/update-signature");
 
 const root = path.resolve(__dirname, "..");
 const outputDirectory = String(
@@ -54,6 +62,27 @@ if (minimumVersion && compareVersions(minimumVersion, packageJson.version) > 0) 
 const manifest = { version: packageJson.version, file, sha256 };
 if (forceUpdate) manifest.force = true;
 if (minimumVersion) manifest.minimumVersion = minimumVersion;
+
+const signingKeyPath = String(
+  process.env.MATCH_SESSION_OVERLAY_UPDATE_SIGNING_KEY_PATH ??
+    path.join(
+      os.homedir(),
+      ".match-session-overlay-secrets",
+      "update-signing-ed25519-private.pem",
+    ),
+).trim();
+if (!signingKeyPath) {
+  throw new Error("MATCH_SESSION_OVERLAY_UPDATE_SIGNING_KEY_PATH is required");
+}
+const resolvedSigningKeyPath = path.resolve(signingKeyPath);
+const privateKey = fs.readFileSync(resolvedSigningKeyPath, "utf8");
+const normalizedManifest = normalizeUpdateManifest(manifest);
+manifest.signatureAlgorithm = UPDATE_SIGNATURE_ALGORITHM;
+manifest.keyId = UPDATE_SIGNATURE_KEY_ID;
+manifest.signature = crypto
+  .sign(null, canonicalManifestPayload(normalizedManifest), privateKey)
+  .toString("base64");
+validateSignedManifest(manifest);
 
 fs.writeFileSync(
   manifestPath,
