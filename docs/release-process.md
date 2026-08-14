@@ -42,6 +42,18 @@ pnpm build
 pnpm release:manifest
 ```
 
+更新マニフェストは、リポジトリ外の次の秘密鍵でEd25519署名します。
+
+```text
+%USERPROFILE%\.match-session-overlay-secrets\update-signing-ed25519-private.pem
+```
+
+- 秘密鍵はGit、リリース資産、インストーラーへ含めない
+- 秘密鍵のACLは現在のWindowsユーザーだけに限定する
+- 秘密鍵を紛失すると、既存アプリ向けの更新マニフェストを署名できなくなるため、安全な別媒体へバックアップする
+- 別の場所を使う場合だけ`MATCH_SESSION_OVERLAY_UPDATE_SIGNING_KEY_PATH`で絶対パスを指定する
+- `pnpm release:manifest`は、署名後にアプリ内の公開鍵でも検証し、一致しない鍵では失敗する
+
 Codex Securityを通過した後にリリース入力を変更した場合は、再スキャン後にインストーラーも作り直します。
 
 ## 4. 完成物を検査する

@@ -1,6 +1,7 @@
 "use strict";
 
 const assert = require("node:assert/strict");
+const crypto = require("node:crypto");
 const { EventEmitter } = require("node:events");
 const fs = require("node:fs");
 const os = require("node:os");
@@ -14,6 +15,15 @@ const {
   assertUpdateAllowed,
   resolveUpdateRequirement,
 } = require("../src/update-policy");
+const {
+  UPDATE_SIGNATURE_ALGORITHM,
+  UPDATE_SIGNATURE_KEY_ID,
+  canonicalManifestPayload,
+} = require("../src/update-signature");
+
+const testSigningKeys = crypto.generateKeyPairSync("ed25519");
+const testPrivateKey = testSigningKeys.privateKey.export({ type: "pkcs8", format: "pem" });
+const testPublicKey = testSigningKeys.publicKey.export({ type: "spki", format: "pem" });
 
 const manifest = (overrides = {}) => ({
   version: "1.3.1",
@@ -26,6 +36,16 @@ const manifest = (overrides = {}) => ({
   source: "github",
   ...overrides,
 });
+
+const signedManifest = (overrides = {}) => {
+  const value = manifest(overrides);
+  value.signatureAlgorithm = UPDATE_SIGNATURE_ALGORITHM;
+  value.keyId = UPDATE_SIGNATURE_KEY_ID;
+  value.signature = crypto
+    .sign(null, canonicalManifestPayload(value), testPrivateKey)
+    .toString("base64");
+  return value;
+};
 
 function fakeApp(version = "1.3.0") {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mso-force-update-test-"));
@@ -41,13 +61,34 @@ function fakeApp(version = "1.3.0") {
 }
 
 test("force update manifest validation is strict", () => {
-  const valid = validateManifest(manifest({ force: true, minimumVersion: "1.3.0" }));
+  const valid = validateManifest(
+    signedManifest({ force: true, minimumVersion: "1.3.0" }),
+    testPublicKey,
+  );
   assert.equal(valid.force, true);
   assert.equal(valid.minimumVersion, "1.3.0");
-  assert.throws(() => validateManifest(manifest({ force: "true" })), /UPDATE_MANIFEST_INVALID/);
-  assert.throws(() => validateManifest(manifest({ minimumVersion: "1.4.0" })), /UPDATE_MANIFEST_INVALID/);
-  assert.throws(() => validateManifest(manifest({ file: "../update.exe" })), /UPDATE_MANIFEST_INVALID/);
-  assert.throws(() => validateManifest(manifest({ sha256: "invalid" })), /UPDATE_MANIFEST_INVALID/);
+  assert.throws(() => validateManifest({ ...signedManifest(), force: "true" }, testPublicKey), /UPDATE_MANIFEST_INVALID/);
+  assert.throws(() => validateManifest({ ...signedManifest(), minimumVersion: "1.4.0" }, testPublicKey), /UPDATE_MANIFEST_INVALID/);
+  assert.throws(() => validateManifest({ ...signedManifest(), file: "../update.exe" }, testPublicKey), /UPDATE_MANIFEST_INVALID/);
+  assert.throws(() => validateManifest({ ...signedManifest(), sha256: "invalid" }, testPublicKey), /UPDATE_MANIFEST_INVALID/);
+});
+
+test("update manifest signature rejects missing, tampered, and foreign signatures", () => {
+  const valid = signedManifest({ force: true });
+  assert.equal(validateManifest(valid, testPublicKey).version, "1.3.1");
+  assert.throws(
+    () => validateManifest({ ...valid, signature: undefined }, testPublicKey),
+    /UPDATE_MANIFEST_SIGNATURE_INVALID/,
+  );
+  assert.throws(
+    () => validateManifest({ ...valid, force: false }, testPublicKey),
+    /UPDATE_MANIFEST_SIGNATURE_INVALID/,
+  );
+  const foreignKey = crypto.generateKeyPairSync("ed25519").publicKey;
+  assert.throws(
+    () => validateManifest(valid, foreignKey),
+    /UPDATE_MANIFEST_SIGNATURE_INVALID/,
+  );
 });
 
 test("force flag and minimum version both enter required state", async (t) => {
