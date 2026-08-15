@@ -7,7 +7,6 @@
   "author": "mickangumi-oss",
   "license": "PolyForm-Strict-1.0.0",
   "scripts": {
-    "test": "node --test",
     "check": "node scripts/check-source.js",
     "qa:force-update": "electron scripts/force-update-fixture.js",
     "qa:stats-resize": "electron scripts/qa-fixtures/stats-resize-layout.cjs",
