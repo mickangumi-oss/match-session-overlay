@@ -35,7 +35,7 @@ Your signed-in session is stored in the app-specific folder on your own PC:
 
 Records are kept separately by character. Master-rank characters show MR; other characters show LP.
 
-After at least two ranked matches are available, the app may show `POTENTIAL MR` or `POTENTIAL LP`. This is the median of up to 20 recent ranked matches for the current player and character. It is a reference value created by the app, not an official rating or prediction.
+After at least two ranked matches are available, the app may show `POTENTIAL MR` or `POTENTIAL LP` from up to 20 recent ranked matches for the current player and character. Both use robust exponential smoothing: each new observation contributes 60% of a difference capped at 20 MR or 100 LP. These are reference values created by the app, not official ratings or predictions.
 
 ## 4. Choose where to display it
 
