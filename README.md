@@ -13,13 +13,13 @@
 - 公式サイトへのログインと戦績取得に必要なインターネット接続
 - OBSで表示する場合のみ、OBS Studio（任意）
 
-公開版: v1.5.1
+公開版: v1.6.0
 
 ## ダウンロード
 
-[v1.5.1をダウンロード（GitHub Releases）](https://github.com/mickangumi-oss/match-session-overlay/releases/download/v1.5.1/Match-Session-Overlay-1.5.1-Setup.exe)
+[v1.6.0をダウンロード（GitHub Releases）](https://github.com/mickangumi-oss/match-session-overlay/releases/download/v1.6.0/Match-Session-Overlay-1.6.0-Setup.exe)
 
-開いたページの「Assets」から、`Match-Session-Overlay-1.5.1-Setup.exe`をダウンロードして実行してください。最新版以外のファイルや、配布元を確認できないファイルは使用しないでください。
+開いたページの「Assets」から、`Match-Session-Overlay-1.6.0-Setup.exe`をダウンロードして実行してください。最新版以外のファイルや、配布元を確認できないファイルは使用しないでください。
 
 詳しい操作手順は[`docs/usage.md`](docs/usage.md)、表示レイアウトは[`docs/window-layout.md`](docs/window-layout.md)、対戦履歴は[`docs/match-history.md`](docs/match-history.md)、フォントは[`docs/font-settings.md`](docs/font-settings.md)をご覧ください。
 
@@ -27,7 +27,7 @@
 
 正式な配布インストーラーは、公開前にMicrosoft DefenderおよびVirusTotalでセキュリティチェックを実施します。検査結果は公開時点のものであり、完全な安全性を保証するものではありません。インストーラーは必ずこのリポジトリの公式GitHub Releaseから取得し、各リリースノートに記載されたSHA-256と一致することを確認してください。
 
-`v1.5.1`はMicrosoft Defenderで検出なし、VirusTotalで`0 / 68`でした。詳細は[`v1.5.1リリースノート`](docs/release-notes/v1.5.1.md)をご覧ください。
+`v1.6.0`の検査結果は[`v1.6.0リリースノート`](docs/release-notes/v1.6.0.md)をご覧ください。
 
 ## 画面イメージ
 
@@ -63,14 +63,14 @@ CHARACTER RANKと現在のキャラクター、セッション戦績、FRIENDS�
 
 ![合成データを表示した対戦履歴画面](docs/images/match-history-example.png)
 
-## v1.5.1の変更内容
+## v1.6.0の変更内容
 
-- ウィンドウとオーバーレイで、カード内の文字サイズ・位置・色を揃えました。
-- CHARACTER RANKの順位変動を見やすくし、数値の桁区切りカンマを表示しない形式へ統一しました。
-- 横・縦表示で、グラフON／OFF時のカード高さと余白を調整しました。
-- 表示項目を変更した後も現在のウィンドウサイズを維持し、横表示を同じ最小幅まで縮小できるようにしました。
+- POTENTIAL MR／LPの算出方法を見直し、直近の実力変化へより早く追従するようにしました。
+- 一時的なレート変動の影響を抑えながら、現在の実力帯を確認しやすくしました。
+- 管理画面、ウィンドウ、オーバーレイ、OBS、対戦履歴でPOTENTIAL値の算出結果を統一しました。
+- READMEの画面画像を最新UIへ更新しました。
 
-詳しい変更内容は[`v1.5.1リリースノート`](docs/release-notes/v1.5.1.md)をご覧ください。
+詳しい変更内容は[`v1.6.0リリースノート`](docs/release-notes/v1.6.0.md)をご覧ください。
 
 過去の変更内容は[`docs/release-notes`](docs/release-notes)をご覧ください。
 
@@ -165,7 +165,7 @@ OBSでは、管理画面に表示されるブラウザソースURLをOBSの「�
 
 - ランク、バトルハブ、カジュアルの戦績を切り替えて表示
 - 勝敗、勝率、現在のMR／LP、計測開始後の増減を表示
-- 同じキャラクターの直近20試合の中央値を、参考値の`POTENTIAL MR／POTENTIAL LP`として表示
+- 同じキャラクターの直近20試合から、一時的な変動を抑えた参考値の`POTENTIAL MR／POTENTIAL LP`を表示
 - 現在のキャラクター内の順位を`CHARACTER RANK`として表示
 - 表示言語に対応した公式プロフィールのキャラクター名を表示
 - FRIENDS／FOLLOWINGをオンライン優先・最終ログイン順で表示し、1ページ10件でページ分割。プレイヤー名から対戦履歴へ移動
@@ -182,9 +182,9 @@ OBSでは、管理画面に表示されるブラウザソースURLをOBSの「�
 
 ### POTENTIAL MR／LPについて
 
-`POTENTIAL MR`および`POTENTIAL LP`は、ストリートファイター6公式が提供する数値ではなく、Match Session Overlayが独自に算出する参考値です。現在のプレイヤーとキャラクターについて、取得済みの直近最大20件のランクマッチからMRまたはLPの中央値を計算します。有効なデータが2件以上ある場合に表示し、小数が生じた場合は整数へ四捨五入します。
+`POTENTIAL MR`および`POTENTIAL LP`は、ストリートファイター6公式が提供する数値ではなく、Match Session Overlayが独自に算出する参考値です。現在のプレイヤーとキャラクターについて、取得済みの直近最大20件のランクマッチから算出し、有効なデータが2件以上ある場合に表示します。
 
-短期的な連勝・連敗などによるMR／LPの一時的な上振れ・下振れの影響を抑え、現在の実力帯に近い水準を把握しやすくするため、平均値ではなく中央値を使用しています。対戦傾向から自分の実力を判断するための目安であり、公式ランキング、公式レート、将来到達するレートを示すものではありません。
+`POTENTIAL MR／POTENTIAL LP`は、直近の実力変化へ追従しながら短期的な上振れ・下振れを抑えるロバスト指数平滑を使用します。各試合で推定値へ反映する差をMRは最大20、LPは最大100に抑え、その差の60%を反映します。いずれも対戦傾向から自分の実力を判断するための目安であり、公式ランキング、公式レート、将来到達するレートを示すものではありません。
 
 ## 通信について
 
