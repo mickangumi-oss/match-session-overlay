@@ -2,6 +2,7 @@
 
 const api = window.matchOverlay;
 const localeApi = window.matchOverlayI18n;
+const displayNumber = window.matchDisplayNumberFormat;
 const t = (key, fallback = key) =>
   localeApi?.t ? localeApi.t(key) : fallback;
 function applyLocale(locale = "ja-jp") {
@@ -243,6 +244,11 @@ function historyRatingValue(record, ratingType) {
   return Number.isFinite(primaryNumber) && primaryNumber > 0 ? primaryNumber : null;
 }
 
+function formatHistoryRating(ratingType, value) {
+  const formatted = displayNumber.integer(value, "");
+  return formatted ? `${ratingType || ""} ${formatted}`.trim() : "—";
+}
+
 function filteredHistoryRecords() {
   const from = elements.historyDateFrom?.value || "";
   const to = elements.historyDateTo?.value || "";
@@ -364,7 +370,7 @@ function drawHistoryRatingChart(records, ratingType, canvas, emptyElement) {
   const axisMax = axis.maximum;
   const tickValues = axis.ticks;
   const color = ratingType === "MR" ? "#ff2e69" : "#43d8ff";
-  const formatValue = (value) => Math.round(value).toLocaleString();
+  const formatValue = (value) => displayNumber.integer(value);
 
   context.font = `9px ${fontStackFor(displaySettings.fontFamily)}`;
   const labelWidth = Math.max(
@@ -467,10 +473,10 @@ function renderHistoryTable(records) {
       result,
       historyModeLabel(record.matchType),
       historyCharacterLabel(record),
-      record.ownRating == null ? "—" : `${record.ownRatingType || ""} ${record.ownRating}`,
+      formatHistoryRating(record.ownRatingType, record.ownRating),
       record.opponentName || "—",
       historyCharacterLabel(record, false),
-      record.opponentRating == null ? "—" : `${record.opponentRatingType || ""} ${record.opponentRating}`,
+      formatHistoryRating(record.opponentRatingType, record.opponentRating),
     ];
     cells.forEach((value, index) => {
       const cell = document.createElement("td");
@@ -983,7 +989,7 @@ function drawManagementChart(
   const widestLabel = Math.max(
     0,
     ...ticks.map((tick) =>
-      context.measureText(Math.round(tick).toLocaleString("ja-JP")).width,
+      context.measureText(displayNumber.integer(tick)).width,
     ),
   );
   const left = Math.max(43, Math.ceil(widestLabel + 10));
@@ -1012,7 +1018,7 @@ function drawManagementChart(
       !isLp || tickIndex >= firstLpLabelIndex
     ) {
       context.fillStyle = `${displaySettings.textColor ?? "#f7f8ff"}99`;
-      context.fillText(Math.round(tick).toLocaleString("ja-JP"), left - 7, y);
+      context.fillText(displayNumber.integer(tick), left - 7, y);
     }
   });
   values.forEach((value, index) => {
@@ -1054,7 +1060,7 @@ function drawManagementChart(
     context.textAlign = "right";
     context.textBaseline = "bottom";
     context.fillText(
-      `${t("potential", "POTENTIAL")} ${ratingType} ${Math.round(potential).toLocaleString()}`,
+      `${t("potential", "POTENTIAL")} ${ratingType} ${displayNumber.integer(potential)}`,
       width - right,
       Math.max(top + labelFontSize, potentialY - 3),
     );
@@ -1331,10 +1337,7 @@ function renderCurrentCharacter(state = trackerState) {
 }
 
 function formatRatingValue(value, ratingType) {
-  const number = Number(value);
-  if (!Number.isFinite(number) || number <= 0) return "—";
-  const locale = displaySettings.locale || "ja-jp";
-  return `${new Intl.NumberFormat(locale).format(Math.round(number))} ${ratingType === "LP" ? "LP" : "MR"}`;
+  return displayNumber.rating(value, ratingType);
 }
 
 function renderMonitorPlayer(state = trackerState) {
@@ -1360,14 +1363,9 @@ function renderCurrentMrRank(state = trackerState) {
   if (!elements.currentMrRank) return;
   const ranking = state?.ranking ?? {};
   const rank = Number(ranking.rank);
-  const locale = displaySettings.locale || "ja-jp";
   const rawDelta = state?.presentation?.mrRankDelta;
-  const delta = rawDelta == null ? null : Number(rawDelta);
-  const formattedDelta = Number.isFinite(delta)
-    ? `${delta > 0 ? "↑" : delta < 0 ? "↓" : "±"}${Math.abs(Math.trunc(delta))}`
-    : "—";
   elements.currentMrRank.textContent = Number.isFinite(rank) && rank > 0
-    ? `${locale === "ja-jp" ? `${new Intl.NumberFormat(locale).format(rank)}位` : `#${new Intl.NumberFormat(locale).format(rank)}`} ${formattedDelta}`
+    ? displayNumber.rankLine(rank, rawDelta)
     : ranking.status === "loading"
       ? "…"
       : "—";
@@ -1428,7 +1426,7 @@ function renderSocialState(state = socialState) {
     const detail = document.createElement("span");
     detail.className = "social-player-detail";
     const rating = player.ratingType && player.rating != null
-      ? `${player.ratingType} ${Number(player.rating).toLocaleString(displaySettings.locale || "ja-jp")}`
+      ? `${player.ratingType} ${displayNumber.integer(player.rating)}`
       : "—";
     detail.textContent = [player.platform, player.characterName, player.rankName, rating]
       .filter(Boolean).join(" · ");

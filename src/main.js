@@ -55,6 +55,7 @@ const {
 const {
   compactStatsWindowInitialSize,
   expandBoundsToMinimumHeight,
+  horizontalMetricMinimumWidth,
   resizeBoundsForGraphVisibility,
   statsWindowSizeConstraints,
 } = require("./stats-window-size");
@@ -193,8 +194,8 @@ const GRAPH_ONLY_MINIMUM_SIZE = {
   vertical: { width: 360, height: 220 },
 };
 const HORIZONTAL_GRAPH_WITH_METRICS_MINIMUM_SIZE = {
-  window: { width: 520, height: 229 },
-  overlay: { width: 520, height: 229 },
+  window: { width: 520, height: 245 },
+  overlay: { width: 520, height: 245 },
 };
 const FONT_KEYS = new Set(["street", "condensed", "system", "japanese", "mono"]);
 const FONT_FAMILY_PATTERN = /^[\p{L}\p{M}\p{N}\p{Zs}._&'()\-+#@]{1,100}$/u;
@@ -1681,7 +1682,10 @@ function statsWindowPresetFor(mode = displaySettings.mode) {
   const horizontalGraphWithMetricsMinimum =
     HORIZONTAL_GRAPH_WITH_METRICS_MINIMUM_SIZE[isOverlay ? "overlay" : "window"];
   if (isVertical) {
-    const cardHeight = isOverlay ? 76 : 86;
+    // Graph-free vertical output uses the renderer's real 68px card tracks.
+    // Keeping the older mode-specific preferred heights left decorative space
+    // below the final card after the graph was hidden.
+    const cardHeight = graphVisible ? (isOverlay ? 76 : 86) : 68;
     const cardArea = metricCount
       ? metricCount * cardHeight + Math.max(0, metricCount - 1) * 8
       : 0;
@@ -1694,7 +1698,7 @@ function statsWindowPresetFor(mode = displaySettings.mode) {
       ? minimumCardArea + fixedGraphArea + 7 + 18
       : 0;
     const contentGap = metricCount && graphVisible ? 8 : 0;
-    const outerAllowance = metricCount || !graphVisible ? 20 : 8;
+    const outerAllowance = graphVisible ? (metricCount ? 20 : 8) : 18;
     const height = Math.min(
       1080,
       Math.max(
@@ -1724,13 +1728,10 @@ function statsWindowPresetFor(mode = displaySettings.mode) {
   const preferredCardWidth = isOverlay ? 118 : 142;
   // Wide fonts still need to show 10,000,000 LP and six-digit ranks in full.
   // Values shrink proportionally, but the window stops before clipping them.
-  const minimumCardWidth = 104;
   const preferredMetricWidth = metricCount
     ? metricCount * preferredCardWidth + Math.max(0, metricCount - 1) * 6 + 20
     : 0;
-  const minimumMetricWidth = metricCount
-    ? metricCount * minimumCardWidth + Math.max(0, metricCount - 1) * 4 + 12
-    : 0;
+  const minimumMetricWidth = horizontalMetricMinimumWidth(metricCount);
   const width = Math.min(1200, Math.max(graphVisible ? 520 : 320, preferredMetricWidth));
   const minWidth = Math.min(
     1000,
@@ -1743,12 +1744,15 @@ function statsWindowPresetFor(mode = displaySettings.mode) {
       minimumMetricWidth,
     ),
   );
-  const cardArea = metricCount ? (isOverlay ? 60 : 94) : 0;
-  const graphArea = graphVisible ? (isOverlay ? 112 : 184) : 0;
-  const outerAllowance = metricCount || !graphVisible ? 16 : 6;
+  // Window and overlay share the same renderer. Use its fixed 60px compact
+  // card row and 160px chart track in both native modes so toggling the chart
+  // never changes the card height.
+  const cardArea = metricCount ? 60 : 0;
+  const graphArea = graphVisible ? 160 : 0;
+  const outerAllowance = metricCount || !graphVisible ? 18 : 6;
   const height = Math.max(
     graphOnly ? graphOnlyMinimum.height : 68,
-    cardArea + graphArea + (metricCount && graphVisible ? 6 : 0) + outerAllowance,
+    cardArea + graphArea + (metricCount && graphVisible ? 7 : 0) + outerAllowance,
   );
   return {
     width,
@@ -1801,6 +1805,7 @@ function resizeStatsWindowForGraphVisibility(previousPreset) {
   applyingStatsBounds = true;
   statsWindow.setBounds(nextBounds, true);
   applyingStatsBounds = false;
+  rememberStatsWindowBounds();
 }
 
 function sendDisplaySettings() {
@@ -5012,6 +5017,7 @@ function startOverlayServer() {
       "/stats.css": ["stats.css", "text/css; charset=utf-8"],
       "/stats.js": ["stats.js", "text/javascript; charset=utf-8"],
       "/i18n.js": ["i18n.js", "text/javascript; charset=utf-8"],
+      "/display-number-format.js": ["../display-number-format.js", "text/javascript; charset=utf-8"],
       "/assets/stats-frame-horizontal.png": [
         path.join("assets", "stats-frame-horizontal.png"),
         "image/png",

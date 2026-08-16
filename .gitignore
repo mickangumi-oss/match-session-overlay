@@ -18,6 +18,7 @@ tmp/
 screenshots/
 docs/images/overlay-horizontal-example.png
 test/
+test-local/
 scripts/management-fixture.js
 scripts/visual-fixture.js
 docs/qa-checklist.md

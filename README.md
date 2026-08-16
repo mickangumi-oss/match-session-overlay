@@ -13,13 +13,13 @@
 - 公式サイトへのログインと戦績取得に必要なインターネット接続
 - OBSで表示する場合のみ、OBS Studio（任意）
 
-公開版: v1.5.0
+公開版: v1.5.1
 
 ## ダウンロード
 
-[v1.5.0をダウンロード（GitHub Releases）](https://github.com/mickangumi-oss/match-session-overlay/releases/download/v1.5.0/Match-Session-Overlay-1.5.0-Setup.exe)
+[v1.5.1をダウンロード（GitHub Releases）](https://github.com/mickangumi-oss/match-session-overlay/releases/download/v1.5.1/Match-Session-Overlay-1.5.1-Setup.exe)
 
-開いたページの「Assets」から、`Match-Session-Overlay-1.5.0-Setup.exe`をダウンロードして実行してください。最新版以外のファイルや、配布元を確認できないファイルは使用しないでください。
+開いたページの「Assets」から、`Match-Session-Overlay-1.5.1-Setup.exe`をダウンロードして実行してください。最新版以外のファイルや、配布元を確認できないファイルは使用しないでください。
 
 詳しい操作手順は[`docs/usage.md`](docs/usage.md)、表示レイアウトは[`docs/window-layout.md`](docs/window-layout.md)、対戦履歴は[`docs/match-history.md`](docs/match-history.md)、フォントは[`docs/font-settings.md`](docs/font-settings.md)をご覧ください。
 
@@ -27,7 +27,7 @@
 
 正式な配布インストーラーは、公開前にMicrosoft DefenderおよびVirusTotalでセキュリティチェックを実施します。検査結果は公開時点のものであり、完全な安全性を保証するものではありません。インストーラーは必ずこのリポジトリの公式GitHub Releaseから取得し、各リリースノートに記載されたSHA-256と一致することを確認してください。
 
-`v1.5.0`はMicrosoft Defenderで検出なし、VirusTotalで`0 / 67`でした。詳細は[`v1.5.0リリースノート`](docs/release-notes/v1.5.0.md)をご覧ください。
+`v1.5.1`の検査結果は[`v1.5.1リリースノート`](docs/release-notes/v1.5.1.md)をご覧ください。
 
 ## 画面イメージ
 
@@ -63,18 +63,14 @@ CHARACTER RANKと現在のキャラクター、セッション戦績、FRIENDS�
 
 ![合成データを表示した対戦履歴画面](docs/images/match-history-example.png)
 
-## v1.5.0の変更内容
+## v1.5.1の変更内容
 
-- 初回起動時に日本語／Englishを選択できるようにしました。オプション内の言語設定名も`Language`へ統一しました。
-- ウィンドウとオーバーレイの初期サイズを約10％縮小し、表示項目の追加・削除時は現在のサイズをできるだけ維持するようにしました。
-- 縦表示でグラフをOFFにした際に残っていた余白を解消し、リサイズ処理を調整しました。
-- フォントサイズの設定範囲を30％からに変更しました。
-- 対戦履歴の取得中に、取得できたページから一覧・集計・グラフへ順次反映するようにしました。
-- 表示・取得処理のパフォーマンスを改善しました。公式サイトへの通信間隔と通信回数の制限は従来どおりです。
-- 更新ファイルの検証方法を強化しました。
-- 英語版READMEと英語版利用ガイドを追加しました。
+- ウィンドウとオーバーレイで、カード内の文字サイズ・位置・色を揃えました。
+- CHARACTER RANKの順位変動を見やすくし、数値の桁区切りカンマを表示しない形式へ統一しました。
+- 横・縦表示で、グラフON／OFF時のカード高さと余白を調整しました。
+- 表示項目を変更した後も現在のウィンドウサイズを維持し、横表示を同じ最小幅まで縮小できるようにしました。
 
-詳しい変更内容は[`v1.5.0リリースノート`](docs/release-notes/v1.5.0.md)をご覧ください。
+詳しい変更内容は[`v1.5.1リリースノート`](docs/release-notes/v1.5.1.md)をご覧ください。
 
 過去の変更内容は[`docs/release-notes`](docs/release-notes)をご覧ください。
 

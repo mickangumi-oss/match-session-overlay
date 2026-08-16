@@ -1,6 +1,6 @@
 {
   "name": "match-session-overlay",
-  "version": "1.5.0",
+  "version": "1.5.1",
   "private": true,
   "description": "Privacy-first local match session stats window with optional OBS overlay",
   "main": "src/main.js",
@@ -8,15 +8,25 @@
   "license": "PolyForm-Strict-1.0.0",
   "scripts": {
     "check": "node scripts/check-source.js",
-    "qa:force-update": "electron scripts/force-update-fixture.js",
-    "qa:stats-resize": "electron scripts/qa-fixtures/stats-resize-layout.cjs",
+    "lint": "eslint src scripts test-local eslint.config.cjs --no-error-on-unmatched-pattern",
+    "qa:local": "node scripts/run-local-qa.js all",
+    "qa:ui": "node scripts/run-local-qa.js ui",
+    "qa:screenshots": "node scripts/run-local-qa.js screenshots",
+    "qa:force-update": "node scripts/run-local-qa.js force-update",
+    "qa:stats-resize": "node scripts/run-local-qa.js resize",
+    "prepare": "node scripts/install-local-hooks.js",
     "build": "electron-builder --win nsis --publish never",
     "release:security:dry-run": "node scripts/run-release-security.js --dry-run",
     "release:security": "node scripts/run-release-security.js",
     "release:manifest": "node scripts/create-release-manifest.js"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.62.1",
     "electron": "43.2.0",
-    "electron-builder": "26.15.3"
+    "electron-builder": "26.15.3",
+    "eslint": "^10.8.1",
+    "eslint-plugin-promise": "^7.3.0",
+    "globals": "^17.11.0"
   }
 }
