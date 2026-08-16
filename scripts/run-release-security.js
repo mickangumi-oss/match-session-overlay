@@ -6,7 +6,11 @@ const { spawnSync } = require("node:child_process");
 
 const root = path.resolve(__dirname, "..");
 const securityRoot = path.resolve(root, "..", "_tools", "codex-security");
-const stateDirectory = path.join(securityRoot, "state");
+const stateDirectory = path.join(
+  process.env.LOCALAPPDATA || path.join(process.env.USERPROFILE || root, "AppData", "Local"),
+  "MatchSessionOverlay",
+  "codex-security-state",
+);
 const cliEntrypoint = path.join(
   securityRoot,
   "cli",

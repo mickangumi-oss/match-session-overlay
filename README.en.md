@@ -21,18 +21,14 @@ Open the latest release and download the installer named `Match-Session-Overlay-
 
 For step-by-step instructions, see the [English usage guide](docs/usage.en.md).
 
-## What's new in v1.5.0
+## What's new in v1.5.1
 
-- You can now choose Japanese or English when you launch the app for the first time after installation.
-- The language setting in Options is now labeled **Language**.
-- Window and overlay behavior has been improved.
-- The minimum font size has been lowered from 75% to 30%, so numbers can be displayed at a smaller size.
-- Display and data retrieval performance has been improved.
-- Session and match-history storage has been revised.
-- The app now avoids fetching the same player's profile repeatedly when you reselect them within a short period.
-- An English README and an English usage guide are now available.
+- Card typography, alignment, and selected font colors are now consistent between window and overlay modes.
+- CHARACTER RANK movement is easier to read, and numeric values no longer use grouping commas.
+- Card height and extra space have been adjusted when the graph is turned on or off in horizontal and vertical layouts.
+- The current window size is preserved when display fields change, and horizontal layouts can be resized to the same minimum width.
 
-See the [v1.5.0 release notes](https://github.com/mickangumi-oss/match-session-overlay/releases/tag/v1.5.0) for the installer checksum and security scan results.
+See the [v1.5.1 release notes](https://github.com/mickangumi-oss/match-session-overlay/releases/tag/v1.5.1) for the installer checksum and security scan results.
 
 ## What it can show
 

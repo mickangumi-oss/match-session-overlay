@@ -50,6 +50,7 @@ const api = window.matchOverlay || {
   updateDisplaySettings() {},
 };
 const localeApi = window.matchOverlayI18n;
+const displayNumber = window.matchDisplayNumberFormat;
 const t = (key, fallback = key) =>
   localeApi?.t ? localeApi.t(key) : fallback;
 const FONT_STACKS = {
@@ -153,7 +154,7 @@ function unwrap(result) {
   return result.data;
 }
 
-function fitStatsValue(element, minimumSize = 10) {
+function fitStatsValue(element, minimumSize = 8) {
   if (!element) return;
   element.style.fontSize = "";
   requestAnimationFrame(() => {
@@ -171,6 +172,27 @@ function fitStatsValue(element, minimumSize = 10) {
   });
 }
 
+function fitVerticalRankLine() {
+  const group = elements.mrRank?.closest(".rank-group");
+  const delta = elements.mrRankDelta;
+  if (!group || !delta || !elements.root.classList.contains("vertical") || delta.classList.contains("hidden")) return;
+  requestAnimationFrame(() => {
+    if (!group.isConnected || group.clientWidth <= 0) return;
+    let rankSize = Number.parseFloat(getComputedStyle(elements.mrRank).fontSize);
+    let deltaSize = Number.parseFloat(getComputedStyle(delta).fontSize);
+    while (
+      rankSize > 14 &&
+      deltaSize > 11 &&
+      elements.mrRank.scrollWidth + delta.scrollWidth + 1 > group.clientWidth
+    ) {
+      rankSize -= 0.5;
+      deltaSize = Math.max(11, deltaSize - 0.35);
+      elements.mrRank.style.fontSize = `${rankSize}px`;
+      delta.style.fontSize = `${deltaSize}px`;
+    }
+  });
+}
+
 function fitStatsValues() {
   for (const element of [
     elements.recordValues,
@@ -184,6 +206,7 @@ function fitStatsValues() {
   ]) {
     fitStatsValue(element);
   }
+  fitVerticalRankLine();
 }
 
 function drawStatsChart(
@@ -283,7 +306,7 @@ function drawStatsChart(
   const widestLabel = Math.max(
     0,
     ...ticks.map((tick) =>
-      context.measureText(Math.round(tick).toLocaleString("ja-JP")).width,
+      context.measureText(displayNumber.integer(tick)).width,
     ),
   );
   const left = Math.max(46, Math.ceil(widestLabel + 12));
@@ -312,7 +335,7 @@ function drawStatsChart(
       !isLp || tickIndex >= firstLpLabelIndex
     ) {
       context.fillStyle = `${displaySettings?.textColor ?? "#f7f8ff"}99`;
-      context.fillText(Math.round(tick).toLocaleString("ja-JP"), left - 8, y);
+      context.fillText(displayNumber.integer(tick), left - 8, y);
     }
   });
   values.forEach((value, index) => {
@@ -354,7 +377,7 @@ function drawStatsChart(
     context.textAlign = "right";
     context.textBaseline = "bottom";
     context.fillText(
-      `${t("potential", "POTENTIAL")} ${ratingType} ${Math.round(potential).toLocaleString()}`,
+      `${t("potential", "POTENTIAL")} ${ratingType} ${displayNumber.integer(potential)}`,
       chartWidth - right,
       Math.max(top + labelFontSize, potentialY - 3),
     );
@@ -552,20 +575,20 @@ function renderTracker(state) {
   const peakRating = Number(presentation.sessionPeakRating);
   const peakType = presentation.sessionPeakRatingType === "LP" ? "LP" : "MR";
   elements.sessionPeakRating.textContent = Number.isFinite(peakRating) && peakRating > 0
-    ? `${new Intl.NumberFormat(displaySettings?.locale || "ja-jp").format(Math.round(peakRating))} ${peakType}`
+    ? peakType === "MR"
+      ? displayNumber.positiveInteger(peakRating)
+      : displayNumber.rating(peakRating, peakType)
     : "—";
   const mrRank = Number(presentation.mrRank ?? state?.ranking?.rank);
-  const locale = displaySettings?.locale || "ja-jp";
   elements.mrRank.textContent = Number.isFinite(mrRank) && mrRank > 0
-    ? new Intl.NumberFormat(locale).format(mrRank)
+    ? displayNumber.positiveInteger(mrRank)
     : (presentation.mrRankLoading ?? state?.ranking?.status === "loading")
       ? "…"
       : "—";
   const rawRankDelta = presentation.mrRankDelta;
-  const rankDelta = rawRankDelta == null ? null : Number(rawRankDelta);
-  elements.mrRankDelta.textContent = Number.isFinite(rankDelta)
-    ? `${rankDelta > 0 ? "↑" : rankDelta < 0 ? "↓" : "±"}${Math.abs(Math.trunc(rankDelta))}`
-    : "—";
+  const formattedRankDelta = displayNumber.rankDelta(rawRankDelta);
+  elements.mrRankDelta.textContent = formattedRankDelta;
+  elements.mrRankDelta.classList.toggle("hidden", !formattedRankDelta);
   renderMedianRating(state);
   fitStatsValues();
   renderStatsChart(state);

@@ -1651,11 +1651,11 @@ body.remote-overlay {
 
 .stats-window:not(.vertical):not(.no-chart):not(.no-metrics) .summary > .metric-group,
 .stats-window:not(.vertical):not(.no-chart):not(.no-metrics) .summary > .record-group {
-  min-height: 44px !important;
+  min-height: 60px !important;
 }
 
 .stats-window:not(.vertical):not(.no-chart):not(.no-metrics) .summary {
-  grid-template-rows: minmax(44px, 1fr) !important;
+  grid-template-rows: minmax(60px, 1fr) !important;
 }
 
 .stats-window.vertical:not(.no-chart):not(.no-metrics) {
@@ -1679,6 +1679,119 @@ body.remote-overlay {
   align-content: stretch;
 }
 
+.stats-window.vertical.no-chart {
+  min-height: 0 !important;
+}
+
 .stats-window:not(.no-chart):not(.no-metrics) .stats-chart {
   height: 100% !important;
+}
+
+/* Unified metric typography. Every card reserves the same title, value and
+   supplemental rows so labels do not jump between card types. */
+.stats-window .summary > .metric-group,
+.stats-window .summary > .record-group {
+  grid-template-rows: minmax(11px, auto) minmax(0, 1fr) minmax(12px, auto);
+  align-content: stretch;
+  row-gap: 2px;
+}
+
+.stats-window .summary small,
+.stats-window .record-labels {
+  align-self: center;
+  font-size: min(calc(10px * var(--font-scale)), 2.4vw);
+  line-height: 1;
+}
+
+.stats-window .summary > .metric-group > strong,
+.stats-window .summary > .record-group > strong,
+.stats-window .potential-group strong,
+.stats-window .peak-group strong,
+.stats-window .rank-group strong,
+.stats-window.overlay:not(.vertical) .potential-group strong {
+  align-self: center;
+  font-size: min(calc(24px * var(--stats-value-scale)), 4.5vw);
+  line-height: 1;
+}
+
+.stats-window .rank-delta {
+  align-self: center;
+  font-size: min(calc(14px * var(--stats-value-scale)), 3vw);
+  line-height: 1;
+}
+
+/* Overlay text uses the selected color for the complete card. Semantic chart
+   colors remain defined by the canvas drawing code. */
+.stats-window .record-labels,
+.stats-window .summary small,
+.stats-window .summary strong,
+.stats-window .metric-sample,
+.stats-window .rank-delta {
+  color: var(--text) !important;
+}
+
+/* Window and overlay share one compact horizontal typography system. Their
+   only differences are native window behavior and background treatment. */
+.stats-window.horizontal:not(.vertical) .record-labels,
+.stats-window.horizontal:not(.vertical) .summary small {
+  font-size: 7px;
+  line-height: 1;
+  letter-spacing: 0.04em;
+}
+
+.stats-window.horizontal:not(.vertical) .summary > .metric-group > strong,
+.stats-window.horizontal:not(.vertical) .summary > .record-group > strong {
+  font-size: clamp(
+    calc(18px * var(--stats-value-scale)),
+    calc(6vw * var(--stats-value-scale)),
+    calc(25px * var(--stats-value-scale))
+  );
+  line-height: 0.9;
+}
+
+.stats-window.vertical .summary > .metric-group,
+.stats-window.vertical .summary > .record-group {
+  grid-template-rows: minmax(12px, auto) minmax(0, 1fr) minmax(14px, auto);
+}
+
+.stats-window.vertical .summary > .metric-group > strong,
+.stats-window.vertical .summary > .record-group > strong,
+.stats-window.vertical .potential-group strong,
+.stats-window.vertical .peak-group strong,
+.stats-window.vertical .rank-group strong {
+  font-size: clamp(
+    calc(25px * var(--stats-value-scale)),
+    calc(7vw * var(--stats-value-scale)),
+    calc(44px * var(--stats-value-scale))
+  );
+}
+
+/* Vertical CHARACTER RANK keeps a valid movement beside the rank. */
+.stats-window.vertical .rank-group {
+  grid-template-columns: max-content max-content;
+  grid-template-rows: minmax(12px, auto) minmax(0, 1fr) !important;
+  justify-content: center;
+  column-gap: 0;
+}
+
+.stats-window.vertical .rank-group > small {
+  grid-column: 1 / -1;
+  grid-row: 1;
+}
+
+.stats-window.vertical .rank-group > strong {
+  grid-column: 1;
+  grid-row: 2;
+  width: auto;
+}
+
+.stats-window.vertical .rank-group > .rank-delta {
+  grid-column: 2;
+  grid-row: 2;
+  width: auto;
+  font-size: clamp(
+    calc(15px * var(--stats-value-scale)),
+    calc(4vw * var(--stats-value-scale)),
+    calc(24px * var(--stats-value-scale))
+  );
 }

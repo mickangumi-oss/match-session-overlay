@@ -1,5 +1,19 @@
 "use strict";
 
+function horizontalMetricMinimumWidth(metricCount, {
+  cardWidth = 104,
+  gap = 4,
+  padding = 12,
+  maximumWidth = 520,
+} = {}) {
+  const count = Math.max(0, Math.trunc(Number(metricCount) || 0));
+  if (count === 0) return 0;
+  return Math.min(
+    maximumWidth,
+    count * cardWidth + Math.max(0, count - 1) * gap + padding,
+  );
+}
+
 function statsWindowSizeConstraints(preset, currentBounds = null) {
   const constraints = {
     minWidth: preset.minWidth,
@@ -26,13 +40,16 @@ function compactStatsWindowInitialSize(preset, scale = 0.9) {
 }
 
 function resizeBoundsForGraphVisibility(currentBounds, previousPreset, nextPreset) {
+  const graphWasRemoved = nextPreset.height < previousPreset.height;
   return {
     ...currentBounds,
     height: Math.min(
       nextPreset.maxHeight,
       Math.max(
         nextPreset.minHeight,
-        currentBounds.height + nextPreset.height - previousPreset.height,
+        graphWasRemoved
+          ? nextPreset.height
+          : currentBounds.height + nextPreset.height - previousPreset.height,
       ),
     ),
   };
@@ -52,6 +69,7 @@ function expandBoundsToMinimumHeight(currentBounds, preset) {
 module.exports = {
   compactStatsWindowInitialSize,
   expandBoundsToMinimumHeight,
+  horizontalMetricMinimumWidth,
   resizeBoundsForGraphVisibility,
   statsWindowSizeConstraints,
 };
