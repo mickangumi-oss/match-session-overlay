@@ -62,6 +62,7 @@ const {
 const { suggestedInitialLocale } = require("./initial-language");
 const { buildPresentationState } = require("./presentation-model");
 const { applyCurrentProfileRatings } = require("./history-current-rating");
+const { potentialRatingValue } = require("./potential-rating");
 const {
   buildTrackerSessionPayload,
   hasRetainedTrackerSession,
@@ -1193,21 +1194,6 @@ function historyViewTrackerState() {
   };
 }
 
-function medianValue(values) {
-  const sorted = values
-    .map((value) => Number(value))
-    .filter(Number.isFinite)
-    .sort((a, b) => a - b);
-  if (sorted.length < 2) return null;
-  const middle = Math.floor(sorted.length / 2);
-  const median = sorted.length % 2
-    ? sorted[middle]
-    : (sorted[middle - 1] + sorted[middle]) / 2;
-  // MR/LP are displayed as whole points. When an even-sized sample produces
-  // a fractional median, use ordinary half-up rounding instead of decimals.
-  return Math.round(median);
-}
-
 function publicMedianRating(sourceState) {
   const hasStateRating =
     sourceState?.currentRating != null || sourceState?.active || sourceState?.readOnly;
@@ -1242,7 +1228,9 @@ function publicMedianRating(sourceState) {
       .slice(-MEDIAN_RATING_SAMPLE_LIMIT);
   }
   return {
-    medianRating: medianValue(values),
+    // Preserve the public field names for renderer/OBS compatibility. Both
+    // rating types use robust smoothing with scale-specific step limits.
+    medianRating: potentialRatingValue(values, ratingType),
     medianRatingType: ratingType,
     medianRatingSampleCount: values.length,
   };

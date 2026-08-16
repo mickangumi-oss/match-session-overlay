@@ -555,18 +555,15 @@ function selectHistoryPotentialRating(records, player = historyState.player) {
     .filter((record) => record.ownRatingType === ratingType)
     .map((record) => Number(record.ownRating))
     .filter(Number.isFinite)
-    .sort((a, b) => a - b);
+    .slice(-20);
   if (elements.historyPotentialLabel) {
     elements.historyPotentialLabel.textContent = `${t("potential", "POTENTIAL")} ${ratingType}`;
   }
   if (values.length < 2) {
     return { ratingType, value: null, sampleCount: values.length };
   }
-  const middle = Math.floor(values.length / 2);
-  const value = values.length % 2
-    ? values[middle]
-    : (values[middle - 1] + values[middle]) / 2;
-  return { ratingType, value: Math.round(value), sampleCount: values.length };
+  const value = window.MatchPotentialRating?.potentialRatingValue(values, ratingType) ?? null;
+  return { ratingType, value, sampleCount: values.length };
 }
 
 function renderHistoryFetchStatus() {
