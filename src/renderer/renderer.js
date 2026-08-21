@@ -545,16 +545,26 @@ function selectHistoryMaximumRating(records) {
 }
 
 function selectHistoryPotentialRating(records, player = historyState.player) {
+  const characterId = Number(player?.characterId) || null;
+  const ratingType = player?.mr != null
+    ? "MR"
+    : player?.lp != null
+      ? "LP"
+      : [...records]
+          .filter((record) => record.matchType === "ranked")
+          .sort((a, b) => Number(a.playedAt ?? a.uploadedAt) - Number(b.playedAt ?? b.uploadedAt))
+          .at(-1)?.ownRatingType ?? "MR";
   const ordered = [...records]
-    .filter((record) => ["MR", "LP"].includes(record.ownRatingType))
+    .filter(
+      (record) =>
+        record.matchType === "ranked" &&
+        record.ownRatingType === ratingType &&
+        (characterId == null || Number(record.characterId) === characterId),
+    )
     .sort((a, b) => Number(a.playedAt ?? a.uploadedAt) - Number(b.playedAt ?? b.uploadedAt));
-  const ratingType =
-    ordered.at(-1)?.ownRatingType ??
-    (player?.mr != null ? "MR" : player?.lp != null ? "LP" : "MR");
   const values = ordered
-    .filter((record) => record.ownRatingType === ratingType)
     .map((record) => Number(record.ownRating))
-    .filter(Number.isFinite)
+    .filter((value) => Number.isFinite(value) && value > 0)
     .slice(-20);
   if (elements.historyPotentialLabel) {
     elements.historyPotentialLabel.textContent = `${t("potential", "POTENTIAL")} ${ratingType}`;
