@@ -12,6 +12,11 @@ const INITIAL_SAMPLE_LIMIT = 5;
 
 function finiteValues(values) {
   return (Array.isArray(values) ? values : [])
+    .filter(
+      (value) =>
+        typeof value === "number" ||
+        (typeof value === "string" && value.trim() !== ""),
+    )
     .map((value) => Number(value))
     .filter(Number.isFinite);
 }
