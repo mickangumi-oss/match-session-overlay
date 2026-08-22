@@ -600,7 +600,7 @@ function renderRecentHistoryPreview(records) {
       formatHistoryDate(record),
       result,
       historyModeLabel(record.matchType),
-      historyCharacterLabel(record),
+      historyCharacterLabel(record, false),
       record.opponentName || "—",
       ratingDelta == null ? "—" : `${ratingDelta >= 0 ? "+" : ""}${ratingDelta}`,
     ];
