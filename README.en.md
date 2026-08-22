@@ -25,7 +25,7 @@ For step-by-step instructions, see the [English usage guide](docs/usage.en.md).
 
 - The management screen, match history, window, overlay, and friend notifications now use the new MIDNIGHT GLASS design.
 - A softly pulsing indicator makes it easier to see when session tracking is active.
-- Match-history loading progress, the last update time, the selected character, and MR/LP changes are easier to check.
+- Match-history loading progress, the last update time, the opponent character in the latest five matches, and MR/LP changes are easier to check.
 - Window and overlay layouts now compact automatically when displayed items are removed.
 
 See the [v1.7.0 release notes](https://github.com/mickangumi-oss/match-session-overlay/releases/tag/v1.7.0) for the installer checksum and security scan results.
