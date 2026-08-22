@@ -129,6 +129,10 @@ const scanArguments = [
   "--headless",
   "--fail-on-severity",
   "medium",
+  "--max-cost",
+  "5",
+  "--codex",
+  "features.multi_agent_v2.max_concurrent_threads_per_session=2",
 ];
 if (fs.existsSync(outputDirectory)) scanArguments.push("--archive-existing");
 
