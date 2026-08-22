@@ -6,12 +6,12 @@ Updated: 2026-08-22
 
 ## Current state
 
-- App repository: `C:\Users\zuga\CodexWork\development\match-session-overlay`
+- App repository: this repository root
 - Current release: `v1.7.0`
 - Current verified HEAD when this context was created: `248f682a3d69b558a7932bbcbf956497576354ed`
 - Product truth: `README.md`, `README.en.md`, `docs/usage.md`
 - Release truth: `package.json`, `docs/release-process.md`, the matching file under `docs/release-notes/`
-- Landing-page repository: `C:\Users\zuga\CodexWork\development\match-session-overlay-site`
+- Landing-page repository: sibling repository `../match-session-overlay-site`
 - Production landing page: `https://match-session-overlay.mickangumi.chatgpt.site/`
 - Download links should use the evergreen GitHub URL: `https://github.com/mickangumi-oss/match-session-overlay/releases/latest`
 
