@@ -121,7 +121,9 @@ const commonArguments = [
 console.log(`Codex Security target: ${root}`);
 console.log(`Codex Security output: ${outputDirectory}`);
 console.log("Running credential-free release scan dry-run...");
-const dryRun = run(process.execPath, [...commonArguments, "--dry-run"], {
+const dryRunArguments = [...commonArguments, "--dry-run"];
+if (fs.existsSync(outputDirectory)) dryRunArguments.push("--archive-existing");
+const dryRun = run(process.execPath, dryRunArguments, {
   env: environment,
   stdio: "inherit",
 });
