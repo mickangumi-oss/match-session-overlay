@@ -101,20 +101,17 @@ const environment = {
   ...process.env,
   CODEX_SECURITY_STATE_DIR: stateDirectory,
 };
+const previousReleaseResult = run("git", ["describe", "--tags", "--abbrev=0"]);
+const previousRelease = previousReleaseResult.stdout.trim();
+if (previousReleaseResult.status !== 0 || !/^v\d+\.\d+\.\d+$/.test(previousRelease)) {
+  throw new Error("Unable to resolve the previous release tag for the security diff scan.");
+}
 const commonArguments = [
   cliEntrypoint,
   "scan",
   root,
-  "--path",
-  "src",
-  "--path",
-  "scripts",
-  "--path",
-  "package.json",
-  "--path",
-  "pnpm-lock.yaml",
-  "--path",
-  "electron-builder.yml",
+  "--diff",
+  previousRelease,
   "--output-dir",
   outputDirectory,
   "--auth",
