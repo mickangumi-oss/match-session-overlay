@@ -1,15 +1,20 @@
 "use strict";
 
 const fs = require("node:fs");
+const os = require("node:os");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
 
 const root = path.resolve(__dirname, "..");
 const securityRoot = path.resolve(root, "..", "_tools", "codex-security");
 const stateDirectory = path.join(
-  process.env.USERPROFILE || root,
-  ".match-session-overlay-security",
+  os.tmpdir(),
+  "match-session-overlay-security",
+  String(process.pid),
 );
+process.on("exit", () => {
+  fs.rmSync(stateDirectory, { recursive: true, force: true });
+});
 const cliEntrypoint = path.join(
   securityRoot,
   "cli",
