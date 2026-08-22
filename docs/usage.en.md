@@ -19,7 +19,7 @@ On the first launch, choose Japanese or English. You can change it later from **
 
 In **Player Connection**, select **Open Official Website** and sign in on the official website's sign-in page. Match Session Overlay does not read or store your ID or password.
 
-Close the sign-in window after signing in. The connected player should then appear in the app. If it does not, select **Refresh**.
+Close the sign-in window after signing in. The connected player should then appear in the app. If it does not, select **Refresh session**.
 
 Your signed-in session is stored in the app-specific folder on your own PC:
 
@@ -89,7 +89,7 @@ The app normally checks FRIENDS every five minutes while notifications are enabl
 
 ### The connected player does not appear
 
-Confirm that you are signed in on the official website, then select **Refresh**. If the signed-in session has expired, open the official website from the app and sign in again.
+Confirm that you are signed in on the official website, then select **Refresh session**. If the signed-in session has expired, open the official website from the app and sign in again.
 
 ### MR/LP shows `---`
 
