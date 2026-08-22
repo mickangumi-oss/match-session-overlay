@@ -1613,8 +1613,8 @@ body.remote-overlay {
   transition: opacity 120ms ease;
 }
 
-.stats-window:hover .floating-window-actions,
-.stats-window:focus-within .floating-window-actions {
+.floating-window-actions:hover,
+.floating-window-actions:focus-within {
   opacity: 0.82;
 }
 

@@ -1112,6 +1112,35 @@ body.update-required .cockpit .hud-panel .update-row * {
   border-left: 7px solid currentColor;
 }
 
+.tracking-indicator.tracking-active:disabled {
+  cursor: default;
+  opacity: 1;
+  border-color: rgba(215, 107, 130, 0.78);
+  background: linear-gradient(105deg, rgba(215, 107, 130, 0.24), rgba(121, 130, 201, 0.12));
+  color: #f1b2bf;
+  box-shadow: inset 0 0 16px rgba(215, 107, 130, 0.12), 0 0 10px rgba(215, 107, 130, 0.16);
+}
+
+.tracking-indicator.tracking-active .play-icon {
+  width: 8px;
+  height: 8px;
+  margin-right: 8px;
+  border: 0;
+  border-radius: 50%;
+  background: #d76b82;
+  box-shadow: 0 0 0 0 rgba(215, 107, 130, 0.55);
+  animation: tracking-record-pulse 2.4s ease-in-out infinite;
+}
+
+@keyframes tracking-record-pulse {
+  0%, 100% { opacity: 0.62; box-shadow: 0 0 0 0 rgba(215, 107, 130, 0.18); }
+  50% { opacity: 1; box-shadow: 0 0 0 6px rgba(215, 107, 130, 0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tracking-indicator.tracking-active .play-icon { animation: none; opacity: 1; }
+}
+
 .display-panel {
   position: relative;
   min-height: 0;
@@ -1167,7 +1196,6 @@ body.update-required .cockpit .hud-panel .update-row * {
   padding: 7px 10px;
   border-bottom: 1px solid rgba(102, 135, 177, 0.24);
 }
-.recent-history-preview > header > span:last-child { color: var(--cyan); font: 700 11px "Cascadia Mono", Consolas, monospace; }
 .recent-history-scroll { max-height: 280px; overflow-y: auto; }
 .recent-history-preview table { width: 100%; border-collapse: collapse; font-size: 11px; }
 .recent-history-preview th,
@@ -1176,6 +1204,14 @@ body.update-required .cockpit .hud-panel .update-row * {
 .recent-history-preview td.result-win { color: #ff466c; font-weight: 800; }
 .recent-history-preview td.result-loss { color: #5c9eff; font-weight: 800; }
 .recent-history-preview td.result-draw { color: #aeb9c5; font-weight: 800; }
+.recent-history-preview td.rating-positive { color: #d76b82; font-weight: 800; }
+.recent-history-preview td.rating-negative { color: #668fcf; font-weight: 800; }
+.recent-history-preview th:nth-child(1) { width: 24%; }
+.recent-history-preview th:nth-child(2) { width: 8%; }
+.recent-history-preview th:nth-child(3) { width: 16%; }
+.recent-history-preview th:nth-child(4) { width: 18%; }
+.recent-history-preview th:nth-child(5) { width: 22%; }
+.recent-history-preview th:nth-child(6) { width: 12%; }
 .recent-history-empty { margin: 0; padding: 16px 10px; color: rgba(247, 248, 255, 0.62); font-size: 11px; text-align: center; }
 .recent-history-empty.hidden { display: none; }
 
@@ -1189,9 +1225,9 @@ body.update-required .cockpit .hud-panel .update-row * {
   overflow-y: auto;
   margin-top: 16px;
   padding: 20px;
-  border: 1px solid rgba(67, 216, 255, 0.52);
-  background: rgba(5, 11, 22, 0.9);
-  box-shadow: 0 0 24px rgba(0, 0, 0, 0.35);
+  border: 2px solid rgba(113, 128, 200, 0.72);
+  background: rgba(5, 7, 19, 0.985);
+  box-shadow: inset 0 0 0 1px rgba(171, 181, 255, .08), inset 0 0 42px rgba(100, 112, 215, .09), 0 0 24px rgba(0, 0, 0, 0.45);
 }
 .history-panel.hidden { display: none; }
 .history-heading,
@@ -1200,9 +1236,34 @@ body.update-required .cockpit .hud-panel .update-row * {
 .history-content,
 .history-summary,
 .history-legend { display: flex; }
-.history-heading { align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 14px; }
-.history-heading h2 { margin: 2px 0 0; }
+.history-heading { align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 12px; padding: 0 6px 10px; border-bottom: 1px solid rgba(123, 139, 211, .38); }
+.history-heading h2 { margin: 2px 0 0; font-size: clamp(22px, 2.2vw, 30px); letter-spacing: .02em; }
 .history-heading-actions { align-items: center; gap: 8px; }
+.history-last-update { color: rgba(220, 227, 255, .56); font-size: 10px; letter-spacing: .05em; }
+.history-control-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(330px, 1fr);
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.history-acquisition {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  margin: 0;
+  padding: 10px 12px;
+  border: 2px solid rgba(113, 128, 200, .72);
+  border-radius: 8px;
+  background: linear-gradient(135deg, rgba(24, 28, 58, .93), rgba(8, 11, 27, .97));
+  box-shadow: inset 0 0 0 1px rgba(9, 13, 31, .9), inset 0 0 20px rgba(111, 126, 224, .08);
+}
+.history-acquisition-copy { display: grid; gap: 4px; min-width: 0; }
+.history-acquisition-copy strong { color: #9bb7ff; font-size: 11px; letter-spacing: .08em; }
+.history-fetch-progress { height: 4px; overflow: hidden; border-radius: 999px; background: rgba(111, 128, 200, .2); opacity: .35; }
+.history-fetch-progress.active { opacity: 1; }
+.history-fetch-progress > div { width: 0; height: 100%; background: linear-gradient(90deg, #75a4ff, #c280ff); box-shadow: 0 0 8px rgba(125, 160, 255, .55); transition: width 160ms ease; }
+.history-acquisition .button { min-width: 190px; min-height: 38px; }
 .history-fetch-state { color: #43d8ff; font-size: 11px; }
 .history-fetch-state.loading {
   color: var(--lime);
@@ -1221,13 +1282,15 @@ body.update-required .cockpit .hud-panel .update-row * {
 }
 .history-target {
   display: grid;
-  grid-template-columns: minmax(180px, 260px) auto auto minmax(0, 1fr);
+  grid-template-columns: minmax(180px, 1fr) auto auto;
   align-items: end;
   gap: 8px;
-  margin-bottom: 10px;
+  margin: 0;
   padding: 10px 12px;
-  border: 1px solid rgba(255, 61, 141, 0.34);
-  background: rgba(22, 5, 24, 0.46);
+  border: 2px solid rgba(113, 128, 200, .72);
+  border-radius: 8px;
+  background: linear-gradient(135deg, rgba(24, 28, 58, .93), rgba(8, 11, 27, .97));
+  box-shadow: inset 0 0 0 1px rgba(9, 13, 31, .9), inset 0 0 20px rgba(111, 126, 224, .08);
 }
 .history-target label { display: grid; gap: 6px; min-width: 0; }
 .history-target input {
@@ -1240,10 +1303,14 @@ body.update-required .cockpit .hud-panel .update-row * {
   font: 700 13px "Cascadia Mono", Consolas, monospace;
 }
 .history-target p {
+  grid-column: 1 / -1;
   margin: 0;
   align-self: center;
   color: rgba(247, 248, 255, 0.72);
   font-size: 11px;
+  line-height: 1.55;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
 }
 .history-opponent-link {
   appearance: none;
@@ -1263,12 +1330,13 @@ body.update-required .cockpit .hud-panel .update-row * {
   color: #fff;
   text-decoration-color: currentColor;
 }
-.history-filters { display: grid; grid-template-columns: repeat(4, minmax(150px, 1fr)); gap: 10px; padding: 12px; border: 1px solid rgba(102, 135, 177, 0.36); background: rgba(7, 13, 26, 0.74); }
+.history-filters { display: grid; grid-template-columns: repeat(4, minmax(150px, 1fr)); gap: 10px; padding: 12px; border: 2px solid rgba(113, 128, 200, .66); border-radius: 8px; background: linear-gradient(135deg, rgba(19, 24, 52, .9), rgba(8, 11, 27, .96)); box-shadow: inset 0 0 0 1px rgba(9, 13, 31, .9), inset 0 0 18px rgba(111, 126, 224, .07); }
 .history-filters label { display: grid; gap: 6px; min-width: 0; }
 .history-filters input,
 .history-filters select { width: 100%; min-height: 34px; padding: 6px 8px; color: var(--text-color, #f7f8ff); border: 1px solid rgba(67, 216, 255, 0.42); background: rgba(1, 7, 16, 0.9); }
 .history-summary { grid-template-columns: repeat(5, minmax(0, 1fr)); display: grid; gap: 8px; margin: 12px 0; }
-.history-summary article { display: grid; gap: 4px; padding: 10px 12px; border-left: 3px solid #ff2e69; background: linear-gradient(110deg, rgba(70, 10, 47, 0.42), rgba(5, 15, 29, 0.72)); }
+.history-summary article { position: relative; display: grid; gap: 4px; min-height: 76px; padding: 12px 14px; overflow: hidden; border: 2px solid rgba(113, 128, 200, .72); border-radius: 8px; background: linear-gradient(135deg, rgba(26, 31, 65, .96), rgba(9, 12, 29, .98)); box-shadow: inset 0 0 0 1px rgba(9, 13, 31, .92), inset 0 0 22px rgba(117, 132, 232, .1), 0 0 12px rgba(93, 93, 220, .12); }
+.history-summary article::after { position: absolute; right: -1px; bottom: -1px; width: 30px; height: 2px; content: ""; background: linear-gradient(90deg, transparent, #bb82ff); box-shadow: 0 0 8px rgba(187, 130, 255, .7); }
 .history-summary span,
 .history-content header,
 .history-legend { color: rgba(247, 248, 255, 0.72); font-size: 11px; letter-spacing: .08em; }
@@ -1276,7 +1344,10 @@ body.update-required .cockpit .hud-panel .update-row * {
 .history-potential-sample { min-height: 10px; color: rgba(247, 248, 255, 0.56); font-size: 9px; }
 .history-content { display: grid; grid-template-columns: minmax(0, .82fr) minmax(0, 1.18fr); gap: 12px; }
 .history-chart-card,
-.history-table-card { min-width: 0; border: 1px solid rgba(67, 216, 255, 0.38); background: rgba(2, 9, 18, 0.72); }
+.history-table-column { display: grid; min-width: 0; align-content: start; gap: 12px; }
+.history-result-card,
+.history-table-card,
+.history-opponent-stats { min-width: 0; overflow: hidden; border: 2px solid rgba(113, 128, 200, .68); border-radius: 8px; background: rgba(7, 10, 25, .96); box-shadow: inset 0 0 0 1px rgba(9, 13, 31, .9), inset 0 0 24px rgba(111, 126, 224, .07); }
 .history-content header { display: flex; justify-content: space-between; padding: 10px 12px; border-bottom: 1px solid rgba(67, 216, 255, 0.25); }
 .history-chart-wrap { position: relative; min-height: 210px; padding: 10px; }
 .history-chart-wrap canvas { display: block; width: 100%; height: 210px; }
@@ -1285,7 +1356,7 @@ body.update-required .cockpit .hud-panel .update-row * {
 .history-legend { gap: 16px; padding: 0 12px 10px; }
 .history-legend span { display: inline-flex; align-items: center; gap: 5px; }
 .history-legend i { width: 10px; height: 10px; display: inline-block; }
-.history-rating-grid { display: grid; grid-template-columns: 1fr; gap: 8px; padding: 0 10px 10px; }
+.history-rating-grid { display: grid; grid-template-columns: 1fr; gap: 12px; padding: 0; }
 .history-rating-card { min-width: 0; border: 1px solid rgba(67, 216, 255, 0.25); background: rgba(1, 7, 16, 0.52); }
 .history-rating-card header { padding: 7px 9px; border-bottom: 1px solid rgba(67, 216, 255, 0.2); }
 .history-rating-wrap { position: relative; min-height: 150px; padding: 6px 8px 8px; }
@@ -1293,8 +1364,8 @@ body.update-required .cockpit .hud-panel .update-row * {
 .history-rating-wrap p { position: absolute; inset: 0; display: grid; place-items: center; margin: 0; color: rgba(247, 248, 255, .58); font-size: 10px; }
 .history-rating-wrap p.hidden { display: none; }
 .history-rating-grid .history-rating-card header { color: rgba(247, 248, 255, .72); font-size: 11px; letter-spacing: .08em; }
-.legend-win { background: #f32755; }
-.legend-loss { background: #2d78df; }
+.legend-win { background: #d76b82; box-shadow: 0 0 7px rgba(215, 107, 130, .42); }
+.legend-loss { background: #668fcf; box-shadow: 0 0 7px rgba(102, 143, 207, .42); }
 .history-table-scroll { max-height: 264px; overflow: auto; }
 .history-table-card table { width: 100%; border-collapse: collapse; font-size: 11px; }
 .history-table-card th,
@@ -1319,7 +1390,7 @@ body.update-required .cockpit .hud-panel .update-row * {
 .history-pagination { display: flex; align-items: center; justify-content: center; gap: 12px; padding: 10px 12px 12px; border-top: 1px solid rgba(102, 135, 177, .22); }
 .history-pagination .button { min-width: 82px; min-height: 30px; padding: 5px 10px; font-size: 11px; }
 .history-pagination span { min-width: 86px; color: rgba(247, 248, 255, .78); font-size: 11px; text-align: center; }
-.history-opponent-stats { border-top: 1px solid rgba(67, 216, 255, .32); }
+.history-opponent-stats { border-top-width: 2px; }
 .history-opponent-stats > header { padding-block: 9px; }
 .history-opponent-stats-scroll { position: relative; min-height: 88px; overflow: auto; }
 .history-opponent-stats th,
@@ -1336,20 +1407,35 @@ body.update-required .cockpit .hud-panel .update-row * {
   min-width: 76px;
   background: linear-gradient(
     90deg,
-    rgba(255, 46, 105, .2) 0 var(--matchup-win-rate),
-    rgba(92, 158, 255, .08) var(--matchup-win-rate) 100%
+    var(--win-rate-fill) 0 var(--matchup-win-rate),
+    var(--win-rate-track) var(--matchup-win-rate) 100%
   );
+  color: var(--win-rate-text);
+  text-shadow: 0 0 8px var(--win-rate-glow);
   font-variant-numeric: tabular-nums;
+}
+.history-matchup-win-rate.win-rate-pass {
+  --win-rate-fill: rgba(215, 107, 130, .42);
+  --win-rate-track: rgba(119, 57, 75, .1);
+  --win-rate-text: #e99aab;
+  --win-rate-glow: rgba(215, 107, 130, .38);
+}
+.history-matchup-win-rate.win-rate-fail {
+  --win-rate-fill: rgba(102, 143, 207, .42);
+  --win-rate-track: rgba(54, 76, 113, .1);
+  --win-rate-text: #91afe0;
+  --win-rate-glow: rgba(102, 143, 207, .38);
 }
 .history-opponent-stats-empty { display: grid; min-height: 88px; place-items: center; margin: 0; color: rgba(247, 248, 255, .58); font-size: 11px; }
 .history-opponent-stats-empty.hidden { display: none; }
 @media (min-width: 901px) {
-  .history-table-card { display: grid; grid-template-rows: auto 356px auto minmax(0, 1fr); min-height: 0; }
+  .history-table-card { display: grid; grid-template-rows: auto 356px auto; min-height: 0; }
   .history-table-scroll { height: 100%; max-height: none; overflow-x: hidden; overflow-y: auto; }
   .history-opponent-stats { display: grid; grid-template-rows: auto minmax(0, 1fr); min-height: 0; }
   .history-opponent-stats-scroll { min-height: 0; }
 }
 @media (max-width: 900px) {
+  .history-control-row { grid-template-columns: 1fr; }
   .history-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .history-content { grid-template-columns: 1fr; }
   .history-opponent-stats-scroll { max-height: 360px; }
@@ -1357,6 +1443,9 @@ body.update-required .cockpit .hud-panel .update-row * {
 @media (max-width: 560px) {
   .history-heading { align-items: flex-start; flex-direction: column; }
   .history-heading-actions { width: 100%; justify-content: space-between; }
+  .history-last-update { display: none; }
+  .history-acquisition { grid-template-columns: 1fr; }
+  .history-acquisition .button { width: 100%; }
   .history-target { grid-template-columns: 1fr 1fr; }
   .history-target p { grid-column: 1 / -1; }
   .history-filters,
@@ -2229,6 +2318,21 @@ footer {
   display: flex;
   gap: 4px;
   margin-top: 5px;
+}
+
+/* Header values share one typography system. Semantic colors may differ, but
+   PLAYER, CURRENT CHARACTER, SESSION PEAK and CHARACTER RANK must read as the
+   same information tier. Individual values shrink only when they overflow. */
+.monitor-heading .monitor-player > strong,
+.monitor-heading .monitor-character > strong,
+.monitor-heading .monitor-peak > strong,
+.monitor-heading .monitor-rank > strong {
+  font-family: "Yu Gothic UI", "Meiryo UI", sans-serif;
+  font-size: clamp(13px, 1.35vw, 17px);
+  font-style: normal;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  line-height: 1;
 }
 
 .social-heading-actions {

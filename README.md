@@ -13,13 +13,13 @@
 - 公式サイトへのログインと戦績取得に必要なインターネット接続
 - OBSで表示する場合のみ、OBS Studio（任意）
 
-公開版: v1.6.0
+公開版: v1.7.0
 
 ## ダウンロード
 
-[v1.6.0をダウンロード（GitHub Releases）](https://github.com/mickangumi-oss/match-session-overlay/releases/download/v1.6.0/Match-Session-Overlay-1.6.0-Setup.exe)
+[v1.7.0をダウンロード（GitHub Releases）](https://github.com/mickangumi-oss/match-session-overlay/releases/download/v1.7.0/Match-Session-Overlay-1.7.0-Setup.exe)
 
-開いたページの「Assets」から、`Match-Session-Overlay-1.6.0-Setup.exe`をダウンロードして実行してください。最新版以外のファイルや、配布元を確認できないファイルは使用しないでください。
+開いたページの「Assets」から、`Match-Session-Overlay-1.7.0-Setup.exe`をダウンロードして実行してください。最新版以外のファイルや、配布元を確認できないファイルは使用しないでください。
 
 詳しい操作手順は[`docs/usage.md`](docs/usage.md)、表示レイアウトは[`docs/window-layout.md`](docs/window-layout.md)、対戦履歴は[`docs/match-history.md`](docs/match-history.md)、フォントは[`docs/font-settings.md`](docs/font-settings.md)をご覧ください。
 
@@ -27,7 +27,7 @@
 
 正式な配布インストーラーは、公開前にMicrosoft DefenderおよびVirusTotalでセキュリティチェックを実施します。検査結果は公開時点のものであり、完全な安全性を保証するものではありません。インストーラーは必ずこのリポジトリの公式GitHub Releaseから取得し、各リリースノートに記載されたSHA-256と一致することを確認してください。
 
-`v1.6.0`の検査結果は[`v1.6.0リリースノート`](docs/release-notes/v1.6.0.md)をご覧ください。
+`v1.7.0`の検査結果は[`v1.7.0リリースノート`](docs/release-notes/v1.7.0.md)をご覧ください。
 
 ## 画面イメージ
 
@@ -63,14 +63,14 @@ CHARACTER RANKと現在のキャラクター、セッション戦績、FRIENDS�
 
 ![合成データを表示した対戦履歴画面](docs/images/match-history-example.png)
 
-## v1.6.0の変更内容
+## v1.7.0の変更内容
 
-- POTENTIAL MR／LPの算出方法を見直し、直近の実力変化へより早く追従するようにしました。
-- 一時的なレート変動の影響を抑えながら、現在の実力帯を確認しやすくしました。
-- 管理画面、ウィンドウ、オーバーレイ、OBS、対戦履歴でPOTENTIAL値の算出結果を統一しました。
-- READMEの画面画像を最新UIへ更新しました。
+- 管理画面、対戦履歴、ウィンドウ、オーバーレイ、フレンドオンライン通知のUIデザインを刷新しました。
+- 計測中は計測ボタンに点灯アニメーションを表示します。
+- 対戦履歴の取得進捗・最終更新時刻、最新5件の使用キャラクターとMR／LP増減を表示します。
+- 表示項目を減らした際、ウィンドウ・オーバーレイの不要な領域を自動的に詰めます。
 
-詳しい変更内容は[`v1.6.0リリースノート`](docs/release-notes/v1.6.0.md)をご覧ください。
+詳しい変更内容は[`v1.7.0リリースノート`](docs/release-notes/v1.7.0.md)をご覧ください。
 
 過去の変更内容は[`docs/release-notes`](docs/release-notes)をご覧ください。
 
@@ -86,7 +86,7 @@ CHARACTER RANKと現在のキャラクター、セッション戦績、FRIENDS�
 2. 表示された公式画面でログインします。
 3. ログインが終わったら公式画面を閉じます。
 
-ログイン中のプレイヤーが表示されない場合は「更新」を押してください。アプリがIDやパスワードを読み取ることはありません。
+ログイン中のプレイヤーが表示されない場合は「セッション更新」を押してください。アプリがIDやパスワードを読み取ることはありません。
 
 ### 3. 計測を開始する
 

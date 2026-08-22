@@ -1,0 +1,90 @@
+:root{--bg:#050713;--panel:#10142b;--panel-deep:#090c1d;--line:rgba(126,145,220,.32);--line-hot:rgba(143,164,255,.72);--text:#f1f3ff;--muted:#9ca8cc;--cyan:#83a8ff;--cyan-soft:rgba(126,164,255,.13);--lime:#9db8ff;--green:#7fffc0;--magenta:#c783ff;--red:#ff6c9d;--accent:#89a9ff;--mg-panel:linear-gradient(135deg,rgba(21,24,47,.8),rgba(11,14,32,.91) 70%,rgba(27,21,48,.85))}
+body{background:radial-gradient(circle at 86% 6%,rgba(76,75,145,.38),transparent 31%),radial-gradient(circle at 15% 92%,rgba(38,63,120,.26),transparent 34%),repeating-linear-gradient(125deg,transparent 0 86px,rgba(133,151,255,.018) 87px 88px),#050713;background-size:auto}
+.topbar{border-color:#37416f}.topbar::after{background:linear-gradient(90deg,#7da5ff,#b082ff 62%,transparent);height:2px;transform:none}.brand-mark{clip-path:none;border-radius:9px;background:linear-gradient(145deg,#758eff,#9c6ede);box-shadow:0 0 16px rgba(128,133,255,.45);transform:none}
+.hud-panel,.history-panel,.history-result-card,.history-rating-card,.history-table-card,.history-opponent-stats,.history-acquisition,.recent-history-preview,.options-category-card,.initial-language-dialog{border:1px solid #5665a1;border-radius:8px;outline:1px solid #2a315c;outline-offset:-4px;clip-path:none;background:var(--mg-panel);box-shadow:inset 0 0 0 1px #0c1024,inset 0 0 25px rgba(104,120,204,.094),0 0 12px rgba(125,131,255,.125)}
+.hud-panel::before,.history-panel::before,.options-category-card::before{left:18px;right:18px;top:-2px;width:auto;height:2px;border-radius:999px;background:linear-gradient(90deg,transparent,#86a7ff 18%,#b888ff 80%,transparent);box-shadow:0 0 8px rgba(137,157,255,.48);transform:none}.hud-panel::after,.history-panel::after,.history-summary article::after{display:none!important}
+.score-block,.history-summary article{border:1px solid #5665a1;border-radius:7px;outline:1px solid #313963;outline-offset:-4px;clip-path:none;background:linear-gradient(112deg,#151936,#0c1023 57%,#201433);box-shadow:inset 0 0 0 1px #0c1024,inset 0 0 25px rgba(104,120,204,.094)}
+.score-block:nth-child(even) strong,.history-summary article:nth-child(even) strong{color:#c58aff}.score-block strong,.history-summary strong,.potential-rating,.current-rating{color:#82a8ff;text-shadow:0 0 13px rgba(117,153,255,.34)}
+.monitor-chart{border:1px solid #5665a1;border-radius:8px;outline:1px solid #2a315c;outline-offset:-4px;background:linear-gradient(180deg,#11152a,#080c1b);box-shadow:inset 0 0 0 1px #0c1024,inset 0 0 25px rgba(104,120,204,.094),0 0 12px rgba(125,131,255,.125)}
+.history-result-card .history-chart-wrap,.history-rating-card .history-rating-wrap{border:0!important;border-radius:0!important;background:transparent!important;box-shadow:none!important}
+.history-opponent-stats table{width:100%;table-layout:fixed;border-collapse:collapse;font-size:11px;line-height:1.2}.history-opponent-stats th{font-size:10px}.history-opponent-stats th,.history-opponent-stats td{padding-inline:12px}.history-opponent-stats th:nth-child(1){width:28%}.history-opponent-stats th:nth-child(2){width:16%}.history-opponent-stats th:nth-child(3){width:22%}.history-opponent-stats th:nth-child(4){width:34%}.history-matchup-win-rate{width:auto;min-width:0}
+.history-opponent-stats .history-stats-sort{white-space:nowrap}
+.button,.icon-button,.social-tabs button,.switch{border-width:1px;border-radius:5px;background:linear-gradient(180deg,#1a1f3d,#0c1024);border-color:rgba(120,137,211,.72);color:#d7dfff}.button.primary,.button.accent,.social-tabs button.active{background:linear-gradient(135deg,#626bd6,#4c439d);border-color:#a5b1ff;color:#fff;box-shadow:inset 0 0 0 1px rgba(220,225,255,.1),0 0 15px rgba(117,123,255,.4)}.button.danger-ghost{border-color:#a66fd7;color:#d699ff}
+.kicker,.eyebrow,.control-label,.recent-history-preview th,.history-match-table th{color:#9bb7ff}.privacy-badge,.status{border-width:1px;border-radius:5px;background:#131932;border-color:rgba(122,145,217,.68)}
+.social-tabs{border-color:#3d4776}.social-list,.recent-history-scroll,.history-table-scroll,.history-opponent-stats-scroll{scrollbar-color:#707ac0 #0b0f21}
+.social-presence.online{color:#65d69a!important;text-shadow:0 0 8px rgba(101,214,154,.38)}
+.social-presence.offline{color:var(--muted)!important;text-shadow:none}
+.options-drawer{background:rgba(7,10,24,.97);border-radius:8px}.options-category-card:nth-child(even){border-color:rgba(153,118,207,.58)}
+input,select{border-width:1px!important;border-radius:5px!important;background:#0e1329!important;border-color:#59679d!important;color:#eef1ff!important;box-shadow:inset 0 0 10px rgba(105,124,213,.07)!important}
+.history-target,.history-filters{border:1px solid #5665a1!important;border-radius:8px!important;outline:1px solid #2a315c!important;outline-offset:-4px!important;background:var(--mg-panel)!important;box-shadow:inset 0 0 0 1px #0c1024,inset 0 0 25px rgba(104,120,204,.094),0 0 12px rgba(125,131,255,.125)!important}
+.history-summary article:nth-child(5) strong,.potential-rating{color:#c78cff}.legend-win{background:#d76b82;box-shadow:0 0 7px rgba(215,107,130,.42)}.legend-loss{background:#668fcf;box-shadow:0 0 7px rgba(102,143,207,.42)}
+.recent-history-preview{margin-top:12px}.telemetry-panel{margin-bottom:12px}.display-panel .recent-history-preview{order:3}
+.bottom-line{border-color:#343e69}.notice{color:#9fb8ff}
+.scoreboard .score-block>span,.scoreboard .record-headings,.history-summary article>span{color:#dce3ff!important}
+.scoreboard .score-block>strong,.scoreboard .record-values,.history-summary article>strong{color:#7ea7ff!important;text-shadow:0 0 12px rgba(126,167,255,.38)!important}
+.scoreboard .score-block:nth-child(even)>strong,.scoreboard .potential-block>strong,.history-summary article:nth-child(even)>strong,.history-summary article:last-child>strong{color:#c783ff!important}
+.telemetry-panel .scoreboard,
+.telemetry-panel .monitor-chart{
+  clip-path:none!important;
+  border:1px solid #5665a1!important;
+  border-radius:7px!important;
+  outline:1px solid #2a315c!important;
+  outline-offset:-4px!important;
+  background-image:none!important;
+  background-color:rgba(8,11,27,.96)!important;
+  box-shadow:inset 0 0 22px rgba(113,128,220,.1),0 0 10px rgba(112,112,255,.12)!important
+}
+.telemetry-panel .scoreboard{
+  gap:12px!important;
+  overflow:visible!important;
+  border:0!important;
+  outline:0!important;
+  background:transparent!important;
+  box-shadow:none!important
+}
+.telemetry-panel .score-block{border:1px solid #5665a1!important;border-radius:7px!important;outline:1px solid #313963!important;outline-offset:-4px!important;box-shadow:inset 0 0 0 1px #0c1024,inset 0 0 25px rgba(104,120,204,.094)!important}
+.telemetry-panel .scoreboard::after,
+.telemetry-panel .signal-lines,
+.telemetry-panel .potential-block .metric-sample{display:none!important}
+.display-panel>.options-drawer{
+  border-width:1px!important;
+  border-color:#5665a1!important;
+  outline:1px solid #2a315c!important;
+  outline-offset:-4px!important;
+  box-shadow:inset 0 0 22px rgba(113,128,220,.1),0 12px 32px rgba(0,0,0,.45)!important
+}
+.telemetry-panel .monitor-chart>header::before,
+.telemetry-panel .monitor-chart>header::after{display:none!important}
+
+/* Approved management composition: one persistent player rail, then session,
+   graph, match history and the display controls in a vertical reading order. */
+.side-column{
+  position:relative;
+  overflow:visible;
+  gap:12px!important;
+}
+.side-column>.hud-panel{
+  border:1px solid #5665a1!important;
+  border-radius:8px!important;
+  outline:1px solid #2a315c!important;
+  outline-offset:-4px!important;
+  background:var(--mg-panel)!important;
+}
+.cockpit{grid-template-rows:minmax(0,1fr) auto}
+.side-column,.main-column{grid-row:1}
+.main-column{grid-template-rows:auto minmax(0,1fr)!important}
+.telemetry-panel .session-actions{margin-top:12px;gap:12px}
+.telemetry-panel .monitor-chart{margin-top:12px}
+.dashboard-history-panel{padding:12px 16px!important}
+.dashboard-history-panel .recent-history-preview{margin:0!important;border:0!important;border-radius:0!important;outline:0!important;background:transparent!important;box-shadow:none!important}
+.dashboard-history-panel .recent-history-scroll{max-height:none}
+.display-panel{grid-column:1/-1;grid-row:2;min-height:64px}
+.display-panel>.display-heading{margin-bottom:0}
+.options-category-grid{gap:12px}
+.display-panel:has(.options-drawer:not(.hidden)){min-height:430px}
+@media(max-width:840px){
+  .cockpit{grid-template-rows:auto auto auto}
+  .side-column{grid-row:1}
+  .main-column{grid-row:2}
+  .display-panel{grid-row:3}
+}

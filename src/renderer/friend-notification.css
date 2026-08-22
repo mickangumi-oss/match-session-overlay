@@ -3,132 +3,70 @@
   font-family: "Arial Narrow", "Yu Gothic UI", "Segoe UI", sans-serif;
 }
 
-* {
-  box-sizing: border-box;
-}
-
-html,
-body {
-  width: 100%;
-  height: 100%;
-  margin: 0;
-  overflow: hidden;
-  background: transparent;
-  pointer-events: none;
-  user-select: none;
-}
+* { box-sizing: border-box; }
+html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: transparent; pointer-events: none; user-select: none; }
 
 .friend-toast {
   position: absolute;
-  inset: 2px;
+  inset: 3px;
   display: grid;
-  grid-template-columns: 5px minmax(0, 1fr);
-  border: 1px solid rgba(45, 216, 255, 0.72);
-  clip-path: polygon(0 9px, 9px 0, calc(100% - 18px) 0, 100% 18px, 100% 100%, 0 100%);
+  overflow: hidden;
+  border: 1px solid #5665a1;
+  border-radius: 8px;
+  outline: 1px solid #2a315c;
+  outline-offset: -4px;
   isolation: isolate;
   background: transparent;
-  box-shadow: inset 0 0 24px rgba(45, 216, 255, 0.08);
+  box-shadow: inset 0 0 0 1px #0c1024, inset 0 0 25px rgba(104, 120, 204, .094), 0 0 12px rgba(125, 131, 255, .125);
   transform: translateX(18px);
   transition: transform 180ms ease-out;
+}
+
+.friend-toast::after {
+  position: absolute;
+  z-index: 2;
+  top: 16px;
+  right: -2px;
+  bottom: 16px;
+  width: 2px;
+  content: "";
+  background: linear-gradient(transparent, #85a5ff, #bd83ff, transparent);
+  box-shadow: 0 0 8px rgba(163, 133, 255, .48);
+  pointer-events: none;
 }
 
 .toast-background {
   position: absolute;
   z-index: 0;
   inset: 0;
-  background:
-    linear-gradient(125deg, rgba(255, 38, 137, 0.12), transparent 38%),
-    repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.018) 0 1px, transparent 1px 11px),
-    rgb(6, 13, 25);
-  opacity: 0.94;
+  background: radial-gradient(circle at 92% 8%, rgba(90, 82, 168, .28), transparent 38%), repeating-linear-gradient(125deg, transparent 0 48px, rgba(133, 151, 255, .025) 49px 50px), linear-gradient(135deg, rgb(24, 28, 58), rgb(7, 10, 25) 70%, rgb(29, 20, 49));
+  opacity: .94;
 }
 
-.friend-toast.visible {
-  transform: translateX(0);
-}
-
-.friend-toast.leaving {
-  transform: translateX(12px);
-  transition-duration: 180ms;
-}
+.friend-toast.visible { transform: translateX(0); }
+.friend-toast.leaving { transform: translateX(12px); transition-duration: 180ms; }
 
 .accent {
-  position: relative;
-  z-index: 1;
-  background: linear-gradient(#ff2a87 0 48%, #25d8ff 48% 100%);
-  box-shadow: 0 0 12px rgba(255, 42, 135, 0.7);
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  right: 18px;
+  left: 18px;
+  height: 2px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, transparent, #86a8ff 18%, #bd86ff 82%, transparent);
+  box-shadow: 0 0 8px rgba(137, 157, 255, .5);
 }
 
-section {
-  position: relative;
-  z-index: 1;
-  min-width: 0;
-  padding: 9px 14px 8px 12px;
-}
-
-.eyebrow,
-.others {
-  margin: 0;
-}
-
-.eyebrow {
-  color: #9dff31;
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 0.11em;
-  line-height: 1.1;
-  opacity: 1;
-}
-
-.names {
-  display: grid;
-  gap: 1px;
-  margin-top: 4px;
-}
-
-.name {
-  min-width: 0;
-  overflow: hidden;
-  color: #f7f8ff;
-  font-size: 16px;
-  font-weight: 700;
-  line-height: 1.15;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  opacity: 1;
-}
-
-.name::before {
-  content: "";
-  display: inline-block;
-  width: 7px;
-  height: 7px;
-  margin-right: 7px;
-  border-radius: 50%;
-  background: #25f69f;
-  box-shadow: 0 0 7px rgba(37, 246, 159, 0.75);
-  vertical-align: 2px;
-}
-
-.others {
-  overflow: hidden;
-  margin-top: 2px;
-  color: #a8b7c9;
-  font-family: "Segoe UI", sans-serif;
-  font-size: 11px;
-  line-height: 1.2;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  opacity: 1;
-}
-
-.hidden {
-  display: none;
-}
+section { position: relative; z-index: 1; min-width: 0; padding: 11px 16px 10px; }
+.eyebrow, .others { margin: 0; }
+.eyebrow { color: #9bb7ff; font-size: 10px; font-weight: 800; letter-spacing: .11em; line-height: 1.15; opacity: 1; }
+.names { display: grid; gap: 2px; margin-top: 5px; }
+.name { min-width: 0; overflow: hidden; color: #f1f3ff; font-size: 15px; font-weight: 750; line-height: 1.15; text-overflow: ellipsis; white-space: nowrap; opacity: 1; }
+.name::before { display: inline-block; width: 7px; height: 7px; margin-right: 8px; border-radius: 50%; background: #7fffc0; box-shadow: 0 0 7px rgba(127, 255, 192, .72); vertical-align: 2px; content: ""; }
+.others { overflow: hidden; margin-top: 3px; color: #9ca8cc; font-family: "Segoe UI", sans-serif; font-size: 10px; line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; opacity: 1; }
+.hidden { display: none; }
 
 @media (prefers-reduced-motion: reduce) {
-  .friend-toast {
-    transition: none;
-    transform: none;
-  }
+  .friend-toast { transition: none; transform: none; }
 }

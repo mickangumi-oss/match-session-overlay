@@ -1,0 +1,83 @@
+:root{--text:#eef1ff;--muted:rgba(205,215,255,.72);--accent:#83a8ff;--pink:#c783ff;--blue:#7da5ff;--line:rgba(118,137,213,.45)}
+.stats-window{clip-path:none;border:1px solid #5665a1;border-radius:8px;outline:1px solid #2a315c;outline-offset:-4px;background:linear-gradient(135deg,rgba(21,24,47,var(--panel-opacity)),rgba(11,14,32,var(--panel-opacity)) 70%,rgba(27,21,48,var(--panel-opacity)))!important;box-shadow:inset 0 0 0 1px #0c1024,inset 0 0 25px rgba(104,120,204,.094),0 0 12px rgba(125,131,255,.125)}
+.stats-window.overlay,
+.stats-window.horizontal,
+.stats-window.vertical{
+  border-width:1px!important;
+  border-color:#5665a1!important;
+  border-radius:8px!important
+}
+.stats-window::before{left:18px;right:18px;top:-2px;width:auto;height:2px;border-radius:999px;background:linear-gradient(90deg,transparent,#86a8ff 18%,#bd86ff 82%,transparent);box-shadow:0 0 8px rgba(137,157,255,.5);transform:none}.stats-window::after{right:-2px;top:18px;bottom:18px;width:2px;height:auto;background:linear-gradient(transparent,#85a5ff,#bd83ff,transparent);box-shadow:0 0 8px rgba(163,133,255,.48);transform:none}
+.summary>div{clip-path:none!important;border:1px solid #5665a1!important;border-radius:7px!important;outline:1px solid #313963!important;outline-offset:-4px!important;background:linear-gradient(112deg,rgba(21,25,54,var(--panel-opacity)),rgba(12,16,35,var(--panel-opacity)) 57%,rgba(32,20,51,var(--panel-opacity)))!important;box-shadow:inset 0 0 0 1px #0c1024,inset 0 0 25px rgba(104,120,204,.094)!important}
+.summary>div:nth-child(even) strong{color:#c58aff!important}.summary strong{color:#82a8ff;text-shadow:0 0 12px rgba(117,153,255,.38)}
+.stats-window .stats-chart{clip-path:none!important;border:1px solid #5665a1!important;border-radius:8px!important;outline:1px solid #2a315c!important;outline-offset:-4px!important;background:linear-gradient(180deg,rgba(17,21,42,var(--panel-opacity)),rgba(8,12,27,var(--panel-opacity)))!important;box-shadow:inset 0 0 0 1px #0c1024,inset 0 0 25px rgba(104,120,204,.094),0 0 12px rgba(125,131,255,.125)!important}
+.window-actions button{border-radius:4px;color:#c9d4ff}.chart-label{color:#9bb7ff}.rank-delta{color:#a88cff!important}
+.stats-window.vertical .summary>.record-group,.stats-window.vertical .summary>.metric-group{display:flex!important;flex-direction:row!important;align-items:center!important;justify-content:space-between!important;padding-left:20px!important;padding-right:20px!important;text-align:left!important}
+.stats-window.vertical .summary small,.stats-window.vertical .record-labels{margin:0!important;text-align:left!important}.stats-window.vertical .summary strong{margin-left:16px!important;text-align:right!important}.stats-window.vertical .rank-group{justify-content:flex-start!important}.stats-window.vertical .rank-group>strong{margin-left:auto!important}.stats-window.vertical .rank-group>.rank-delta{position:static!important;margin-left:4px!important}
+.stats-window.vertical .summary small,.stats-window.vertical .record-labels{flex:0 0 auto!important;overflow:visible!important;text-overflow:clip!important;white-space:nowrap!important}
+.stats-window.vertical .summary strong{min-width:0!important;flex:0 1 auto!important}
+.stats-window.vertical .record-labels{display:flex!important;width:auto!important;align-items:center!important;justify-content:flex-start!important;gap:0!important}
+.stats-window.vertical .record-labels>span{display:none!important}
+.stats-window.vertical .record-labels::before{content:"W/L";display:block;text-align:left;white-space:nowrap}
+.stats-window.vertical .record-values{width:auto!important;max-width:none!important;flex:0 0 auto!important;justify-content:end!important;margin-left:auto!important;text-align:right!important}
+.stats-window .summary>span.divider{display:none!important;width:0!important;height:0!important;background:transparent!important}
+.stats-window>.hud-background{display:none!important}
+.stats-window .record-labels,.stats-window .summary small{color:var(--text)!important}
+.stats-window .summary strong,.stats-window .record-values{color:var(--text)!important;text-shadow:0 0 12px color-mix(in srgb,var(--text) 42%,transparent)!important}
+.stats-window .summary>.metric-group:nth-of-type(even)>strong,.stats-window .potential-group>strong{color:var(--text)!important;text-shadow:0 0 12px color-mix(in srgb,var(--text) 42%,transparent)!important}
+.stats-window .rank-delta{color:#c783ff!important;font-size:min(calc(15px * var(--stats-value-scale)),2.4vw)!important;line-height:1!important}
+.stats-window .rank-delta.rank-up{color:#d76b82!important;text-shadow:0 0 9px rgba(215,107,130,.42)!important}
+.stats-window .rank-delta.rank-down{color:#668fcf!important;text-shadow:0 0 9px rgba(102,143,207,.42)!important}
+.stats-window .stats-chart>header::before,
+.stats-window .stats-chart>header::after{display:none!important}
+.stats-window.vertical .rank-delta{font-size:calc(15px * var(--stats-value-scale))!important}
+.stats-window.horizontal .stats-chart,
+.stats-window.vertical .stats-chart,
+.stats-window.overlay.horizontal .stats-chart,
+.stats-window.overlay.vertical .stats-chart{
+  border-width:1px!important;
+  border-color:#5665a1!important;
+  outline:1px solid #2a315c!important;
+  outline-offset:-4px!important;
+  background:linear-gradient(180deg,rgba(17,21,42,var(--panel-opacity)),rgba(8,12,27,var(--panel-opacity)))!important
+}
+.stats-window:not(.overlay) .summary>.record-group,
+.stats-window:not(.overlay) .summary>.metric-group,
+.stats-window.overlay .summary>.record-group,
+.stats-window.overlay .summary>.metric-group{
+  border-width:1px!important;
+  border-color:#5665a1!important;
+  background:linear-gradient(112deg,rgba(21,25,54,var(--panel-opacity)),rgba(12,16,35,var(--panel-opacity)) 57%,rgba(32,20,51,var(--panel-opacity)))!important;
+  box-shadow:inset 0 0 0 1px #0c1024,inset 0 0 25px rgba(104,120,204,.094)!important
+}
+
+/* At 0% opacity, retain readable data only. The skin frame, cards and chart
+   chrome must disappear together with their backgrounds. */
+.stats-window.transparent,
+.stats-window.transparent.horizontal,
+.stats-window.transparent.vertical,
+.stats-window.transparent.overlay{
+  border-color:transparent!important;
+  background:transparent!important;
+  outline:none!important;
+  box-shadow:none!important
+}
+.stats-window.transparent::before,
+.stats-window.transparent::after{
+  display:none!important
+}
+.stats-window.transparent .summary>.record-group,
+.stats-window.transparent .summary>.metric-group,
+.stats-window.transparent .stats-chart#statsChartPanel,
+.stats-window.transparent .stats-chart>header{
+  border-color:transparent!important;
+  background:transparent!important;
+  outline:none!important;
+  box-shadow:none!important
+}
+
+/* Display-item settings always win over skin layout declarations. */
+.stats-window .summary>[data-display-card].hidden,
+.stats-window [data-display-card="graph"].hidden{
+  display:none!important
+}

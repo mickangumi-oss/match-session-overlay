@@ -66,10 +66,49 @@ function expandBoundsToMinimumHeight(currentBounds, preset) {
   };
 }
 
+function resizeBoundsForDisplayItemCount(
+  currentBounds,
+  previousPreset,
+  nextPreset,
+  orientation,
+  { itemCountDecreased = false } = {},
+) {
+  if (!currentBounds || !previousPreset || !nextPreset) return currentBounds;
+
+  if (orientation === "vertical") {
+    return {
+      ...currentBounds,
+      height: Math.min(
+        nextPreset.maxHeight,
+        Math.max(
+          nextPreset.minHeight,
+          itemCountDecreased
+            ? nextPreset.height
+            : Math.max(currentBounds.height, nextPreset.minHeight),
+        ),
+      ),
+    };
+  }
+
+  return {
+    ...currentBounds,
+    width: Math.min(
+      nextPreset.maxWidth,
+      Math.max(
+        nextPreset.minWidth,
+        itemCountDecreased
+          ? nextPreset.width
+          : Math.max(currentBounds.width, nextPreset.minWidth),
+      ),
+    ),
+  };
+}
+
 module.exports = {
   compactStatsWindowInitialSize,
   expandBoundsToMinimumHeight,
   horizontalMetricMinimumWidth,
+  resizeBoundsForDisplayItemCount,
   resizeBoundsForGraphVisibility,
   statsWindowSizeConstraints,
 };
