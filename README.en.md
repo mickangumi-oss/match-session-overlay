@@ -21,13 +21,14 @@ Open the latest release and download the installer named `Match-Session-Overlay-
 
 For step-by-step instructions, see the [English usage guide](docs/usage.en.md).
 
-## What's new in v1.6.0
+## What's new in v1.7.0
 
-- POTENTIAL MR/LP now follows recent rating changes more quickly while reducing the effect of short-term fluctuations.
-- The same POTENTIAL calculation is used in the management screen, window, overlay, OBS output, and match history.
-- README screenshots have been updated to the latest interface.
+- The management screen, match history, window, overlay, and friend notifications now use the new MIDNIGHT GLASS design.
+- A softly pulsing indicator makes it easier to see when session tracking is active.
+- Match-history loading progress, the last update time, the selected character, and MR/LP changes are easier to check.
+- Window and overlay layouts now compact automatically when displayed items are removed.
 
-See the [v1.6.0 release notes](https://github.com/mickangumi-oss/match-session-overlay/releases/tag/v1.6.0) for the installer checksum and security scan results.
+See the [v1.7.0 release notes](https://github.com/mickangumi-oss/match-session-overlay/releases/tag/v1.7.0) for the installer checksum and security scan results.
 
 ## What it can show
 

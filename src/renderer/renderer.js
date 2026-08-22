@@ -52,7 +52,6 @@ let friendNotificationSampleInFlight = false;
 const elements = Object.fromEntries(
   [
     "authStatus",
-    "trackerStatus",
     "openLoginButton",
     "checkLoginButton",
     "playerPanel",
@@ -156,6 +155,10 @@ const elements = Object.fromEntries(
     "historyTargetStatus",
     "fetchHistoryButton",
     "historyFetchState",
+    "historyFetchProgress",
+    "historyFetchProgressBar",
+    "historyAcquisitionTitle",
+    "historyLastUpdate",
     "historyDateFrom",
     "historyDateTo",
     "historyMatchType",
@@ -187,7 +190,7 @@ const elements = Object.fromEntries(
     "historyNextButton",
     "historyPageInfo",
     "recentHistoryBody",
-    "recentHistoryCount",
+    "recentHistoryRatingHeader",
     "recentHistoryEmpty",
   ].map((id) => [id, document.getElementById(id)]),
 );
@@ -322,8 +325,8 @@ function drawHistoryResultChart(records) {
       (slotWidth - barWidth) / 2;
     let cursor = padding.top + plotHeight;
     for (const [count, color] of [
-      [bucket.loss, "#2d78df"],
-      [bucket.win, "#f32755"],
+      [bucket.loss, "#668fcf"],
+      [bucket.win, "#d76b82"],
       [bucket.draw, "#9aa7b2"],
     ]) {
       if (!count) continue;
@@ -331,6 +334,17 @@ function drawHistoryResultChart(records) {
       cursor -= segmentHeight;
       context.fillStyle = color;
       context.fillRect(x, cursor, barWidth, segmentHeight);
+      context.save();
+      context.font = `800 10px ${fontStackFor(displaySettings.fontFamily)}`;
+      context.textAlign = "center";
+      context.textBaseline = "middle";
+      context.lineWidth = 3;
+      context.strokeStyle = "rgba(4,7,18,.88)";
+      context.fillStyle = "#f7f8ff";
+      const labelY = cursor + segmentHeight / 2;
+      context.strokeText(String(count), x + barWidth / 2, labelY);
+      context.fillText(String(count), x + barWidth / 2, labelY);
+      context.restore();
     }
     const [, month, day] = bucket.dateKey.split("-");
     const label = `${month}/${day}`;
@@ -365,11 +379,18 @@ function drawHistoryRatingChart(records, ratingType, canvas, emptyElement) {
   if (!points.length) return;
 
   const values = points.map((point) => point.value);
-  const axis = window.matchHistoryChartModel.buildHistoryRatingAxis(values, ratingType);
+  const potentialRating = values.length >= 2
+    ? window.MatchPotentialRating?.potentialRatingValue(values.slice(-20), ratingType) ?? null
+    : null;
+  const axisValues = Number.isFinite(potentialRating)
+    ? [...values, potentialRating]
+    : values;
+  const axis = window.matchHistoryChartModel.buildHistoryRatingAxis(axisValues, ratingType);
   const axisMin = axis.minimum;
   const axisMax = axis.maximum;
   const tickValues = axis.ticks;
-  const color = ratingType === "MR" ? "#ff2e69" : "#43d8ff";
+  const color = "#7ea7ff";
+  const potentialColor = "#c783ff";
   const formatValue = (value) => displayNumber.integer(value);
 
   context.font = `9px ${fontStackFor(displaySettings.fontFamily)}`;
@@ -388,7 +409,7 @@ function drawHistoryRatingChart(records, ratingType, canvas, emptyElement) {
   context.textAlign = "right";
   context.textBaseline = "middle";
   context.fillStyle = "rgba(247,248,255,.62)";
-  context.strokeStyle = "rgba(120, 190, 220, .16)";
+  context.strokeStyle = "rgba(126, 145, 220, .2)";
   context.lineWidth = 1;
   tickValues.forEach((value, index) => {
     const y = padding.top + (plotHeight * index) / Math.max(1, tickValues.length - 1);
@@ -401,9 +422,41 @@ function drawHistoryRatingChart(records, ratingType, canvas, emptyElement) {
 
   const xFor = (index) => padding.left + (points.length === 1 ? plotWidth / 2 : (index / (points.length - 1)) * plotWidth);
   const yFor = (value) => padding.top + plotHeight - ((value - axisMin) / (axisMax - axisMin)) * plotHeight;
+  if (Number.isFinite(potentialRating)) {
+    const potentialY = yFor(potentialRating);
+    context.strokeStyle = potentialColor;
+    context.lineWidth = 1.5;
+    context.beginPath();
+    context.moveTo(padding.left, potentialY);
+    context.lineTo(width - padding.right, potentialY);
+    context.stroke();
+    context.fillStyle = potentialColor;
+    context.font = `800 8px ${fontStackFor(displaySettings.fontFamily)}`;
+    context.textAlign = "right";
+    context.textBaseline = "bottom";
+    context.fillText(`POTENTIAL ${ratingType} ${formatValue(potentialRating)}`, width - padding.right - 3, potentialY - 2);
+  }
+
+  const areaGradient = context.createLinearGradient(0, padding.top, 0, padding.top + plotHeight);
+  areaGradient.addColorStop(0, "rgba(126,167,255,.34)");
+  areaGradient.addColorStop(1, "rgba(126,167,255,.025)");
+  context.beginPath();
+  points.forEach((point, index) => {
+    const x = xFor(index);
+    const y = yFor(point.value);
+    if (index === 0) context.moveTo(x, y);
+    else context.lineTo(x, y);
+  });
+  context.lineTo(xFor(points.length - 1), padding.top + plotHeight);
+  context.lineTo(xFor(0), padding.top + plotHeight);
+  context.closePath();
+  context.fillStyle = areaGradient;
+  context.fill();
+
   context.strokeStyle = color;
-  context.fillStyle = color;
   context.lineWidth = 2;
+  context.lineJoin = "round";
+  context.lineCap = "round";
   context.beginPath();
   points.forEach((point, index) => {
     const x = xFor(index);
@@ -414,19 +467,24 @@ function drawHistoryRatingChart(records, ratingType, canvas, emptyElement) {
   context.stroke();
   points.forEach((point, index) => {
     const x = xFor(index);
-    const y = yFor(point.value);
-    context.beginPath();
-    context.arc(x, y, 2.5, 0, Math.PI * 2);
-    context.fill();
-    if (points.length <= 10 || index % Math.ceil(points.length / 10) === 0) {
+    if (points.length <= 4 || index % Math.ceil(points.length / 4) === 0 || index === points.length - 1) {
       const label = `#${point.match}`;
       context.fillStyle = "rgba(247,248,255,.66)";
       context.textAlign = "center";
       context.textBaseline = "top";
       context.fillText(label, x, padding.top + plotHeight + 6);
-      context.fillStyle = color;
     }
   });
+  const lastPoint = points.at(-1);
+  const lastX = xFor(points.length - 1);
+  const lastY = yFor(lastPoint.value);
+  context.beginPath();
+  context.arc(lastX, lastY, 4, 0, Math.PI * 2);
+  context.fillStyle = "#07101f";
+  context.fill();
+  context.lineWidth = 2;
+  context.strokeStyle = color;
+  context.stroke();
 }
 
 function renderHistoryCharacters(records) {
@@ -500,32 +558,69 @@ function renderRecentHistoryPreview(records) {
   const recent = [...records]
     .sort((a, b) => Number(b.uploadedAt) - Number(a.uploadedAt))
     .slice(0, RECENT_HISTORY_PREVIEW_LIMIT);
+  const playerRatingType = historyState.player?.mr != null
+    ? "MR"
+    : historyState.player?.lp != null
+      ? "LP"
+      : null;
+  const latestHistoryRatingType = recent
+    .map((record) => String(record?.ownRatingType || "").toUpperCase())
+    .find((ratingType) => ["MR", "LP"].includes(ratingType));
+  if (elements.recentHistoryRatingHeader) {
+    elements.recentHistoryRatingHeader.textContent = playerRatingType || latestHistoryRatingType || "MR / LP";
+  }
   body.replaceChildren();
+  const ratingDeltaFor = (record) => {
+    const ratingType = String(record?.ownRatingType || "").toUpperCase();
+    const rating = Number(record?.ownRating);
+    if (!Number.isFinite(rating) || !["MR", "LP"].includes(ratingType)) return null;
+    const characterId = Number(record?.characterId) || null;
+    const timestamp = Number(record?.playedAt ?? record?.uploadedAt) || 0;
+    const nextRecord = records
+      .filter((candidate) =>
+        String(candidate?.ownRatingType || "").toUpperCase() === ratingType &&
+        (Number(candidate?.characterId) || null) === characterId &&
+        Number(candidate?.playedAt ?? candidate?.uploadedAt) > timestamp &&
+        Number.isFinite(Number(candidate?.ownRating)))
+      .sort((a, b) => Number(a?.playedAt ?? a?.uploadedAt) - Number(b?.playedAt ?? b?.uploadedAt))[0];
+    let nextRating = Number(nextRecord?.ownRating);
+    if (!Number.isFinite(nextRating)) {
+      const playerCharacterId = Number(historyState.player?.characterId) || null;
+      if (playerCharacterId == null || playerCharacterId === characterId) {
+        nextRating = Number(ratingType === "MR" ? historyState.player?.mr : historyState.player?.lp);
+      }
+    }
+    return Number.isFinite(nextRating) ? Math.round(nextRating - rating) : null;
+  };
   for (const record of recent) {
     const result = record.result === "win" ? "W" : record.result === "loss" ? "L" : "—";
+    const ratingDelta = ratingDeltaFor(record);
     const row = document.createElement("tr");
     const values = [
       formatHistoryDate(record),
       result,
       historyModeLabel(record.matchType),
+      historyCharacterLabel(record),
       record.opponentName || "—",
+      ratingDelta == null ? "—" : `${ratingDelta >= 0 ? "+" : ""}${ratingDelta}`,
     ];
     values.forEach((value, index) => {
       const cell = document.createElement("td");
       if (index === 1) {
         cell.className = result === "W" ? "result-win" : result === "L" ? "result-loss" : "result-draw";
       }
-      if (index === 3) {
+      if (index === 4) {
         appendHistoryCell(row, value, { opponentUserCode: record.opponentUserCode });
-        row.lastElementChild.className = cell.className;
-      } else {
-        cell.textContent = value;
-        row.append(cell);
+        return;
       }
+      if (index === 5 && ratingDelta != null) {
+        cell.classList.add(ratingDelta >= 0 ? "rating-positive" : "rating-negative");
+      }
+      cell.textContent = value;
+      row.append(cell);
     });
     body.append(row);
   }
-  if (elements.recentHistoryCount) elements.recentHistoryCount.textContent = String(recent.length);
   elements.recentHistoryEmpty?.classList.toggle("hidden", recent.length > 0);
 }
 
@@ -589,6 +684,36 @@ function renderHistoryFetchStatus() {
     ? t("historyFetching", "Loading…")
     : t("fetchHistory", "Import 100 matches");
   elements.historyFetchState.classList.toggle("loading", Boolean(historyState.fetching));
+  if (elements.historyAcquisitionTitle) {
+    elements.historyAcquisitionTitle.textContent = historyState.fetching
+      ? "ACQUIRING MATCHES"
+      : "MATCH HISTORY STATUS";
+  }
+  const fetchedCount = Math.max(0, Number(historyState.fetchedCount) || 0);
+  const pageProgress = historyState.fetching
+    ? (Math.max(0, Number(historyState.fetchPage) || 0) / Math.max(1, Number(historyState.fetchMaxPages) || 10)) * 100
+    : 0;
+  const fetchProgress = historyState.fetching
+    ? Math.min(100, fetchedCount > 0 ? fetchedCount : pageProgress)
+    : 0;
+  elements.historyFetchProgress?.classList.toggle("active", Boolean(historyState.fetching));
+  if (elements.historyFetchProgressBar) {
+    elements.historyFetchProgressBar.style.width = `${fetchProgress}%`;
+  }
+  if (elements.historyLastUpdate) {
+    const lastFetchedAt = Number(historyState.lastFetchedAt) || 0;
+    if (!lastFetchedAt) {
+      elements.historyLastUpdate.textContent = "LAST UPDATE: —";
+    } else {
+      const elapsedSeconds = Math.max(0, Math.floor((Date.now() - lastFetchedAt) / 1000));
+      const relative = elapsedSeconds < 60
+        ? `${elapsedSeconds}s AGO`
+        : elapsedSeconds < 3600
+          ? `${Math.floor(elapsedSeconds / 60)}m AGO`
+          : new Date(lastFetchedAt).toLocaleString(displaySettings?.locale || undefined);
+      elements.historyLastUpdate.textContent = `LAST UPDATE: ${relative}`;
+    }
+  }
   elements.historyFetchState.textContent = historyState.fetching
     ? t("historyFetchProgress", "Loading page {page}/{max} · {count} fetched")
       .replace("{page}", String(historyState.fetchPage || 1))
@@ -638,7 +763,7 @@ function renderOpponentCharacterStats(records) {
     result.append(wins, separator, losses);
     const winRate = document.createElement("td");
     const percentage = Math.max(0, Math.min(100, Number(entry.winRate) || 0));
-    winRate.className = "history-matchup-win-rate";
+    winRate.className = `history-matchup-win-rate ${percentage >= 50 ? "win-rate-pass" : "win-rate-fail"}`;
     winRate.style.setProperty("--matchup-win-rate", `${percentage}%`);
     winRate.textContent = `${percentage.toFixed(1)}%`;
     row.append(character, matches, result, winRate);
@@ -820,11 +945,6 @@ async function populateInstalledFonts(selectedValue = "street") {
 function setStatus(element, label, kind = "neutral") {
   element.textContent = label;
   element.className = `status ${kind}`;
-}
-
-function translateStatus(status) {
-  if (status === "historyViewing") return t("historyViewing", "Viewing");
-  return localeApi?.statusLabel ? localeApi.statusLabel(status) : status;
 }
 
 function fitPlayerName() {
@@ -1011,7 +1131,7 @@ function drawManagementChart(
   const plotBottom = height - bottom;
   context.textAlign = "right";
   context.textBaseline = "middle";
-  context.fillStyle = `${displaySettings.textColor ?? "#f7f8ff"}99`;
+  context.fillStyle = "rgba(174,184,218,.72)";
   context.lineWidth = 1;
   const firstLpLabelIndex = Math.max(0, ticks.length - 4);
   ticks.forEach((tick, tickIndex) => {
@@ -1024,7 +1144,7 @@ function drawManagementChart(
     if (
       !isLp || tickIndex >= firstLpLabelIndex
     ) {
-      context.fillStyle = `${displaySettings.textColor ?? "#f7f8ff"}99`;
+      context.fillStyle = "rgba(174,184,218,.72)";
       context.fillText(displayNumber.integer(tick), left - 7, y);
     }
   });
@@ -1037,7 +1157,7 @@ function drawManagementChart(
     context.stroke();
   });
 
-  context.strokeStyle = "rgba(67, 216, 255, 0.9)";
+  context.strokeStyle = "rgba(126, 167, 255, 0.9)";
   context.lineWidth = 1.15;
   context.beginPath();
   context.moveTo(left, plotBottom);
@@ -1051,10 +1171,10 @@ function drawManagementChart(
   if (potential != null) {
     const potentialY = yFor(potential);
     context.save();
-    context.strokeStyle = "#ff2e69";
+    context.strokeStyle = "#c783ff";
     context.lineWidth = 1.5;
     context.shadowBlur = 5;
-    context.shadowColor = "rgba(255,46,105,.65)";
+    context.shadowColor = "rgba(199,131,255,.62)";
     context.beginPath();
     context.moveTo(left, potentialY);
     context.lineTo(width - right, potentialY);
@@ -1063,7 +1183,7 @@ function drawManagementChart(
     context.font = `${fontStyle}${Math.max(8, labelFontSize - 1)}px ${fontStackFor(
       displaySettings.fontFamily,
     )}`;
-    context.fillStyle = "#ff6f97";
+    context.fillStyle = "#d6a4ff";
     context.textAlign = "right";
     context.textBaseline = "bottom";
     context.fillText(
@@ -1085,7 +1205,7 @@ function drawManagementChart(
   context.font = `${fontStyle}${labelFontSize}px ${fontStackFor(
     displaySettings.fontFamily,
   )}`;
-  context.fillStyle = `${displaySettings.textColor ?? "#f7f8ff"}cc`;
+  context.fillStyle = "rgba(202,211,245,.86)";
   const safeMatchCount = Math.max(0, Math.trunc(Number(matchCount) || 0));
   const safeMatchStart = Math.max(0, Math.trunc(Number(matchStart) || 0));
   const lastIndex = Math.max(1, values.length - 1);
@@ -1117,20 +1237,20 @@ function drawManagementChart(
   areaPath.lineTo(xFor(0), plotBottom);
   areaPath.closePath();
   const areaGradient = context.createLinearGradient(0, top, 0, plotBottom);
-  areaGradient.addColorStop(0, "rgba(67,216,255,.34)");
-  areaGradient.addColorStop(1, "rgba(67,216,255,.025)");
+  areaGradient.addColorStop(0, "rgba(126,167,255,.34)");
+  areaGradient.addColorStop(1, "rgba(126,167,255,.025)");
   context.fillStyle = areaGradient;
   context.fill(areaPath);
 
-  context.strokeStyle = "#43d8ff";
+  context.strokeStyle = "#7ea7ff";
   context.lineWidth = 2.5;
   context.lineJoin = "round";
   context.lineCap = "round";
   context.shadowBlur = 9;
-  context.shadowColor = "rgba(67,216,255,.82)";
+  context.shadowColor = "rgba(126,167,255,.78)";
   context.stroke(linePath);
   context.shadowBlur = 0;
-  context.fillStyle = "#43d8ff";
+  context.fillStyle = "#7ea7ff";
   values.forEach((value, index) => {
     context.beginPath();
     context.arc(xFor(index), yFor(value), 2.4, 0, Math.PI * 2);
@@ -1138,7 +1258,7 @@ function drawManagementChart(
   });
   const lastX = xFor(values.length - 1);
   const lastY = yFor(values[values.length - 1]);
-  context.strokeStyle = "#bdf8ff";
+  context.strokeStyle = "#c7d5ff";
   context.lineWidth = 1.4;
   context.beginPath();
   context.arc(lastX, lastY, 5.5, 0, Math.PI * 2);
@@ -1354,6 +1474,7 @@ function renderMonitorPlayer(state = trackerState) {
   ).trim();
   elements.monitorPlayerName.textContent = playerName || "—";
   elements.monitorPlayerName.title = playerName;
+  fitScoreValue(elements.monitorPlayerName);
 }
 
 function renderSessionPeak(state = trackerState) {
@@ -1529,16 +1650,15 @@ function renderTracker(state) {
   fitManagementScoreValues();
   renderManagementChart(state);
   elements.overlayUrl.textContent = state.overlayUrl;
-  setStatus(
-    elements.trackerStatus,
-    translateStatus(state.status),
-    state.active ? "ok" : "neutral",
-  );
+  elements.startTrackingButton.classList.toggle("tracking-active", Boolean(state.active));
+  elements.startTrackingButton.setAttribute("aria-pressed", String(Boolean(state.active)));
   elements.startTrackingButton.disabled = Boolean(state.readOnly) || !selectedPlayer || state.active;
   elements.startTrackingLabel.textContent =
-    ["idle", "manual", "restart"].includes(state.stopReason)
-      ? t("resumeMeasure", "計測を再開")
-      : t("startMeasure", "計測を開始");
+    state.active
+      ? t("measuring", "計測中")
+      : ["idle", "manual", "restart"].includes(state.stopReason)
+        ? t("resumeMeasure", "計測を再開")
+        : t("startMeasure", "計測を開始");
   elements.stopTrackingButton.disabled = Boolean(state.readOnly) || !state.active;
   elements.resetTrackingButton.disabled = Boolean(state.readOnly) || !state.startedAt;
   renderNextUpdate();

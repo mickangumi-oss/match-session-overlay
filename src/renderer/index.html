@@ -9,6 +9,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Match Session Overlay</title>
     <link rel="stylesheet" href="./style.css" />
+    <link rel="stylesheet" href="./midnight-glass.css" />
   </head>
   <body>
     <main class="shell">
@@ -55,7 +56,7 @@
             </p>
             <div class="actions">
               <button class="button primary" id="openLoginButton" data-i18n="openOfficial">公式サイトを開く</button>
-              <button class="button secondary" id="checkLoginButton" data-i18n="refresh">再取得</button>
+              <button class="button secondary" id="checkLoginButton" data-i18n="sessionRefresh">セッション更新</button>
             </div>
           </article>
 
@@ -108,7 +109,6 @@
                 <strong id="currentMrRank">—</strong>
                 <small id="currentMrRankHome"></small>
               </div>
-              <span class="status neutral" id="trackerStatus" data-i18n="stopped">停止中</span>
             </header>
 
             <div class="scoreboard">
@@ -138,6 +138,15 @@
               </div>
             </div>
 
+            <div class="session-actions">
+              <button class="button accent wide-action tracking-indicator" id="startTrackingButton" disabled aria-live="polite">
+                <span class="play-icon" aria-hidden="true"></span><span id="startTrackingLabel">計測を開始</span>
+              </button>
+              <span class="session-timer" id="nextUpdateInfo" data-i18n="nextUpdate">次回更新 --:--</span>
+              <button class="button secondary" id="resetTrackingButton" disabled data-i18n="reset">リセット</button>
+              <button class="button danger-ghost" id="stopTrackingButton" disabled data-i18n="end">終了</button>
+            </div>
+
             <section class="monitor-chart" id="managementChartPanel" data-display-card="graph">
               <header>
                 <div>
@@ -154,17 +163,26 @@
               </div>
             </section>
 
-            <div class="session-actions">
-              <button class="button accent wide-action" id="startTrackingButton" disabled>
-                <span class="play-icon" aria-hidden="true"></span><span id="startTrackingLabel">計測を開始</span>
-              </button>
-              <span class="session-timer" id="nextUpdateInfo" data-i18n="nextUpdate">次回更新 --:--</span>
-              <button class="button secondary" id="resetTrackingButton" disabled data-i18n="reset">リセット</button>
-              <button class="button danger-ghost" id="stopTrackingButton" disabled data-i18n="end">終了</button>
-            </div>
           </article>
 
-          <article class="hud-panel display-panel">
+          <article class="hud-panel dashboard-history-panel">
+            <section class="recent-history-preview" aria-live="polite">
+              <header>
+                <span class="control-label" data-i18n="matchHistory">MATCH HISTORY</span>
+              </header>
+              <div class="recent-history-scroll">
+                <table>
+                  <thead><tr><th data-i18n="date">DATE</th><th data-i18n="result">RESULT</th><th data-i18n="matchType">MODE</th><th data-i18n="characterFilter">CHARACTER</th><th data-i18n="opponent">OPPONENT</th><th id="recentHistoryRatingHeader">MR</th></tr></thead>
+                  <tbody id="recentHistoryBody"></tbody>
+                </table>
+                <p class="recent-history-empty" id="recentHistoryEmpty" data-i18n="historyEmpty">取得した対戦履歴はありません</p>
+              </div>
+            </section>
+          </article>
+
+        </section>
+
+        <article class="hud-panel display-panel">
             <header class="display-heading">
               <div>
                 <p class="kicker" data-i18n="displayStep">STEP 03 / DISPLAY CONTROL</p>
@@ -378,21 +396,7 @@
               </div>
             </section>
 
-            <section class="recent-history-preview" aria-live="polite">
-              <header>
-                <span class="control-label" data-i18n="recentMatches">RECENT MATCHES</span>
-                <span id="recentHistoryCount">0</span>
-              </header>
-              <div class="recent-history-scroll">
-                <table>
-                  <thead><tr><th data-i18n="date">DATE</th><th data-i18n="result">RESULT</th><th data-i18n="matchType">MODE</th><th data-i18n="opponent">OPPONENT</th></tr></thead>
-                  <tbody id="recentHistoryBody"></tbody>
-                </table>
-                <p class="recent-history-empty" id="recentHistoryEmpty" data-i18n="historyEmpty">取得した対戦履歴はありません</p>
-              </div>
-            </section>
-          </article>
-        </section>
+        </article>
       </section>
 
       <section class="history-panel hud-panel hidden" id="historyPanel" aria-hidden="true">
@@ -402,20 +406,29 @@
             <h2 data-i18n="matchHistory">対戦履歴</h2>
           </div>
           <div class="history-heading-actions">
-            <span class="history-fetch-state" id="historyFetchState" aria-live="polite"></span>
-            <button class="button secondary" id="fetchHistoryButton" data-i18n="fetchHistory">100件を取得</button>
+            <span class="history-last-update" id="historyLastUpdate">LAST UPDATE: —</span>
             <button class="icon-button" id="closeHistoryButton" data-i18n-title="closeHistory" title="対戦履歴を閉じる">×</button>
           </div>
         </header>
-        <section class="history-target" aria-label="History target">
-          <label>
-            <span class="control-label" data-i18n="historyTargetCode">VIEW USER CODE</span>
-            <input id="historyTargetCode" type="text" inputmode="numeric" autocomplete="off" maxlength="12" placeholder="USER CODE" />
-          </label>
-          <button class="button secondary" id="selectHistoryTargetButton" data-i18n="historySelectTarget">表示対象を設定</button>
-          <button class="button secondary" id="clearHistoryTargetButton" data-i18n="historySelectSelf" disabled>自分に戻す</button>
-          <p id="historyTargetStatus" aria-live="polite"></p>
-        </section>
+        <div class="history-control-row">
+          <section class="history-target" aria-label="History target">
+            <label>
+              <span class="control-label" data-i18n="historyTargetCode">VIEW USER CODE</span>
+              <input id="historyTargetCode" type="text" inputmode="numeric" autocomplete="off" maxlength="12" placeholder="USER CODE" />
+            </label>
+            <button class="button secondary" id="selectHistoryTargetButton" data-i18n="historySelectTarget">表示対象を設定</button>
+            <button class="button secondary" id="clearHistoryTargetButton" data-i18n="historySelectSelf" disabled>自分に戻す</button>
+            <p id="historyTargetStatus" aria-live="polite"></p>
+          </section>
+          <section class="history-acquisition" aria-labelledby="historyAcquisitionTitle">
+            <div class="history-acquisition-copy">
+              <strong id="historyAcquisitionTitle">MATCH HISTORY STATUS</strong>
+              <span class="history-fetch-state" id="historyFetchState" aria-live="polite"></span>
+              <div class="history-fetch-progress" id="historyFetchProgress" aria-hidden="true"><div id="historyFetchProgressBar"></div></div>
+            </div>
+            <button class="button secondary" id="fetchHistoryButton" data-i18n="fetchHistory">100件を取得</button>
+          </section>
+        </div>
         <div class="history-filters">
           <label>
             <span class="control-label" data-i18n="dateFrom">DATE FROM</span>
@@ -450,9 +463,11 @@
         </div>
         <div class="history-content">
           <section class="history-chart-card">
-            <header><span class="control-label" data-i18n="resultTrend">MATCH RESULT TREND</span><span id="historyCount">0 MATCHES</span></header>
-            <div class="history-chart-wrap"><canvas id="historyResultChart" aria-label="Match result trend"></canvas><p id="historyEmpty" data-i18n="historyEmpty">取得した対戦履歴はありません</p></div>
-            <div class="history-legend"><span><i class="legend-win"></i><span data-i18n="win">WIN</span></span><span><i class="legend-loss"></i><span data-i18n="loss">LOSS</span></span></div>
+            <section class="history-result-card">
+              <header><span class="control-label" data-i18n="resultTrend">MATCH RESULT TREND</span><span id="historyCount">0 MATCHES</span></header>
+              <div class="history-chart-wrap"><canvas id="historyResultChart" aria-label="Match result trend"></canvas><p id="historyEmpty" data-i18n="historyEmpty">取得した対戦履歴はありません</p></div>
+              <div class="history-legend"><span><i class="legend-win"></i><span data-i18n="win">WIN</span></span><span><i class="legend-loss"></i><span data-i18n="loss">LOSS</span></span></div>
+            </section>
             <div class="history-rating-grid">
               <section class="history-rating-card">
                 <header><span class="control-label" data-i18n="mrTrend">MR TREND</span></header>
@@ -464,19 +479,21 @@
               </section>
             </div>
           </section>
-          <section class="history-table-card">
-            <header><span class="control-label" data-i18n="matchList">MATCH LIST</span></header>
-            <div class="history-table-scroll">
-              <table class="history-match-table">
-                <thead><tr><th data-i18n="date">DATE</th><th data-i18n="result">RESULT</th><th data-i18n="matchType">MODE</th><th data-i18n="myCharacter">MY CHARACTER</th><th data-i18n="rating">MY MR / LP</th><th data-i18n="opponent">OPPONENT</th><th data-i18n="opponentCharacter">OPPONENT CHARACTER</th><th data-i18n="opponentRating">OPPONENT MR / LP</th></tr></thead>
-                <tbody id="historyTableBody"></tbody>
-              </table>
-            </div>
-            <nav class="history-pagination" aria-label="Match history pages">
-              <button class="button secondary" id="historyPreviousButton" data-i18n="historyPrevious" disabled>Previous</button>
-              <span id="historyPageInfo" aria-live="polite">0 / 0</span>
-              <button class="button secondary" id="historyNextButton" data-i18n="historyNext" disabled>Next</button>
-            </nav>
+          <div class="history-table-column">
+            <section class="history-table-card">
+              <header><span class="control-label" data-i18n="matchList">MATCH LIST</span></header>
+              <div class="history-table-scroll">
+                <table class="history-match-table">
+                  <thead><tr><th data-i18n="date">DATE</th><th data-i18n="result">RESULT</th><th data-i18n="matchType">MODE</th><th data-i18n="myCharacter">MY CHARACTER</th><th data-i18n="rating">MY MR / LP</th><th data-i18n="opponent">OPPONENT</th><th data-i18n="opponentCharacter">OPPONENT CHARACTER</th><th data-i18n="opponentRating">OPPONENT MR / LP</th></tr></thead>
+                  <tbody id="historyTableBody"></tbody>
+                </table>
+              </div>
+              <nav class="history-pagination" aria-label="Match history pages">
+                <button class="button secondary" id="historyPreviousButton" data-i18n="historyPrevious" disabled>Previous</button>
+                <span id="historyPageInfo" aria-live="polite">0 / 0</span>
+                <button class="button secondary" id="historyNextButton" data-i18n="historyNext" disabled>Next</button>
+              </nav>
+            </section>
             <section class="history-opponent-stats" aria-labelledby="historyOpponentStatsTitle">
               <header><span class="control-label" id="historyOpponentStatsTitle" data-i18n="opponentCharacterStats">OPPONENT CHARACTER STATS</span></header>
               <div class="history-opponent-stats-scroll">
@@ -492,7 +509,7 @@
                 <p class="history-opponent-stats-empty" id="historyOpponentStatsEmpty" data-i18n="opponentCharacterStatsEmpty">No opponent character data</p>
               </div>
             </section>
-          </section>
+          </div>
         </div>
       </section>
 

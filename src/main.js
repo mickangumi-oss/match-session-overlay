@@ -54,8 +54,8 @@ const {
 } = require("./display-settings");
 const {
   compactStatsWindowInitialSize,
-  expandBoundsToMinimumHeight,
   horizontalMetricMinimumWidth,
+  resizeBoundsForDisplayItemCount,
   resizeBoundsForGraphVisibility,
   statsWindowSizeConstraints,
 } = require("./stats-window-size");
@@ -1912,6 +1912,7 @@ function updateDisplaySettings(
   const previousMode = displaySettings.mode;
   const previousOrientation = displaySettings.windowOrientation;
   const previousDisplayItems = { ...displaySettings.displayItems };
+  const previousMetricCount = visibleMetricCount(previousDisplayItems);
   const previousStatsPreset = statsWindowPresetFor(previousMode);
   const previousMatchType = displaySettings.matchType;
   const previousLocale = displaySettings.locale;
@@ -1987,6 +1988,7 @@ function updateDisplaySettings(
     previousDisplayItems,
     displaySettings.displayItems,
   );
+  const nextMetricCount = visibleMetricCount(displaySettings.displayItems);
   const graphVisibilityChanging =
     previousDisplayItems.graph !== displaySettings.displayItems.graph;
   const nextFontFamily = normalizeFontFamily(nextSettings.fontFamily);
@@ -2090,21 +2092,31 @@ function updateDisplaySettings(
     // real content height so vertical layouts never retain an empty panel.
     resizeStatsWindowForGraphVisibility(previousStatsPreset);
   } else if (!layoutModeChanging && displayItemsChanging) {
-    // Adding or removing cards changes the recommended constraints, but it must
-    // not replace the size and position explicitly chosen by the user. When
-    // cards are added, however, expand only the height needed to keep the
-    // fixed graph row below the complete vertical card stack.
+    // Removing cards compacts the layout's primary axis (height when vertical,
+    // width when horizontal). Adding cards expands only when the current size
+    // can no longer contain the newly selected items. Position and the other
+    // axis remain exactly where the user left them.
     const currentBounds = statsWindow.getBounds();
-    const expandedBounds = expandBoundsToMinimumHeight(
+    const nextPreset = statsWindowPresetFor(displaySettings.mode);
+    const resizedBounds = resizeBoundsForDisplayItemCount(
       currentBounds,
-      statsWindowPresetFor(displaySettings.mode),
+      previousStatsPreset,
+      nextPreset,
+      displaySettings.windowOrientation,
+      { itemCountDecreased: nextMetricCount < previousMetricCount },
     );
-    if (expandedBounds.height !== currentBounds.height) {
+    const constraints = statsWindowSizeConstraints(nextPreset, resizedBounds);
+    statsWindow.setMinimumSize(constraints.minWidth, constraints.minHeight);
+    statsWindow.setMaximumSize(constraints.maxWidth, constraints.maxHeight);
+    if (
+      resizedBounds.width !== currentBounds.width ||
+      resizedBounds.height !== currentBounds.height
+    ) {
       applyingStatsBounds = true;
-      statsWindow.setBounds(expandedBounds, true);
+      statsWindow.setBounds(resizedBounds, true);
       applyingStatsBounds = false;
     }
-    applyStatsWindowSizeConstraints({ preserveCurrentSize: true });
+    rememberStatsWindowBounds();
   }
   scheduleSettingsWrite();
   sendDisplaySettings();
@@ -5003,6 +5015,7 @@ function startOverlayServer() {
     const requestPath = String(request.url ?? "").split("?", 1)[0];
     const rendererAssets = {
       "/stats.css": ["stats.css", "text/css; charset=utf-8"],
+      "/stats-midnight-glass.css": ["stats-midnight-glass.css", "text/css; charset=utf-8"],
       "/stats.js": ["stats.js", "text/javascript; charset=utf-8"],
       "/i18n.js": ["i18n.js", "text/javascript; charset=utf-8"],
       "/display-number-format.js": ["../display-number-format.js", "text/javascript; charset=utf-8"],

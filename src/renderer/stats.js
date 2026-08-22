@@ -321,7 +321,7 @@ function drawStatsChart(
   const plotBottom = chartHeight - bottom;
   context.textAlign = "right";
   context.textBaseline = "middle";
-  context.fillStyle = `${displaySettings?.textColor ?? "#f7f8ff"}99`;
+  context.fillStyle = "rgba(174,184,218,.72)";
   context.lineWidth = 1;
   const firstLpLabelIndex = Math.max(0, ticks.length - 4);
   ticks.forEach((tick, tickIndex) => {
@@ -334,7 +334,7 @@ function drawStatsChart(
     if (
       !isLp || tickIndex >= firstLpLabelIndex
     ) {
-      context.fillStyle = `${displaySettings?.textColor ?? "#f7f8ff"}99`;
+      context.fillStyle = "rgba(174,184,218,.72)";
       context.fillText(displayNumber.integer(tick), left - 8, y);
     }
   });
@@ -347,7 +347,7 @@ function drawStatsChart(
     context.stroke();
   });
 
-  context.strokeStyle = "rgba(67, 216, 255, 0.9)";
+  context.strokeStyle = "rgba(126, 167, 255, 0.9)";
   context.lineWidth = 1.2;
   context.beginPath();
   context.moveTo(left, plotBottom);
@@ -361,10 +361,10 @@ function drawStatsChart(
   if (potential != null) {
     const potentialY = yFor(potential);
     context.save();
-    context.strokeStyle = "#ff2e69";
+    context.strokeStyle = "#c783ff";
     context.lineWidth = 1.5;
     context.shadowBlur = 5;
-    context.shadowColor = "rgba(255,46,105,.65)";
+    context.shadowColor = "rgba(199,131,255,.62)";
     context.beginPath();
     context.moveTo(left, potentialY);
     context.lineTo(chartWidth - right, potentialY);
@@ -373,7 +373,7 @@ function drawStatsChart(
     context.font = `${fontStyle}${Math.max(8, labelFontSize - 1)}px ${fontStackFor(
       "street",
     )}`;
-    context.fillStyle = "#ff6f97";
+    context.fillStyle = "#d6a4ff";
     context.textAlign = "right";
     context.textBaseline = "bottom";
     context.fillText(
@@ -393,7 +393,7 @@ function drawStatsChart(
   context.textAlign = "center";
   context.textBaseline = "top";
   context.font = `${fontStyle}${labelFontSize}px ${fontStackFor("street")}`;
-  context.fillStyle = `${displaySettings?.textColor ?? "#f7f8ff"}cc`;
+  context.fillStyle = "rgba(202,211,245,.86)";
   const safeMatchCount = Math.max(0, Math.trunc(Number(matchCount) || 0));
   const safeMatchStart = Math.max(0, Math.trunc(Number(matchStart) || 0));
   const lastIndex = Math.max(1, values.length - 1);
@@ -429,20 +429,20 @@ function drawStatsChart(
     : Number(displaySettings?.backgroundOpacity);
   if (renderedOpacity > 0.001) {
     const areaGradient = context.createLinearGradient(0, top, 0, plotBottom);
-    areaGradient.addColorStop(0, "rgba(67,216,255,.32)");
-    areaGradient.addColorStop(1, "rgba(67,216,255,.025)");
+    areaGradient.addColorStop(0, "rgba(126,167,255,.34)");
+    areaGradient.addColorStop(1, "rgba(126,167,255,.025)");
     context.fillStyle = areaGradient;
     context.fill(areaPath);
   }
-  context.strokeStyle = "#43d8ff";
+  context.strokeStyle = "#7ea7ff";
   context.lineWidth = 2.6;
   context.lineJoin = "round";
   context.lineCap = "round";
   context.shadowBlur = 9;
-  context.shadowColor = "rgba(67,216,255,.82)";
+  context.shadowColor = "rgba(126,167,255,.78)";
   context.stroke(linePath);
   context.shadowBlur = 0;
-  context.fillStyle = "#43d8ff";
+  context.fillStyle = "#7ea7ff";
   values.forEach((value, index) => {
     context.beginPath();
     context.arc(xFor(index), yFor(value), 2.8, 0, Math.PI * 2);
@@ -450,7 +450,7 @@ function drawStatsChart(
   });
   const lastX = xFor(values.length - 1);
   const lastY = yFor(values[values.length - 1]);
-  context.strokeStyle = "#bdf8ff";
+  context.strokeStyle = "#c7d5ff";
   context.lineWidth = 1.5;
   context.beginPath();
   context.arc(lastX, lastY, 5.5, 0, Math.PI * 2);
@@ -589,6 +589,8 @@ function renderTracker(state) {
   const formattedRankDelta = displayNumber.rankDelta(rawRankDelta);
   elements.mrRankDelta.textContent = formattedRankDelta;
   elements.mrRankDelta.classList.toggle("hidden", !formattedRankDelta);
+  elements.mrRankDelta.classList.toggle("rank-up", formattedRankDelta.startsWith("↑"));
+  elements.mrRankDelta.classList.toggle("rank-down", formattedRankDelta.startsWith("↓"));
   renderMedianRating(state);
   fitStatsValues();
   renderStatsChart(state);
@@ -684,7 +686,7 @@ function renderSettings(settings, { skipTrackerRender = false } = {}) {
   );
   elements.root.classList.toggle(
     "locked",
-    settings.overlayInteractionLocked === true,
+    settings.mode === "overlay" && settings.overlayInteractionLocked === true,
   );
   animateBackgroundOpacity(settings.backgroundOpacity);
   if (trackerState && !skipTrackerRender) {
