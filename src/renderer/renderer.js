@@ -871,6 +871,8 @@ function scheduleHistoryRender(nextState = historyState, { resetPage = false } =
   pendingHistoryPageReset = pendingHistoryPageReset || resetPage ||
     previousProfileId !== (historyState?.profileId ?? null);
   if (!historyPanelOpen) {
+    const records = Array.isArray(historyState.records) ? historyState.records : [];
+    renderRecentHistoryPreview(records);
     if (pendingHistoryPageReset) historyPage = 0;
     pendingHistoryPageReset = false;
     return;

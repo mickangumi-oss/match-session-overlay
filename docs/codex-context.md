@@ -35,6 +35,7 @@ Do not assume the recorded HEAD, release, deployment, analytics counts, hashes, 
 - For any skin, typography, spacing, or resize change, automated tests alone are insufficient. Capture fresh Electron output and visually compare all four modes: WINDOW horizontal/vertical and OVERLAY horizontal/vertical.
 - QA must never occupy the user's screen or steal keyboard focus. Run Electron capture and UI checks hidden/offscreen; do not show QA windows in the foreground.
 - Use synthetic data only. Confirm that at least one item remains visible and that graph-off and reduced-item layouts compact correctly.
+- Keep the live-state regressions in `docs/qa-regressions.md` in the affected-area test flow; in particular, verify recent-history updates while details are closed and pushed Friends/Following updates without reopening the screen.
 
 ## Required checks
 
