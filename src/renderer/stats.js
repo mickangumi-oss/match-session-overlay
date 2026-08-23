@@ -172,27 +172,6 @@ function fitStatsValue(element, minimumSize = 8) {
   });
 }
 
-function fitVerticalRankLine() {
-  const group = elements.mrRank?.closest(".rank-group");
-  const delta = elements.mrRankDelta;
-  if (!group || !delta || !elements.root.classList.contains("vertical") || delta.classList.contains("hidden")) return;
-  requestAnimationFrame(() => {
-    if (!group.isConnected || group.clientWidth <= 0) return;
-    let rankSize = Number.parseFloat(getComputedStyle(elements.mrRank).fontSize);
-    let deltaSize = Number.parseFloat(getComputedStyle(delta).fontSize);
-    while (
-      rankSize > 14 &&
-      deltaSize > 11 &&
-      elements.mrRank.scrollWidth + delta.scrollWidth + 1 > group.clientWidth
-    ) {
-      rankSize -= 0.5;
-      deltaSize = Math.max(11, deltaSize - 0.35);
-      elements.mrRank.style.fontSize = `${rankSize}px`;
-      delta.style.fontSize = `${deltaSize}px`;
-    }
-  });
-}
-
 function fitStatsValues() {
   for (const element of [
     elements.recordValues,
@@ -206,7 +185,6 @@ function fitStatsValues() {
   ]) {
     fitStatsValue(element);
   }
-  fitVerticalRankLine();
 }
 
 function drawStatsChart(

@@ -339,6 +339,12 @@ if (!hasSingleInstanceLock) {
 }
 
 let mainWindow;
+let splashWindow;
+let splashOpenedAt = 0;
+let splashCloseTimer;
+const SPLASH_MINIMUM_VISIBLE_MS = 5000;
+let mainWindowReadyToShow = false;
+let managementUiReady = false;
 let loginWindow;
 let statsWindow;
 let friendNotificationWindow;
@@ -2461,9 +2467,8 @@ function showMainWindowFromTray() {
 
 function createTray() {
   if (tray) return;
-  const iconPath = path.join(__dirname, "renderer", "assets", "header-graffiti-m.png");
-  let icon = nativeImage.createFromPath(iconPath);
-  if (!icon.isEmpty()) icon = icon.resize({ width: 16, height: 16 });
+  const iconPath = path.join(__dirname, "renderer", "assets", "tray-icon.ico");
+  const icon = nativeImage.createFromPath(iconPath);
   tray = new Tray(icon);
   tray.setToolTip("Match Session Overlay");
   tray.on("double-click", () => showMainWindowFromTray());
@@ -2887,6 +2892,8 @@ function dismissFriendNotification({ destroy = false } = {}) {
 }
 
 function createMainWindow() {
+  mainWindowReadyToShow = false;
+  managementUiReady = false;
   const workAreaHeight = screen.getPrimaryDisplay().workAreaSize.height;
   // Keep the five-row recent-match preview visible on first launch.  Respect
   // shorter work areas, while using the extra vertical space available on
@@ -2921,7 +2928,8 @@ function createMainWindow() {
       .catch(() => {});
   });
   mainWindow.once("ready-to-show", () => {
-    if (!backgroundMode) mainWindow.show();
+    mainWindowReadyToShow = true;
+    finishStartupPresentation();
   });
   mainWindow.on("show", () => {
     recordSocialActivity({ schedule: false });
@@ -2946,6 +2954,52 @@ function createMainWindow() {
   mainWindow.on("closed", () => {
     if (!displaySettings.friendOnlineNotificationsEnabled) stopSocialRefresh();
     mainWindow = null;
+  });
+}
+
+function finishStartupPresentation() {
+  if (backgroundMode || !mainWindowReadyToShow || !managementUiReady) return;
+  const remainingSplashTime = Math.max(
+    0,
+    SPLASH_MINIMUM_VISIBLE_MS - (Date.now() - splashOpenedAt),
+  );
+  clearTimeout(splashCloseTimer);
+  splashCloseTimer = setTimeout(() => {
+    splashCloseTimer = null;
+    if (splashWindow && !splashWindow.isDestroyed()) splashWindow.destroy();
+    splashWindow = null;
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.show();
+  }, remainingSplashTime);
+}
+
+function createSplashWindow() {
+  if (backgroundMode || splashWindow) return;
+  splashOpenedAt = Date.now();
+  splashWindow = new BrowserWindow({
+    width: 780,
+    height: 440,
+    show: false,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    movable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    skipTaskbar: true,
+    center: true,
+    backgroundColor: "#00000000",
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true,
+    },
+  });
+  splashWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  loadRendererFile(splashWindow, path.join(__dirname, "renderer", "splash.html"));
+  splashWindow.once("ready-to-show", () => splashWindow?.show());
+  splashWindow.on("closed", () => {
+    splashWindow = null;
   });
 }
 
@@ -4856,6 +4910,12 @@ function resultHandler(handler, { allowDuringUpdate = false } = {}) {
 }
 
 function registerIpcHandlers() {
+  ipcMain.on("ui:management-ready", (event) => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    if (event.sender !== mainWindow.webContents) return;
+    managementUiReady = true;
+    finishStartupPresentation();
+  });
   ipcMain.handle("auth:open-login", resultHandler(async () => openLoginWindow()));
   ipcMain.handle("auth:check", resultHandler(checkAuthentication));
   ipcMain.handle(
@@ -5027,10 +5087,6 @@ function startOverlayServer() {
         path.join("assets", "stats-frame-vertical.png"),
         "image/png",
       ],
-      "/assets/header-graffiti-m.png": [
-        path.join("assets", "header-graffiti-m.png"),
-        "image/png",
-      ],
     };
     if (requestPath === "/state") {
       response.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
@@ -5130,6 +5186,7 @@ app.whenReady().then(() => {
   registerIpcHandlers();
   startOverlayServer();
   createTray();
+  createSplashWindow();
   createMainWindow();
   configureLaunchAtLogin();
   configureGameDetection();
@@ -5166,6 +5223,8 @@ app.on("before-quit", (event) => {
   updater?.cancel?.();
   clearTimeout(startupUpdateTimer);
   startupUpdateTimer = null;
+  clearTimeout(splashCloseTimer);
+  splashCloseTimer = null;
   stopPolling();
   persistTrackerSession();
   stopHistoryViewPolling();

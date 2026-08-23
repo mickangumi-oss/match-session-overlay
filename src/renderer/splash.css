@@ -1,0 +1,120 @@
+:root {
+  color-scheme: dark;
+  font-family: "Bahnschrift", "Yu Gothic UI", sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: transparent;
+}
+
+body {
+  padding: 12px;
+  user-select: none;
+}
+
+.splash-card {
+  position: relative;
+  display: grid;
+  width: 100%;
+  height: 100%;
+  place-items: center;
+  align-content: center;
+  overflow: hidden;
+  border: 1px solid rgba(111, 145, 255, 0.9);
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 50% 20%, rgba(48, 78, 186, 0.28), transparent 40%),
+    linear-gradient(145deg, rgba(14, 20, 51, 0.99), rgba(5, 8, 25, 0.99));
+  box-shadow:
+    inset 0 0 0 3px rgba(21, 30, 70, 0.9),
+    inset 0 0 70px rgba(56, 70, 151, 0.12),
+    0 0 24px rgba(43, 82, 224, 0.42);
+}
+
+.splash-grid {
+  position: absolute;
+  inset: 0;
+  opacity: 0.18;
+  background-image:
+    linear-gradient(rgba(102, 130, 222, 0.17) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(102, 130, 222, 0.17) 1px, transparent 1px);
+  background-size: 52px 52px;
+  mask-image: radial-gradient(circle at center, #000, transparent 75%);
+}
+
+.splash-logo {
+  z-index: 1;
+  width: 112px;
+  height: 112px;
+  margin-bottom: 14px;
+  filter: drop-shadow(0 0 18px rgba(55, 115, 255, 0.48));
+}
+
+h1 {
+  z-index: 1;
+  margin: 0;
+  color: #f5f7ff;
+  font-family: "Bahnschrift Condensed", "Arial Narrow", sans-serif;
+  font-size: 42px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: 0.055em;
+  text-shadow: 0 0 18px rgba(130, 164, 255, 0.2);
+}
+
+.splash-divider {
+  z-index: 1;
+  display: grid;
+  width: min(440px, 72%);
+  height: 18px;
+  margin: 18px 0 10px;
+  place-items: center;
+  background: linear-gradient(90deg, transparent, #5798ff 38%, transparent 38% 62%, #a262ff 62%, transparent);
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: 100% 1px;
+}
+
+.splash-divider span {
+  width: 9px;
+  height: 9px;
+  border: 1px solid #8e6aff;
+  background: #0a0e26;
+  transform: rotate(45deg);
+}
+
+.splash-quote {
+  z-index: 1;
+  width: min(640px, 86%);
+  min-height: 66px;
+  text-align: center;
+}
+
+.splash-quote p {
+  margin: 0;
+  text-wrap: balance;
+}
+
+.quote-original {
+  color: #f0f3ff;
+  font-size: 18px;
+  font-weight: 650;
+  letter-spacing: 0.025em;
+}
+
+.quote-translation {
+  margin-top: 9px !important;
+  color: #8f9bc3;
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.035em;
+}

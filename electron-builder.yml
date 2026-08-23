@@ -19,6 +19,7 @@ files:
   - LICENSE
   - README.md
 win:
+  icon: src/renderer/assets/tray-icon.ico
   target:
     - target: nsis
       arch:

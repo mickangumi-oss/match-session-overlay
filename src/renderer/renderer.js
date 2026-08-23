@@ -2824,4 +2824,5 @@ Promise.all([
     renderSocialState(savedSocial);
     renderUpdate(updateState);
   })
-  .catch((error) => showNotice(error.message, "error"));
+  .catch((error) => showNotice(error.message, "error"))
+  .finally(() => api.notifyManagementReady?.());
