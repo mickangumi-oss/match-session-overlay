@@ -25,6 +25,7 @@ For step-by-step instructions, see the [English usage guide](docs/usage.en.md).
 
 - The app logo has been refreshed, with more readable management-screen typography, spacing, and match-performance chart sizing.
 - Vertical overlays now keep long character rankings and rank movement easy to read.
+- Fixed the recent-match table so newly detected matches appear immediately while tracking.
 
 See the [v1.8.0 release notes](https://github.com/mickangumi-oss/match-session-overlay/releases/tag/v1.8.0) for the installer checksum and security scan results.
 
