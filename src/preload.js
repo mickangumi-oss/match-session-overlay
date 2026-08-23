@@ -46,6 +46,7 @@ contextBridge.exposeInMainWorld("matchOverlay", {
   getUpdateState: () => ipcRenderer.invoke("update:state"),
   installUpdate: () => ipcRenderer.invoke("update:install"),
   copyText: (text) => ipcRenderer.invoke("clipboard:write", { text }),
+  notifyManagementReady: () => ipcRenderer.send("ui:management-ready"),
   onState: (callback) => {
     const listener = (_event, state) => callback(state);
     ipcRenderer.on("tracker:state", listener);

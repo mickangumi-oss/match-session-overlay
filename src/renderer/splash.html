@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Match Session Overlay</title>
+    <link rel="stylesheet" href="./splash.css" />
+  </head>
+  <body>
+    <main class="splash-card">
+      <div class="splash-grid" aria-hidden="true"></div>
+      <img class="splash-logo" src="./assets/app-icon.png" alt="" />
+      <h1>MATCH SESSION OVERLAY</h1>
+      <div class="splash-divider" aria-hidden="true"><span></span></div>
+      <section class="splash-quote" aria-live="off">
+        <p id="splashQuoteOriginal" class="quote-original"></p>
+        <p id="splashQuoteTranslation" class="quote-translation"></p>
+      </section>
+    </main>
+    <script src="../splash-quotes.js"></script>
+    <script src="./splash.js"></script>
+  </body>
+</html>

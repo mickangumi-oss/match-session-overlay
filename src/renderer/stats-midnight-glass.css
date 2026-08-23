@@ -13,7 +13,7 @@
 .stats-window .stats-chart{clip-path:none!important;border:1px solid #5665a1!important;border-radius:8px!important;outline:1px solid #2a315c!important;outline-offset:-4px!important;background:linear-gradient(180deg,rgba(17,21,42,var(--panel-opacity)),rgba(8,12,27,var(--panel-opacity)))!important;box-shadow:inset 0 0 0 1px #0c1024,inset 0 0 25px rgba(104,120,204,.094),0 0 12px rgba(125,131,255,.125)!important}
 .window-actions button{border-radius:4px;color:#c9d4ff}.chart-label{color:#9bb7ff}.rank-delta{color:#a88cff!important}
 .stats-window.vertical .summary>.record-group,.stats-window.vertical .summary>.metric-group{display:flex!important;flex-direction:row!important;align-items:center!important;justify-content:space-between!important;padding-left:20px!important;padding-right:20px!important;text-align:left!important}
-.stats-window.vertical .summary small,.stats-window.vertical .record-labels{margin:0!important;text-align:left!important}.stats-window.vertical .summary strong{margin-left:16px!important;text-align:right!important}.stats-window.vertical .rank-group{justify-content:flex-start!important}.stats-window.vertical .rank-group>strong{margin-left:auto!important}.stats-window.vertical .rank-group>.rank-delta{position:static!important;margin-left:4px!important}
+.stats-window.vertical .summary small,.stats-window.vertical .record-labels{margin:0!important;text-align:left!important}.stats-window.vertical .summary strong{margin-left:16px!important;text-align:right!important}.stats-window.vertical .summary>.rank-group{display:grid!important;grid-template-columns:minmax(0,1fr) minmax(0,max-content)!important;grid-template-rows:minmax(0,1fr) minmax(0,1fr)!important;align-items:center!important;justify-content:stretch!important;column-gap:8px!important}.stats-window.vertical .rank-group>small{grid-column:1!important;grid-row:1/-1!important}.stats-window.vertical .rank-group>strong{grid-column:2!important;grid-row:1!important;align-self:end!important;justify-self:start!important;margin:0!important;text-align:left!important}.stats-window.vertical .rank-group>.rank-delta{position:static!important;grid-column:2!important;grid-row:2!important;align-self:start!important;justify-self:center!important;margin:2px 0 0!important;text-align:center!important}
 .stats-window.vertical .summary small,.stats-window.vertical .record-labels{flex:0 0 auto!important;overflow:visible!important;text-overflow:clip!important;white-space:nowrap!important}
 .stats-window.vertical .summary strong{min-width:0!important;flex:0 1 auto!important}
 .stats-window.vertical .record-labels{display:flex!important;width:auto!important;align-items:center!important;justify-content:flex-start!important;gap:0!important}
@@ -30,7 +30,7 @@
 .stats-window .rank-delta.rank-down{color:#668fcf!important;text-shadow:0 0 9px rgba(102,143,207,.42)!important}
 .stats-window .stats-chart>header::before,
 .stats-window .stats-chart>header::after{display:none!important}
-.stats-window.vertical .rank-delta{font-size:calc(15px * var(--stats-value-scale))!important}
+.stats-window.vertical .rank-delta{font-size:clamp(calc(17px * var(--stats-value-scale)),calc(4.6vw * var(--stats-value-scale)),calc(28px * var(--stats-value-scale)))!important}
 .stats-window.horizontal .stats-chart,
 .stats-window.vertical .stats-chart,
 .stats-window.overlay.horizontal .stats-chart,
