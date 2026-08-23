@@ -1766,32 +1766,40 @@ body.remote-overlay {
   );
 }
 
-/* Vertical CHARACTER RANK keeps a valid movement beside the rank. */
+/* Vertical CHARACTER RANK stacks movement below the rank so long values keep
+   the same readable 6:4 visual hierarchy without consuming card width. */
 .stats-window.vertical .rank-group {
-  grid-template-columns: max-content max-content;
-  grid-template-rows: minmax(12px, auto) minmax(0, 1fr) !important;
-  justify-content: center;
-  column-gap: 0;
+  grid-template-columns: minmax(0, 1fr) minmax(0, max-content);
+  grid-template-rows: minmax(0, 1fr) minmax(0, 1fr) !important;
+  justify-content: stretch;
+  column-gap: 8px;
 }
 
 .stats-window.vertical .rank-group > small {
-  grid-column: 1 / -1;
-  grid-row: 1;
+  grid-column: 1;
+  grid-row: 1 / -1;
+  align-self: center;
 }
 
 .stats-window.vertical .rank-group > strong {
-  grid-column: 1;
-  grid-row: 2;
+  grid-column: 2;
+  grid-row: 1;
   width: auto;
+  align-self: end;
+  justify-self: start;
 }
 
 .stats-window.vertical .rank-group > .rank-delta {
   grid-column: 2;
   grid-row: 2;
   width: auto;
+  align-self: start;
+  justify-self: center;
+  margin-top: 2px;
+  text-align: center;
   font-size: clamp(
-    calc(15px * var(--stats-value-scale)),
-    calc(4vw * var(--stats-value-scale)),
-    calc(24px * var(--stats-value-scale))
+    calc(17px * var(--stats-value-scale)),
+    calc(4.6vw * var(--stats-value-scale)),
+    calc(28px * var(--stats-value-scale))
   );
 }

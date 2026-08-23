@@ -1,6 +1,6 @@
 # Codex context: Match Session Overlay
 
-Updated: 2026-08-22
+Updated: 2026-08-23
 
 この文書は、長いCodex会話を引き継がずに作業を再開するための短い正本である。新しいタスクは、過去タスク全文ではなく、この文書と変更対象ファイルだけを読む。
 
@@ -33,6 +33,7 @@ Do not assume the recorded HEAD, release, deployment, analytics counts, hashes, 
 - Vertical rank change uses the compact form `1234↓123`.
 - Preserve number aspect ratio and automatic shrink-to-fit.
 - For any skin, typography, spacing, or resize change, automated tests alone are insufficient. Capture fresh Electron output and visually compare all four modes: WINDOW horizontal/vertical and OVERLAY horizontal/vertical.
+- QA must never occupy the user's screen or steal keyboard focus. Run Electron capture and UI checks hidden/offscreen; do not show QA windows in the foreground.
 - Use synthetic data only. Confirm that at least one item remains visible and that graph-off and reduced-item layouts compact correctly.
 
 ## Required checks
