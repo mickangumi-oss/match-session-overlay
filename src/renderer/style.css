@@ -1356,6 +1356,15 @@ body.update-required .cockpit .hud-panel .update-row * {
 .history-legend span { display: inline-flex; align-items: center; gap: 5px; }
 .history-legend i { width: 10px; height: 10px; display: inline-block; }
 .history-rating-grid { display: grid; grid-template-columns: 1fr; gap: 12px; padding: 0; }
+.history-rating-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 10px; flex-wrap: wrap; min-width: 0; padding: 0 2px 6px; }
+.history-rating-toolbar { display: flex; align-items: flex-end; justify-content: flex-end; gap: 8px; flex-wrap: wrap; min-width: 0; }
+.history-rating-period-select,
+.history-rating-date-select { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.history-rating-period-select select,
+.history-rating-date-select select { min-width: 116px; min-height: 30px; }
+.history-rating-week-nav { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.history-rating-week-nav button { min-width: 30px; min-height: 30px; padding: 2px 7px; line-height: 1; }
+.history-rating-week-nav span { min-width: 92px; color: rgba(247, 248, 255, .68); font-size: 10px; text-align: center; white-space: nowrap; }
 .history-rating-card { min-width: 0; border: 1px solid rgba(67, 216, 255, 0.25); background: rgba(1, 7, 16, 0.52); }
 .history-rating-card header { padding: 7px 9px; border-bottom: 1px solid rgba(67, 216, 255, 0.2); }
 .history-rating-wrap { position: relative; min-height: 150px; padding: 6px 8px 8px; }
@@ -1447,6 +1456,14 @@ body.update-required .cockpit .hud-panel .update-row * {
   .history-acquisition .button { width: 100%; }
   .history-target { grid-template-columns: 1fr 1fr; }
   .history-target p { grid-column: 1 / -1; }
+  .history-rating-heading { align-items: stretch; }
+  .history-rating-heading > .control-label { align-self: center; }
+  .history-rating-toolbar { align-items: stretch; justify-content: stretch; flex: 1 1 100%; }
+  .history-rating-period-select,
+  .history-rating-date-select { flex: 1 1 150px; justify-content: space-between; }
+  .history-rating-period-select select,
+  .history-rating-date-select select { flex: 1; min-width: 0; }
+  .history-rating-week-nav { flex: 1 1 150px; justify-content: center; }
   .history-filters,
   .history-summary { grid-template-columns: 1fr 1fr; }
 }

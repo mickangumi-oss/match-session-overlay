@@ -7,8 +7,8 @@ Updated: 2026-08-23
 ## Current state
 
 - App repository: this repository root
-- Current release: `v1.7.0`
-- Current verified HEAD when this context was created: `248f682a3d69b558a7932bbcbf956497576354ed`
+- Current release: `v1.8.0`
+- Current release tag commit: `5efb86510bc6b52d679785d98dd87c14f551f339`
 - Product truth: `README.md`, `README.en.md`, `docs/usage.md`
 - Release truth: `package.json`, `docs/release-process.md`, the matching file under `docs/release-notes/`
 - Landing-page repository: sibling repository `../match-session-overlay-site`

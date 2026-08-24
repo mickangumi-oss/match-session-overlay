@@ -470,6 +470,30 @@
               <div class="history-chart-wrap"><canvas id="historyResultChart" aria-label="Match result trend"></canvas><p id="historyEmpty" data-i18n="historyEmpty">取得した対戦履歴はありません</p></div>
               <div class="history-legend"><span><i class="legend-win"></i><span data-i18n="win">WIN</span></span><span><i class="legend-loss"></i><span data-i18n="loss">LOSS</span></span></div>
             </section>
+            <div class="history-rating-heading">
+              <span class="control-label" data-i18n="ratingTrendHeading">MR / LP TREND</span>
+              <div class="history-rating-toolbar" role="group" aria-label="MR and LP trend display options">
+                <label class="history-rating-period-select">
+                  <span class="control-label" id="historyRatingPeriodLabel" data-i18n="historyRatingPeriod">DISPLAY PERIOD</span>
+                  <select id="historyRatingPeriod" aria-label="Display period">
+                    <option value="all" data-i18n="historyRatingPeriodAll">ALL</option>
+                    <option value="week" data-i18n="historyRatingPeriodWeek">WEEKLY</option>
+                  </select>
+                </label>
+                <label class="history-rating-date-select">
+                  <span class="control-label" id="historyRatingDateModeLabel" data-i18n="historyRatingDateMode">DATE DISPLAY</span>
+                  <select id="historyRatingDateMode" aria-label="Date display">
+                    <option value="played" data-i18n="historyRatingDatePlayed">PLAY DAYS</option>
+                    <option value="all" data-i18n="historyRatingDateAll">ALL DAYS</option>
+                  </select>
+                </label>
+                <div class="history-rating-week-nav">
+                  <button class="button secondary" id="historyRatingWeekPrevious" type="button">‹</button>
+                  <span id="historyRatingWeekLabel" aria-live="polite"></span>
+                  <button class="button secondary" id="historyRatingWeekNext" type="button">›</button>
+                </div>
+              </div>
+            </div>
             <div class="history-rating-grid">
               <section class="history-rating-card">
                 <header><span class="control-label" data-i18n="mrTrend">MR TREND</span></header>
