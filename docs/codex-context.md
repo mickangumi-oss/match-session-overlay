@@ -1,14 +1,14 @@
 # Codex context: Match Session Overlay
 
-Updated: 2026-08-23
+Updated: 2026-08-25
 
 この文書は、長いCodex会話を引き継がずに作業を再開するための短い正本である。新しいタスクは、過去タスク全文ではなく、この文書と変更対象ファイルだけを読む。
 
 ## Current state
 
 - App repository: this repository root
-- Current release: `v1.8.0`
-- Current release tag commit: `5efb86510bc6b52d679785d98dd87c14f551f339`
+- Current release: `v1.9.0`
+- Current release tag commit: `7af431ead72153f5dab39b395cb563b100d9c68c`
 - Product truth: `README.md`, `README.en.md`, `docs/usage.md`
 - Release truth: `package.json`, `docs/release-process.md`, the matching file under `docs/release-notes/`
 - Landing-page repository: sibling repository `../match-session-overlay-site`
