@@ -1779,6 +1779,7 @@ body.remote-overlay {
   grid-column: 1;
   grid-row: 1 / -1;
   align-self: center;
+  justify-self: start;
 }
 
 .stats-window.vertical .rank-group > strong {

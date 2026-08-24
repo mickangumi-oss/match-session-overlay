@@ -4,6 +4,10 @@
   const DAY_MS = 24 * 60 * 60 * 1000;
   const DATE_KEY_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
 
+  function isFiniteSeriesValue(value) {
+    return value != null && value !== "" && Number.isFinite(Number(value));
+  }
+
   function dateOrdinal(dateKey) {
     const match = DATE_KEY_PATTERN.exec(String(dateKey ?? ""));
     if (!match) return null;
@@ -83,7 +87,7 @@
 
   function buildSevenDayResultChart(
     records,
-    { endDateKey = "", todayKey = localTodayKey() } = {},
+    _options = {},
   ) {
     const normalized = (Array.isArray(records) ? records : [])
       .map((record) => ({
@@ -92,22 +96,10 @@
         result: String(record?.result ?? ""),
       }))
       .filter((record) => record.ordinal != null);
-    const explicitEnd = dateOrdinal(endDateKey);
-    const latestRecordOrdinal = normalized.length
-      ? Math.max(...normalized.map((record) => record.ordinal))
-      : null;
-    const fallbackEnd = dateOrdinal(todayKey);
-    const endOrdinal = explicitEnd ?? latestRecordOrdinal ?? fallbackEnd;
-    if (endOrdinal == null) {
-      return { slotCount: 7, startDateKey: "", endDateKey: "", buckets: [] };
-    }
-    const startOrdinal = endOrdinal - 6;
     const grouped = new Map();
     for (const record of normalized) {
-      if (record.ordinal < startOrdinal || record.ordinal > endOrdinal) continue;
       const bucket = grouped.get(record.ordinal) ?? {
         dateKey: dateKeyFromOrdinal(record.ordinal),
-        dayIndex: record.ordinal - startOrdinal,
         win: 0,
         loss: 0,
         draw: 0,
@@ -117,26 +109,222 @@
       else bucket.draw += 1;
       grouped.set(record.ordinal, bucket);
     }
-    const buckets = [...grouped.entries()]
-      .sort(([left], [right]) => left - right)
-      .map(([, bucket]) => ({
+    const selectedOrdinals = [...grouped.keys()]
+      .sort((left, right) => right - left)
+      .slice(0, 7)
+      .sort((left, right) => left - right);
+    const buckets = selectedOrdinals.map((ordinal, dayIndex) => {
+      const bucket = grouped.get(ordinal);
+      return {
         ...bucket,
+        dayIndex,
         total: bucket.win + bucket.loss + bucket.draw,
-      }));
+      };
+    });
     return {
-      slotCount: 7,
-      startDateKey: dateKeyFromOrdinal(startOrdinal),
-      endDateKey: dateKeyFromOrdinal(endOrdinal),
+      slotCount: buckets.length,
+      startDateKey: buckets[0]?.dateKey || "",
+      endDateKey: buckets.at(-1)?.dateKey || "",
       buckets,
     };
   }
 
+  function historyDateEntry(record, dateKeyForRecord = (value) => value?.dateKey) {
+    const dateKey = String(dateKeyForRecord(record) ?? "");
+    const ordinal = dateOrdinal(dateKey);
+    return ordinal == null ? null : { record, dateKey, ordinal };
+  }
+
+  function buildHistoryRatingPeriod(
+    records,
+    { mode = "all", weekOffset = 0, todayKey = localTodayKey() } = {},
+  ) {
+    const normalizedMode = ["all", "week", "recent"].includes(mode) ? mode : "all";
+    const entries = (Array.isArray(records) ? records : [])
+      .map((record) => historyDateEntry(record))
+      .filter(Boolean);
+    const ordinals = entries.map((entry) => entry.ordinal);
+    if (normalizedMode === "all") {
+      const first = ordinals.length ? Math.min(...ordinals) : null;
+      const last = ordinals.length ? Math.max(...ordinals) : null;
+      return {
+        mode: normalizedMode,
+        weekOffset: 0,
+        startDateKey: first == null ? "" : dateKeyFromOrdinal(first),
+        endDateKey: last == null ? "" : dateKeyFromOrdinal(last),
+      };
+    }
+
+    const referenceOrdinal = dateOrdinal(todayKey) ?? (ordinals.length ? Math.max(...ordinals) : null);
+    if (referenceOrdinal == null) {
+      return { mode: normalizedMode, weekOffset: 0, startDateKey: "", endDateKey: "" };
+    }
+    if (normalizedMode === "recent") {
+      return {
+        mode: normalizedMode,
+        weekOffset: 0,
+        startDateKey: dateKeyFromOrdinal(referenceOrdinal - 6),
+        endDateKey: dateKeyFromOrdinal(referenceOrdinal),
+      };
+    }
+
+    const safeWeekOffset = Math.trunc(Number(weekOffset) || 0);
+    const dayOfWeek = new Date(referenceOrdinal * DAY_MS).getUTCDay();
+    const currentWeekStart = referenceOrdinal - ((dayOfWeek + 6) % 7);
+    const startOrdinal = currentWeekStart + safeWeekOffset * 7;
+    return {
+      mode: normalizedMode,
+      weekOffset: safeWeekOffset,
+      startDateKey: dateKeyFromOrdinal(startOrdinal),
+      endDateKey: dateKeyFromOrdinal(startOrdinal + 6),
+    };
+  }
+
+  function filterHistoryRatingRecords(
+    records,
+    period,
+    dateKeyForRecord = (value) => value?.dateKey,
+  ) {
+    const entries = (Array.isArray(records) ? records : [])
+      .map((record) => historyDateEntry(record, dateKeyForRecord))
+      .filter(Boolean);
+    if (!period?.startDateKey || !period?.endDateKey) return [];
+    const startOrdinal = dateOrdinal(period.startDateKey);
+    const endOrdinal = dateOrdinal(period.endDateKey);
+    if (startOrdinal == null || endOrdinal == null) return [];
+    return entries
+      .filter((entry) => entry.ordinal >= startOrdinal && entry.ordinal <= endOrdinal)
+      .map((entry) => entry.record);
+  }
+
+  function historyTimestamp(record, timestampForRecord) {
+    const raw = timestampForRecord
+      ? timestampForRecord(record)
+      : record?.playedAt ?? record?.uploadedAt;
+    const timestamp = Number(raw);
+    if (!Number.isFinite(timestamp)) return 0;
+    return Math.abs(timestamp) < 10_000_000_000 ? timestamp * 1000 : timestamp;
+  }
+
+  function buildHistoryRatingSeries(
+    records,
+    {
+      period,
+      dateMode = "played",
+      valueForRecord = (record) => record?.value,
+      dateKeyForRecord = (record) => record?.dateKey,
+      timestampForRecord,
+    } = {},
+  ) {
+    const normalizedPeriod = period?.startDateKey && period?.endDateKey
+      ? period
+      : buildHistoryRatingPeriod(records, period ?? {});
+    const startOrdinal = dateOrdinal(normalizedPeriod.startDateKey);
+    const endOrdinal = dateOrdinal(normalizedPeriod.endDateKey);
+    if (startOrdinal == null || endOrdinal == null || endOrdinal < startOrdinal) return [];
+
+    const entries = (Array.isArray(records) ? records : [])
+      .map((record, index) => {
+        const entry = historyDateEntry(record, dateKeyForRecord);
+        if (!entry) return null;
+        const rawValue = valueForRecord(record);
+        const value = rawValue == null || rawValue === "" ? null : Number(rawValue);
+        return {
+          ...entry,
+          index,
+          timestamp: historyTimestamp(record, timestampForRecord),
+          value: Number.isFinite(value) ? value : null,
+        };
+      })
+      .filter(Boolean)
+      .sort((left, right) => left.timestamp - right.timestamp || left.index - right.index);
+
+    const dailyValues = new Map();
+    for (const entry of entries) {
+      if (!Number.isFinite(entry.value)) continue;
+      const previous = dailyValues.get(entry.ordinal);
+      if (!previous || entry.timestamp >= previous.timestamp) {
+        dailyValues.set(entry.ordinal, {
+          dateKey: entry.dateKey,
+          ordinal: entry.ordinal,
+          timestamp: entry.timestamp,
+          value: entry.value,
+        });
+      }
+    }
+
+    if (dateMode !== "all") {
+      return [...dailyValues.values()]
+        .filter((entry) => entry.ordinal >= startOrdinal && entry.ordinal <= endOrdinal)
+        .sort((left, right) => left.ordinal - right.ordinal)
+        .map((entry, position) => ({
+          dateKey: entry.dateKey,
+          ordinal: entry.ordinal,
+          position,
+          value: entry.value,
+        }));
+    }
+
+    let carriedValue = null;
+    for (const entry of [...dailyValues.values()].sort((left, right) => left.ordinal - right.ordinal)) {
+      if (entry.ordinal < startOrdinal) carriedValue = entry.value;
+    }
+    const points = [];
+    for (let ordinal = startOrdinal; ordinal <= endOrdinal; ordinal += 1) {
+      const entry = dailyValues.get(ordinal);
+      if (entry) carriedValue = entry.value;
+      points.push({
+        dateKey: dateKeyFromOrdinal(ordinal),
+        ordinal,
+        position: ordinal - startOrdinal,
+        value: Number.isFinite(carriedValue) ? carriedValue : null,
+      });
+    }
+    return points;
+  }
+
+  function thinHistoryPoints(points, maxPoints) {
+    const source = Array.isArray(points) ? points : [];
+    const limit = Math.max(2, Math.trunc(Number(maxPoints) || 2));
+    if (source.length <= limit) return source.slice();
+    const keep = new Set([0, source.length - 1]);
+    const firstFinite = source.findIndex((point) => isFiniteSeriesValue(point?.value));
+    const lastFinite = source.findLastIndex((point) => isFiniteSeriesValue(point?.value));
+    if (firstFinite >= 0) keep.add(firstFinite);
+    if (lastFinite >= 0) keep.add(lastFinite);
+    const scored = source.slice(1, -1).map((point, index) => {
+      const sourceIndex = index + 1;
+      const previous = source[sourceIndex - 1]?.value;
+      const current = point?.value;
+      const next = source[sourceIndex + 1]?.value;
+      const previousDelta = isFiniteSeriesValue(previous) && isFiniteSeriesValue(current)
+        ? Math.abs(current - previous)
+        : 0;
+      const nextDelta = isFiniteSeriesValue(current) && isFiniteSeriesValue(next)
+        ? Math.abs(next - current)
+        : 0;
+      return {
+        sourceIndex,
+        score: previousDelta + nextDelta,
+      };
+    }).sort((left, right) => right.score - left.score || left.sourceIndex - right.sourceIndex);
+    for (const item of scored) {
+      if (keep.size >= limit) break;
+      keep.add(item.sourceIndex);
+    }
+    return [...keep].sort((left, right) => left - right).map((index) => source[index]);
+  }
+
   const api = {
     buildHistoryRatingAxis,
+    buildHistoryRatingPeriod,
+    buildHistoryRatingSeries,
     buildSevenDayResultChart,
     dateKeyFromOrdinal,
     dateOrdinal,
+    filterHistoryRatingRecords,
     localTodayKey,
+    thinHistoryPoints,
   };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   if (globalScope) globalScope.matchHistoryChartModel = api;
