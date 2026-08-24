@@ -13,13 +13,13 @@
 - 公式サイトへのログインと戦績取得に必要なインターネット接続
 - OBSで表示する場合のみ、OBS Studio（任意）
 
-公開版: v1.8.0
+公開版: v1.9.0
 
 ## ダウンロード
 
-[v1.8.0をダウンロード（GitHub Releases）](https://github.com/mickangumi-oss/match-session-overlay/releases/download/v1.8.0/Match-Session-Overlay-1.8.0-Setup.exe)
+[v1.9.0をダウンロード（GitHub Releases）](https://github.com/mickangumi-oss/match-session-overlay/releases/download/v1.9.0/Match-Session-Overlay-1.9.0-Setup.exe)
 
-開いたページの「Assets」から、`Match-Session-Overlay-1.8.0-Setup.exe`をダウンロードして実行してください。最新版以外のファイルや、配布元を確認できないファイルは使用しないでください。
+開いたページの「Assets」から、`Match-Session-Overlay-1.9.0-Setup.exe`をダウンロードして実行してください。最新版以外のファイルや、配布元を確認できないファイルは使用しないでください。
 
 詳しい操作手順は[`docs/usage.md`](docs/usage.md)、表示レイアウトは[`docs/window-layout.md`](docs/window-layout.md)、対戦履歴は[`docs/match-history.md`](docs/match-history.md)、フォントは[`docs/font-settings.md`](docs/font-settings.md)をご覧ください。
 
@@ -27,7 +27,7 @@
 
 正式な配布インストーラーは、公開前にMicrosoft DefenderおよびVirusTotalでセキュリティチェックを実施します。検査結果は公開時点のものであり、完全な安全性を保証するものではありません。インストーラーは必ずこのリポジトリの公式GitHub Releaseから取得し、各リリースノートに記載されたSHA-256と一致することを確認してください。
 
-`v1.8.0`の検査結果は[`v1.8.0リリースノート`](docs/release-notes/v1.8.0.md)をご覧ください。
+`v1.9.0`の検査結果は[`v1.9.0リリースノート`](docs/release-notes/v1.9.0.md)をご覧ください。
 
 ## 画面イメージ
 
@@ -59,17 +59,17 @@ CHARACTER RANKと現在のキャラクター、セッション戦績、FRIENDS�
 
 ### 対戦履歴
 
-取得済みの対戦を絞り込み、勝敗、勝率、最大連勝、MR／LP推移、末尾7日間の勝敗グラフ、相手キャラクター別成績を確認できます。
+取得済みの対戦を絞り込み、勝敗、勝率、最大連勝、MR／LP推移、直近7試合日分の勝敗グラフ、相手キャラクター別成績を確認できます。
 
 ![合成データを表示した対戦履歴画面](docs/images/match-history-example.png)
 
-## v1.8.0の変更内容
+## v1.9.0の変更内容
 
-- アプリロゴを刷新し、管理画面の文字、余白、戦績グラフを読みやすく調整しました。
-- 縦型オーバーレイの順位表示を改善し、桁数が多い場合も順位と変動を確認しやすくしました。
-- 計測中に新しい対戦を取得した際、管理画面の直近の対戦履歴がすぐ更新されるよう修正しました。
+- 勝敗の推移を、試合をした日が新しい順に最大7日分へ集約し、同日の勝敗を1本の積み上げ棒にまとめました。
+- MR／LP推移に「全期間／週別」と「プレイ日のみ／全日」の共通切り替えを追加し、週の移動にも対応しました。
+- 最終試合のMR／LP増減を現在値との差分で表示し、縦型オーバーレイの順位ラベルを他の項目と同じ左位置に揃えました。
 
-詳しい変更内容は[`v1.8.0リリースノート`](docs/release-notes/v1.8.0.md)をご覧ください。
+詳しい変更内容は[`v1.9.0リリースノート`](docs/release-notes/v1.9.0.md)をご覧ください。
 
 過去の変更内容は[`docs/release-notes`](docs/release-notes)をご覧ください。
 

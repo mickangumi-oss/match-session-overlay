@@ -33,6 +33,7 @@ let historyPanelOpen = false;
 let pendingHistoryRenderState = null;
 let historyRenderFrame = null;
 let pendingHistoryPageReset = false;
+let historyRatingPeriod = { mode: "all", weekOffset: 0, dateMode: "played" };
 const HISTORY_PAGE_SIZE = 10;
 const RECENT_HISTORY_PREVIEW_LIMIT = 5;
 let historyPage = 0;
@@ -173,6 +174,11 @@ const elements = Object.fromEntries(
     "historyCount",
     "historyResultChart",
     "historyEmpty",
+    "historyRatingPeriod",
+    "historyRatingDateMode",
+    "historyRatingWeekPrevious",
+    "historyRatingWeekNext",
+    "historyRatingWeekLabel",
     "historyMrChart",
     "historyMrEmpty",
     "historyLpChart",
@@ -252,6 +258,30 @@ function formatHistoryRating(ratingType, value) {
   return formatted ? `${ratingType || ""} ${formatted}`.trim() : "—";
 }
 
+function historyRatingDelta(record, records, player, { useCurrentRating = false } = {}) {
+  const ratingType = String(record?.ownRatingType || "").toUpperCase();
+  const rating = Number(record?.ownRating);
+  if (!Number.isFinite(rating) || !["MR", "LP"].includes(ratingType)) return null;
+  const characterId = Number(record?.characterId) || null;
+  const playerCharacterId = Number(player?.characterId) || null;
+  if (useCurrentRating && (playerCharacterId == null || playerCharacterId === characterId)) {
+    const currentRating = Number(ratingType === "MR" ? player?.mr : player?.lp);
+    if (Number.isFinite(currentRating) && currentRating > 0) {
+      return Math.round(currentRating - rating);
+    }
+  }
+  const timestamp = Number(record?.playedAt ?? record?.uploadedAt) || 0;
+  const nextRecord = records
+    .filter((candidate) =>
+      String(candidate?.ownRatingType || "").toUpperCase() === ratingType &&
+      (Number(candidate?.characterId) || null) === characterId &&
+      Number(candidate?.playedAt ?? candidate?.uploadedAt) > timestamp &&
+      Number.isFinite(Number(candidate?.ownRating)))
+    .sort((a, b) => Number(a?.playedAt ?? a?.uploadedAt) - Number(b?.playedAt ?? b?.uploadedAt))[0];
+  const nextRating = Number(nextRecord?.ownRating);
+  return Number.isFinite(nextRating) ? Math.round(nextRating - rating) : null;
+}
+
 function filteredHistoryRecords() {
   const from = elements.historyDateFrom?.value || "";
   const to = elements.historyDateTo?.value || "";
@@ -269,11 +299,20 @@ function filteredHistoryRecords() {
     .sort((a, b) => Number(b.uploadedAt) - Number(a.uploadedAt));
 }
 
-function drawHistoryResultChart(records) {
+function historyResultChartModelFor(records) {
+  return window.matchHistoryChartModel?.buildSevenDayResultChart(
+    records.map((record) => ({
+      dateKey: dateKeyForHistory(record),
+      result: record.result,
+    })),
+  ) ?? { slotCount: 0, buckets: [] };
+}
+
+function drawHistoryResultChart(records, chartModel = historyResultChartModelFor(records)) {
   const canvas = elements.historyResultChart;
-  if (!canvas) return;
+  if (!canvas) return chartModel;
   const rect = canvas.getBoundingClientRect();
-  if (rect.width <= 0 || rect.height <= 0) return;
+  if (rect.width <= 0 || rect.height <= 0) return chartModel;
   const width = Math.max(1, rect.width);
   const height = Math.max(1, rect.height);
   const ratio = window.devicePixelRatio || 1;
@@ -282,18 +321,8 @@ function drawHistoryResultChart(records) {
   const context = canvas.getContext("2d");
   context.setTransform(ratio, 0, 0, ratio, 0, 0);
   context.clearRect(0, 0, width, height);
-  const chartModel = window.matchHistoryChartModel?.buildSevenDayResultChart(
-    records.map((record) => ({
-      dateKey: dateKeyForHistory(record),
-      result: record.result,
-    })),
-    {
-      endDateKey: elements.historyDateTo?.value || "",
-      todayKey: window.matchHistoryChartModel?.localTodayKey?.() || "",
-    },
-  );
   const ordered = chartModel?.buckets ?? [];
-  if (!ordered.length) return;
+  if (!ordered.length) return chartModel;
   const padding = { top: 12, right: 14, bottom: 32, left: 32 };
   const plotWidth = Math.max(1, width - padding.left - padding.right);
   const plotHeight = Math.max(1, height - padding.top - padding.bottom);
@@ -316,7 +345,7 @@ function drawHistoryResultChart(records) {
     context.fillText(String(tick), padding.left - 6, y);
   }
 
-  const slotWidth = plotWidth / 7;
+  const slotWidth = plotWidth / Math.max(1, chartModel.slotCount || ordered.length);
   const barWidth = Math.max(5, Math.min(42, slotWidth * 0.62));
   ordered.forEach((bucket) => {
     const x =
@@ -353,18 +382,96 @@ function drawHistoryResultChart(records) {
     context.textBaseline = "top";
     context.fillText(label, x + barWidth / 2, padding.top + plotHeight + 7);
   });
+  return chartModel;
 }
 
-function drawHistoryRatingChart(records, ratingType, canvas, emptyElement) {
+function normalizeHistoryRatingDateMode(value) {
+  return value === "all" ? "all" : "played";
+}
+
+function historyRatingPeriodModelFor(records) {
+  const model = window.matchHistoryChartModel;
+  const datedRecords = records.map((record) => ({ dateKey: dateKeyForHistory(record) }));
+  const period = model?.buildHistoryRatingPeriod?.(datedRecords, historyRatingPeriod) ?? {
+    mode: historyRatingPeriod.mode,
+    weekOffset: historyRatingPeriod.weekOffset,
+    startDateKey: "",
+    endDateKey: "",
+  };
+  return {
+    ...period,
+    dateMode: normalizeHistoryRatingDateMode(historyRatingPeriod.dateMode),
+  };
+}
+
+function formatHistoryPeriodDate(dateKey) {
+  const [, month, day] = String(dateKey || "").split("-");
+  return month && day ? `${month}/${day}` : "—";
+}
+
+function formatHistoryWeekLabel(startDateKey, endDateKey) {
+  const [startYear, startMonth, startDay] = String(startDateKey || "").split("-");
+  const [endYear, endMonth, endDay] = String(endDateKey || "").split("-");
+  if (!startYear || !endYear || !startMonth || !endMonth || !startDay || !endDay) return "—";
+  const start = `${startYear}/${startMonth}/${startDay}`;
+  const end = startYear === endYear ? `${endMonth}/${endDay}` : `${endYear}/${endMonth}/${endDay}`;
+  return `${start} - ${end}`;
+}
+
+function renderHistoryRatingPeriodControls(period) {
+  if (elements.historyRatingPeriod) elements.historyRatingPeriod.value = period.mode;
+  if (elements.historyRatingDateMode) elements.historyRatingDateMode.value = period.dateMode;
+  const isWeek = period.mode === "week";
+  for (const element of [elements.historyRatingWeekPrevious, elements.historyRatingWeekNext, elements.historyRatingWeekLabel]) {
+    element?.classList.toggle("hidden", !isWeek);
+  }
+  if (elements.historyRatingWeekLabel) {
+    elements.historyRatingWeekLabel.textContent = isWeek
+      ? formatHistoryWeekLabel(period.startDateKey, period.endDateKey)
+      : "";
+  }
+  if (elements.historyRatingWeekPrevious) {
+    elements.historyRatingWeekPrevious.title = t("historyPeriodPrevious", "Previous week");
+    elements.historyRatingWeekPrevious.setAttribute("aria-label", t("historyPeriodPrevious", "Previous week"));
+  }
+  if (elements.historyRatingWeekNext) {
+    elements.historyRatingWeekNext.disabled = !isWeek || period.weekOffset >= 0;
+    elements.historyRatingWeekNext.title = t("historyPeriodNext", "Next week");
+    elements.historyRatingWeekNext.setAttribute("aria-label", t("historyPeriodNext", "Next week"));
+  }
+}
+
+function renderHistoryRatingCharts(records) {
+  const period = historyRatingPeriodModelFor(records);
+  renderHistoryRatingPeriodControls(period);
+  drawHistoryRatingChart(records, "MR", elements.historyMrChart, elements.historyMrEmpty, period);
+  drawHistoryRatingChart(records, "LP", elements.historyLpChart, elements.historyLpEmpty, period);
+}
+
+function drawHistoryRatingChart(records, ratingType, canvas, emptyElement, period = { mode: "all", dateMode: "played" }) {
   if (!canvas) return;
-  const orderedRecords = [...records]
-    .filter((record) => historyRatingValue(record, ratingType) != null)
-    .sort((a, b) => Number(a.playedAt ?? a.uploadedAt) - Number(b.playedAt ?? b.uploadedAt));
-  const points = orderedRecords.map((record, index) => ({
-    match: index + 1,
-    value: historyRatingValue(record, ratingType),
-  }));
-  if (emptyElement) emptyElement.classList.toggle("hidden", points.length > 0);
+  const model = window.matchHistoryChartModel;
+  const dateMode = normalizeHistoryRatingDateMode(period.dateMode);
+  const hasFinitePointValue = (point) =>
+    point?.value != null && point.value !== "" && Number.isFinite(Number(point.value));
+  const allPoints = model?.buildHistoryRatingSeries
+    ? model.buildHistoryRatingSeries(records, {
+        period,
+        dateMode,
+        valueForRecord: (record) => historyRatingValue(record, ratingType),
+        dateKeyForRecord: dateKeyForHistory,
+        timestampForRecord: (record) => record?.playedAt ?? record?.uploadedAt,
+      })
+    : [...records]
+        .filter((record) => historyRatingValue(record, ratingType) != null)
+        .sort((a, b) => Number(a.playedAt ?? a.uploadedAt) - Number(b.playedAt ?? b.uploadedAt))
+        .map((record, position) => ({
+          dateKey: dateKeyForHistory(record),
+          position,
+          value: historyRatingValue(record, ratingType),
+        }));
+  const hasData = allPoints.some(hasFinitePointValue);
+  if (emptyElement) emptyElement.classList.toggle("hidden", hasData);
 
   const rect = canvas.getBoundingClientRect();
   if (rect.width <= 0 || rect.height <= 0) return;
@@ -376,9 +483,11 @@ function drawHistoryRatingChart(records, ratingType, canvas, emptyElement) {
   const context = canvas.getContext("2d");
   context.setTransform(ratio, 0, 0, ratio, 0, 0);
   context.clearRect(0, 0, width, height);
-  if (!points.length) return;
+  if (!hasData) return;
 
-  const values = points.map((point) => point.value);
+  const values = allPoints
+    .filter(hasFinitePointValue)
+    .map((point) => Number(point.value));
   const potentialRating = values.length >= 2
     ? window.MatchPotentialRating?.potentialRatingValue(values.slice(-20), ratingType) ?? null
     : null;
@@ -406,6 +515,21 @@ function drawHistoryRatingChart(records, ratingType, canvas, emptyElement) {
   };
   const plotWidth = Math.max(1, width - padding.left - padding.right);
   const plotHeight = Math.max(1, height - padding.top - padding.bottom);
+  const maxPoints = Math.max(4, Math.floor(plotWidth / 8));
+  const points = period.mode === "week"
+    ? allPoints
+    : window.matchHistoryChartModel?.thinHistoryPoints
+      ? window.matchHistoryChartModel.thinHistoryPoints(allPoints, maxPoints)
+      : allPoints;
+  const lastPosition = Number(allPoints.at(-1)?.position ?? allPoints.length - 1);
+  const xFor = (point, index) => {
+    const position = Number.isFinite(Number(point?.position)) ? Number(point.position) : index;
+    return lastPosition <= 0
+      ? padding.left + plotWidth / 2
+      : padding.left + (position / lastPosition) * plotWidth;
+  };
+  const yFor = (value) => padding.top + plotHeight - ((value - axisMin) / (axisMax - axisMin)) * plotHeight;
+
   context.textAlign = "right";
   context.textBaseline = "middle";
   context.fillStyle = "rgba(247,248,255,.62)";
@@ -420,8 +544,6 @@ function drawHistoryRatingChart(records, ratingType, canvas, emptyElement) {
     context.fillText(formatValue(value), padding.left - 5, y);
   });
 
-  const xFor = (index) => padding.left + (points.length === 1 ? plotWidth / 2 : (index / (points.length - 1)) * plotWidth);
-  const yFor = (value) => padding.top + plotHeight - ((value - axisMin) / (axisMax - axisMin)) * plotHeight;
   if (Number.isFinite(potentialRating)) {
     const potentialY = yFor(potentialRating);
     context.strokeStyle = potentialColor;
@@ -437,47 +559,69 @@ function drawHistoryRatingChart(records, ratingType, canvas, emptyElement) {
     context.fillText(`POTENTIAL ${ratingType} ${formatValue(potentialRating)}`, width - padding.right - 3, potentialY - 2);
   }
 
+  const finiteRuns = [];
+  let currentRun = [];
+  for (let index = 0; index < points.length; index += 1) {
+    const point = points[index];
+    if (hasFinitePointValue(point)) currentRun.push({ point, index });
+    else if (currentRun.length) {
+      finiteRuns.push(currentRun);
+      currentRun = [];
+    }
+  }
+  if (currentRun.length) finiteRuns.push(currentRun);
+
   const areaGradient = context.createLinearGradient(0, padding.top, 0, padding.top + plotHeight);
   areaGradient.addColorStop(0, "rgba(126,167,255,.34)");
   areaGradient.addColorStop(1, "rgba(126,167,255,.025)");
-  context.beginPath();
-  points.forEach((point, index) => {
-    const x = xFor(index);
-    const y = yFor(point.value);
-    if (index === 0) context.moveTo(x, y);
-    else context.lineTo(x, y);
-  });
-  context.lineTo(xFor(points.length - 1), padding.top + plotHeight);
-  context.lineTo(xFor(0), padding.top + plotHeight);
-  context.closePath();
-  context.fillStyle = areaGradient;
-  context.fill();
+  for (const run of finiteRuns) {
+    context.beginPath();
+    run.forEach(({ point, index }, runIndex) => {
+      const x = xFor(point, index);
+      const y = yFor(Number(point.value));
+      if (runIndex === 0) context.moveTo(x, y);
+      else context.lineTo(x, y);
+    });
+    const last = run.at(-1);
+    const first = run[0];
+    context.lineTo(xFor(last.point, last.index), padding.top + plotHeight);
+    context.lineTo(xFor(first.point, first.index), padding.top + plotHeight);
+    context.closePath();
+    context.fillStyle = areaGradient;
+    context.fill();
 
-  context.strokeStyle = color;
-  context.lineWidth = 2;
-  context.lineJoin = "round";
-  context.lineCap = "round";
-  context.beginPath();
+    context.strokeStyle = color;
+    context.lineWidth = 2;
+    context.lineJoin = "round";
+    context.lineCap = "round";
+    context.beginPath();
+    run.forEach(({ point, index }, runIndex) => {
+      const x = xFor(point, index);
+      const y = yFor(Number(point.value));
+      if (runIndex === 0) context.moveTo(x, y);
+      else context.lineTo(x, y);
+    });
+    context.stroke();
+  }
+
+  const labelIndexes = new Set();
+  const labelCount = Math.min(points.length, 7);
+  for (let labelIndex = 0; labelIndex < labelCount; labelIndex += 1) {
+    labelIndexes.add(Math.round((labelIndex * (points.length - 1)) / Math.max(1, labelCount - 1)));
+  }
   points.forEach((point, index) => {
-    const x = xFor(index);
-    const y = yFor(point.value);
-    if (index === 0) context.moveTo(x, y);
-    else context.lineTo(x, y);
+    if (!labelIndexes.has(index)) return;
+    context.fillStyle = "rgba(247,248,255,.66)";
+    context.textAlign = "center";
+    context.textBaseline = "top";
+    context.fillText(formatHistoryPeriodDate(point.dateKey), xFor(point, index), padding.top + plotHeight + 6);
   });
-  context.stroke();
-  points.forEach((point, index) => {
-    const x = xFor(index);
-    if (points.length <= 4 || index % Math.ceil(points.length / 4) === 0 || index === points.length - 1) {
-      const label = `#${point.match}`;
-      context.fillStyle = "rgba(247,248,255,.66)";
-      context.textAlign = "center";
-      context.textBaseline = "top";
-      context.fillText(label, x, padding.top + plotHeight + 6);
-    }
-  });
-  const lastPoint = points.at(-1);
-  const lastX = xFor(points.length - 1);
-  const lastY = yFor(lastPoint.value);
+
+  const lastFinite = [...points].reverse().find(hasFinitePointValue);
+  if (!lastFinite) return;
+  const lastIndex = points.lastIndexOf(lastFinite);
+  const lastX = xFor(lastFinite, lastIndex);
+  const lastY = yFor(Number(lastFinite.value));
   context.beginPath();
   context.arc(lastX, lastY, 4, 0, Math.PI * 2);
   context.fillStyle = "#07101f";
@@ -570,31 +714,11 @@ function renderRecentHistoryPreview(records) {
     elements.recentHistoryRatingHeader.textContent = playerRatingType || latestHistoryRatingType || "MR / LP";
   }
   body.replaceChildren();
-  const ratingDeltaFor = (record) => {
-    const ratingType = String(record?.ownRatingType || "").toUpperCase();
-    const rating = Number(record?.ownRating);
-    if (!Number.isFinite(rating) || !["MR", "LP"].includes(ratingType)) return null;
-    const characterId = Number(record?.characterId) || null;
-    const timestamp = Number(record?.playedAt ?? record?.uploadedAt) || 0;
-    const nextRecord = records
-      .filter((candidate) =>
-        String(candidate?.ownRatingType || "").toUpperCase() === ratingType &&
-        (Number(candidate?.characterId) || null) === characterId &&
-        Number(candidate?.playedAt ?? candidate?.uploadedAt) > timestamp &&
-        Number.isFinite(Number(candidate?.ownRating)))
-      .sort((a, b) => Number(a?.playedAt ?? a?.uploadedAt) - Number(b?.playedAt ?? b?.uploadedAt))[0];
-    let nextRating = Number(nextRecord?.ownRating);
-    if (!Number.isFinite(nextRating)) {
-      const playerCharacterId = Number(historyState.player?.characterId) || null;
-      if (playerCharacterId == null || playerCharacterId === characterId) {
-        nextRating = Number(ratingType === "MR" ? historyState.player?.mr : historyState.player?.lp);
-      }
-    }
-    return Number.isFinite(nextRating) ? Math.round(nextRating - rating) : null;
-  };
-  for (const record of recent) {
+  for (const [index, record] of recent.entries()) {
     const result = record.result === "win" ? "W" : record.result === "loss" ? "L" : "—";
-    const ratingDelta = ratingDeltaFor(record);
+    const ratingDelta = historyRatingDelta(record, records, historyState.player, {
+      useCurrentRating: index === 0,
+    });
     const row = document.createElement("tr");
     const values = [
       formatHistoryDate(record),
@@ -837,11 +961,13 @@ function renderHistoryState(nextState = historyState) {
       ? `(${potential.sampleCount} ${t("matchUnit", "Match")})`
       : "";
   }
-  elements.historyCount.textContent = `${records.length} ${t("matches", "MATCHES")}`;
+  const resultChart = historyResultChartModelFor(records);
+  drawHistoryResultChart(records, resultChart);
+  const displayedMatchCount = (resultChart?.buckets ?? [])
+    .reduce((total, bucket) => total + bucket.total, 0);
+  elements.historyCount.textContent = `${displayedMatchCount} ${t("matches", "MATCHES")}`;
   elements.historyEmpty.classList.toggle("hidden", records.length > 0);
-  drawHistoryResultChart(records);
-  drawHistoryRatingChart(records, "MR", elements.historyMrChart, elements.historyMrEmpty);
-  drawHistoryRatingChart(records, "LP", elements.historyLpChart, elements.historyLpEmpty);
+  renderHistoryRatingCharts(records);
   renderOpponentCharacterStats(records);
   const totalPages = Math.ceil(records.length / HISTORY_PAGE_SIZE);
   historyPage = totalPages ? Math.min(historyPage, totalPages - 1) : 0;
@@ -2084,6 +2210,38 @@ for (const input of [
     renderHistoryState();
   });
 }
+elements.historyRatingPeriod?.addEventListener("change", () => {
+  const mode = elements.historyRatingPeriod.value;
+  historyRatingPeriod = {
+    mode: ["all", "week"].includes(mode) ? mode : "all",
+    weekOffset: 0,
+    dateMode: normalizeHistoryRatingDateMode(historyRatingPeriod.dateMode),
+  };
+  renderHistoryRatingCharts(filteredHistoryRecords());
+});
+elements.historyRatingDateMode?.addEventListener("change", () => {
+  historyRatingPeriod = {
+    ...historyRatingPeriod,
+    dateMode: normalizeHistoryRatingDateMode(elements.historyRatingDateMode.value),
+  };
+  renderHistoryRatingCharts(filteredHistoryRecords());
+});
+elements.historyRatingWeekPrevious?.addEventListener("click", () => {
+  if (historyRatingPeriod.mode !== "week") return;
+  historyRatingPeriod = {
+    ...historyRatingPeriod,
+    weekOffset: historyRatingPeriod.weekOffset - 1,
+  };
+  renderHistoryRatingCharts(filteredHistoryRecords());
+});
+elements.historyRatingWeekNext?.addEventListener("click", () => {
+  if (historyRatingPeriod.mode !== "week") return;
+  historyRatingPeriod = {
+    ...historyRatingPeriod,
+    weekOffset: Math.min(0, historyRatingPeriod.weekOffset + 1),
+  };
+  renderHistoryRatingCharts(filteredHistoryRecords());
+});
 elements.historyPreviousButton?.addEventListener("click", () => {
   historyPage = Math.max(0, historyPage - 1);
   renderHistoryState();

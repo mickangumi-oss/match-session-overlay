@@ -21,13 +21,13 @@ Open the latest release and download the installer named `Match-Session-Overlay-
 
 For step-by-step instructions, see the [English usage guide](docs/usage.en.md).
 
-## What's new in v1.8.0
+## What's new in v1.9.0
 
-- The app logo has been refreshed, with more readable management-screen typography, spacing, and match-performance chart sizing.
-- Vertical overlays now keep long character rankings and rank movement easy to read.
-- Fixed the recent-match table so newly detected matches appear immediately while tracking.
+- The match-result trend now groups the latest seven played dates, with same-day wins and losses combined in one stacked bar.
+- MR/LP trends share controls for all-time or weekly views and played days or all calendar days, including week navigation.
+- The latest match's MR/LP change now uses the difference from the current value, and vertical rank labels align with the other metrics.
 
-See the [v1.8.0 release notes](https://github.com/mickangumi-oss/match-session-overlay/releases/tag/v1.8.0) for the installer checksum and security scan results.
+See the [v1.9.0 release notes](https://github.com/mickangumi-oss/match-session-overlay/releases/tag/v1.9.0) for the installer checksum and security scan results.
 
 ## What it can show
 
