@@ -47,7 +47,7 @@ Normal development baseline:
 4. Review the final diff and preserve unrelated worktree changes.
 5. If QA is followed by another source change, invalidate the result and rerun the affected QA.
 
-Release work must follow `docs/release-process.md`. Keep Codex Security, source checks, installer build, signed update manifest, secret scan, Defender, optional explicitly approved VirusTotal upload, SHA-256 comparison, and post-release download verification as separate gates. The pre-push hook may rebuild the installer, so hash and scan the final post-hook binary.
+Release work must follow `docs/release-process.md`. Keep Codex Security, source checks, installer build, signed update manifest, secret scan, Defender, mandatory VirusTotal public upload, SHA-256 comparison, and post-release download verification as separate gates. The pre-push hook may rebuild the installer, so hash and scan the final post-hook binary.
 
 ## Current backlog
 
