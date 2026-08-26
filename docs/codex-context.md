@@ -75,4 +75,13 @@ At the start of a new Match Session Overlay task:
 5. For normal low-risk implementation, OpenAI Luna implements, validates Qwen's read-only review, runs tests, and integrates the change. Sol handles only high-difficulty requirement/design decisions, final review, external publication, destructive changes, or other high-risk actions. Store only a short result (conclusion, `file:line`, diff, tests/exit code, unresolved items, or split plan) in the conversation; keep long logs in files.
 6. Store durable decisions here or in the relevant repository documentation instead of relying on conversation history.
 
+## Match専用のコンテキスト節約契約
+
+- このタスクは長い過去会話を正本にしない。開始時は本ファイル、依頼に直接関係するソース・テスト、必要なGit状態だけを読む。過去スレッド全文、既存の推論、無関係な変更履歴、巨大な生成物を再読しない。
+- `renderer.js`などの大きなファイルは全体をQwenへ渡さない。`rg`等で対象関数・状態遷移・回帰テストを絞り、必要なら固有run IDの一時フォルダへ非機密の最小スニペットだけを作る。一時物は検証後に削除する。
+- Qwen委任前に同じタスクのterminalから `C:\Users\zuga\AppData\Local\OpenWebUI\venv\Scripts\python.exe C:\Users\zuga\.codex\local-agents\qwen_delegate_cli.py status` を実行し、現行モデル名、更新日時、利用可能状態、コンテキスト上限を確認する。`qwen_local` MCPが見える場合も同じ確認を行う。
+- 通常のMatch実装は OpenAI Luna が編集・テスト・統合し、Qwenはread-onlyレビューを担当する。Qwen-lunaの編集は明示した機械的変更だけ、`output_paths`を必須とする。Qwen-terraは常にread-onlyとし、Solは高難度の要件・設計・公開・破壊的変更だけを担当する。
+- Qwenへの入力はシステム指示、タスク、選択ファイル、出力予約、安全余白の総量を見積もる。8,000未満はqwen-luna、8,000〜24,000は作業種別で選択、24,000〜48,000はqwen-terra、48,000超または安全予算超は生成せず分割案だけを受け取る。結果は800トークン以内に抑え、長いログはファイルへ保存する。
+- Qwenの結果だけで設計・統合・公開を確定しない。Lunaが実ファイル、diff、テスト終了コードを確認して採否を決める。Qwenが利用不能、同じ原因で2回失敗、または再検証コスト過大ならLunaが直接確認し、必要時だけTerraへ切り替える。
+
 Do not load or summarize the archived Match Session Overlay task unless this document and the repository are insufficient to answer a specific question.
