@@ -1,6 +1,6 @@
 # Codex context: Match Session Overlay
 
-Updated: 2026-08-25
+Updated: 2026-08-27
 
 この文書は、長いCodex会話を引き継がずに作業を再開するための短い正本である。新しいタスクは、過去タスク全文ではなく、この文書と変更対象ファイルだけを読む。
 
@@ -71,7 +71,8 @@ At the start of a new Match Session Overlay task:
 1. Read this file.
 2. Read only the source/tests directly relevant to the request.
 3. Verify live Git/release/deployment facts only when needed.
-4. Delegate bounded searches, repetitive checks, and read-only review to local Qwen when that reduces total tokens; Sol keeps requirements, final design decisions, edits integration, release actions, and final review.
-5. Store durable decisions here or in the relevant repository documentation instead of relying on conversation history.
+4. Before delegating to local Qwen, conservatively estimate the complete input: system instructions, task, selected files, and reserved output. Use `qwen-luna` below 8,000 tokens for small mechanical work, choose `qwen-luna` or `qwen-terra` from 8,000–24,000 by task type, use `qwen-terra` for 24,000–48,000, and split without generation above 48,000 or the model's safe budget. Check the current chat model name, modified time, availability, and context limit immediately before delegation; do not guess a stale model or use an embedding-only model. Pass only bounded `include_paths`; `qwen-luna` edits require explicit `output_paths`, and `qwen-terra` is read-only.
+5. For normal low-risk implementation, OpenAI Luna implements, validates Qwen's read-only review, runs tests, and integrates the change. Sol handles only high-difficulty requirement/design decisions, final review, external publication, destructive changes, or other high-risk actions. Store only a short result (conclusion, `file:line`, diff, tests/exit code, unresolved items, or split plan) in the conversation; keep long logs in files.
+6. Store durable decisions here or in the relevant repository documentation instead of relying on conversation history.
 
 Do not load or summarize the archived Match Session Overlay task unless this document and the repository are insufficient to answer a specific question.
