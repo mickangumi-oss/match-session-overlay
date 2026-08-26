@@ -463,12 +463,50 @@
           <article><span data-i18n="maxRating">MAX MR / LP</span><strong id="historyMaxRating">—</strong></article>
           <article><span id="historyPotentialLabel">POTENTIAL MR</span><strong id="historyPotentialRating">—</strong><small class="history-potential-sample" id="historyPotentialSample"></small></article>
         </div>
+        <section class="history-opponent-profile hidden" id="historyOpponentProfile" aria-live="polite" aria-labelledby="historyOpponentProfileTitle">
+          <header>
+            <span class="control-label" id="historyOpponentProfileTitle" data-i18n="historyOpponentProfile">OPPONENT PROFILE REFERENCE</span>
+            <span class="history-reference-badge" data-i18n="historyReferenceBadge">REFERENCE</span>
+          </header>
+          <div class="history-opponent-profile-state" id="historyOpponentProfileState"></div>
+          <div class="history-opponent-profile-grid" id="historyOpponentProfileGrid">
+            <div class="history-opponent-profile-field">
+              <span data-i18n="historyOpponentMatchCharacter">MATCH CHARACTER</span>
+              <strong id="historyOpponentMatchCharacter">—</strong>
+            </div>
+            <div class="history-opponent-profile-field">
+              <span data-i18n="historyOpponentMatchRating">MATCH-TIME MR / LP</span>
+              <strong id="historyOpponentMatchRating">—</strong>
+            </div>
+            <div class="history-opponent-profile-field">
+              <span data-i18n="historyOpponentRecord">LOCAL RECORD</span>
+              <strong id="historyOpponentRecord">—</strong>
+            </div>
+            <div class="history-opponent-profile-field">
+              <span id="historyOpponentCurrentRatingLabel" data-i18n="historyOpponentCurrentRating">CURRENT MR / LP</span>
+              <strong id="historyOpponentCurrentRating">—</strong>
+            </div>
+            <div class="history-opponent-profile-field">
+              <span id="historyOpponentPeakRatingLabel" data-i18n="historyOpponentPeakRating">PEAK MR / LP</span>
+              <strong id="historyOpponentPeakRating">—</strong>
+            </div>
+            <div class="history-opponent-profile-field history-opponent-profile-other">
+              <span id="historyOpponentOtherRatingLabel" data-i18n="historyOpponentOtherRating">OTHER CHARACTER</span>
+              <strong id="historyOpponentOtherCharacter">—</strong>
+              <small id="historyOpponentOtherRating">—</small>
+            </div>
+          </div>
+          <footer>
+            <span id="historyOpponentProfileAct">ACT —</span>
+            <span id="historyOpponentProfileRetrieved">—</span>
+          </footer>
+        </section>
         <div class="history-content">
           <section class="history-chart-card">
             <section class="history-result-card">
               <header><span class="control-label" data-i18n="resultTrend">MATCH RESULT TREND</span><span id="historyCount">0 MATCHES</span></header>
               <div class="history-chart-wrap"><canvas id="historyResultChart" aria-label="Match result trend"></canvas><p id="historyEmpty" data-i18n="historyEmpty">取得した対戦履歴はありません</p></div>
-              <div class="history-legend"><span><i class="legend-win"></i><span data-i18n="win">WIN</span></span><span><i class="legend-loss"></i><span data-i18n="loss">LOSS</span></span></div>
+              <div class="history-legend"><span><i class="legend-win"></i><span data-i18n="win">WIN</span></span><span><i class="legend-loss"></i><span data-i18n="loss">LOSS</span></span><span><i class="legend-draw"></i><span data-i18n="draw">DRAW</span></span></div>
             </section>
             <div class="history-rating-heading">
               <span class="control-label" data-i18n="ratingTrendHeading">MR / LP TREND</span>
@@ -510,7 +548,7 @@
               <header><span class="control-label" data-i18n="matchList">MATCH LIST</span></header>
               <div class="history-table-scroll">
                 <table class="history-match-table">
-                  <thead><tr><th data-i18n="date">DATE</th><th data-i18n="result">RESULT</th><th data-i18n="matchType">MODE</th><th data-i18n="myCharacter">MY CHARACTER</th><th data-i18n="rating">MY MR / LP</th><th data-i18n="opponent">OPPONENT</th><th data-i18n="opponentCharacter">OPPONENT CHARACTER</th><th data-i18n="opponentRating">OPPONENT MR / LP</th></tr></thead>
+                  <thead><tr><th data-i18n="date">DATE</th><th data-i18n="result">RESULT</th><th data-i18n="matchType">MODE</th><th data-i18n="myCharacter">MY CHARACTER</th><th data-i18n="rating">MY MR / LP</th><th data-i18n="opponent">OPPONENT</th><th data-i18n="opponentCharacter">OPPONENT CHARACTER</th><th data-i18n="opponentRating">OPPONENT MR / LP</th><th data-i18n="replayId">REPLAY ID</th></tr></thead>
                   <tbody id="historyTableBody"></tbody>
                 </table>
               </div>
@@ -559,6 +597,7 @@
     <script src="../history-opponent-character-stats.js"></script>
     <script src="../display-number-format.js"></script>
     <script src="../potential-rating.js"></script>
+    <script src="../history-current-rating.js"></script>
     <script src="./i18n.js"></script>
     <script src="./renderer.js"></script>
   </body>

@@ -36,6 +36,7 @@ const {
   snapshotCurrentCharacter,
   syncCurrentPlayerRatingState,
 } = require("./source-client");
+const { buildServiceDataUrl, buildServiceHomeUrl } = require("./service-url");
 const {
   MAX_CONSECUTIVE_FAILURES,
   POLL_JITTER_MAX_MS,
@@ -61,7 +62,7 @@ const {
 } = require("./stats-window-size");
 const { suggestedInitialLocale } = require("./initial-language");
 const { buildPresentationState } = require("./presentation-model");
-const { applyCurrentProfileRatings } = require("./history-current-rating");
+const { deriveHistoryRatingSeries } = require("./history-current-rating");
 const { potentialRatingValue } = require("./potential-rating");
 const {
   buildTrackerSessionPayload,
@@ -117,6 +118,11 @@ const {
 const { createUpdater } = require("./updater");
 const { createDebouncedAtomicWriter } = require("./debounced-atomic-writer");
 const { ServiceRequestScheduler } = require("./service-request-scheduler");
+const { fetchHistoryPagesConcurrently } = require("./history-page-fetch");
+const {
+  normalizeOpponentProfileContext,
+  setBoundedCacheEntry,
+} = require("./opponent-profile-context");
 const {
   assertUpdateAllowed,
   resolveUpdateRequirement,
@@ -310,11 +316,15 @@ const trackerSessionPath = path.join(userDataPath, "tracker-session.json");
 const matchHistoryDirectory = path.join(userDataPath, "match-history");
 const matchHistoryPath = path.join(userDataPath, "match-history.json");
 const MATCH_HISTORY_LIMIT = OWN_MATCH_HISTORY_LIMIT;
-// The battle log is paginated at ten entries per page. A manual import walks
-// at most ten pages (100 entries) through the existing request queue; live
-// polling intentionally remains a single-page request.
+// The battle log is paginated at ten entries per page. A manual import starts
+// all ten page requests together (100 entries maximum); live polling
+// intentionally remains a single-page request.
 const MATCH_HISTORY_PAGE_SIZE = 10;
 const MATCH_HISTORY_MAX_PAGES = 10;
+// History imports use the shared scheduler with an explicit zero start gap so
+// all ten pages can begin together. Non-history traffic keeps the normal
+// single-filed, rate-limited behavior.
+const MATCH_HISTORY_FETCH_CONCURRENCY = MATCH_HISTORY_MAX_PAGES;
 const MEDIAN_RATING_SAMPLE_LIMIT = 20;
 // Keep manual imports deliberately infrequent so the feature cannot be used
 // to poll the service repeatedly.
@@ -327,6 +337,15 @@ const HISTORY_PROFILE_LOOKUP_COOLDOWN_MS = 10 * 60 * 1000;
 // selection). Keep a short cache so a retry or character switch cannot turn
 // one polling cycle into a request burst.
 const PROFILE_REFRESH_COOLDOWN_MS = 90 * 1000;
+// Opponent profile references are fetched only when a history row is opened.
+// Keep a separate cache from the selected-player profile cache so opening a
+// row never changes the history target or tracker state.
+const OPPONENT_PROFILE_CONTEXT_COOLDOWN_MS = 5 * 60 * 1000;
+// The profile-reference IPC accepts renderer-selected tuples. Bound both the
+// waiting work and retained results so distinct untrusted keys cannot grow
+// scheduler backlog or process memory without limit.
+const OPPONENT_PROFILE_CONTEXT_MAX_IN_FLIGHT = 16;
+const OPPONENT_PROFILE_CONTEXT_MAX_CACHE_ENTRIES = 128;
 fs.mkdirSync(userDataPath, { recursive: true });
 fs.mkdirSync(sessionDataPath, { recursive: true });
 fs.mkdirSync(matchHistoryDirectory, { recursive: true });
@@ -364,6 +383,7 @@ let trackingSessionId = 0;
 const serviceRequestScheduler = new ServiceRequestScheduler({
   minStartGapMs: SERVICE_REQUEST_MIN_GAP_MS,
   maxPriorityBurst: 3,
+  maxConcurrent: MATCH_HISTORY_FETCH_CONCURRENCY,
 });
 let serviceRetryBlockedUntil = 0;
 let privateDataGeneration = 0;
@@ -408,8 +428,11 @@ const historyProfileLookupCache = new Map();
 const profileRefreshCache = new Map();
 const profileRefreshInFlight = new Map();
 const profileCharacterNameCache = new Map();
+const opponentProfileContextCache = new Map();
+const opponentProfileContextInFlight = new Map();
 let matchHistoryFetchInFlight = null;
 let matchHistoryFetchProgress = null;
+let matchHistoryFetchSummary = null;
 let historyViewPlayer = null;
 let historyViewPollTimer = null;
 let historyViewPollInFlight = false;
@@ -510,7 +533,7 @@ function serviceLocale() {
 }
 
 function serviceHome() {
-  return `${SERVICE_ORIGIN}/6/buckler/${serviceLocale()}`;
+  return buildServiceHomeUrl(SERVICE_ORIGIN, serviceLocale());
 }
 
 function buildProfileRefreshHint(previousPlayer, characterId) {
@@ -720,9 +743,9 @@ function normalizeStoredHistoryRecord(value) {
     characterId: finiteOrNull(value.characterId),
     ownRating,
     ownRatingType,
-    // MASTER battle logs and profiles can contain both values. Keep the
-    // existing primary MR/LP fields for every current UI surface, while these
-    // parallel values feed only the two history trend charts.
+    // MASTER battle logs can contain both values. Keep both match-time
+    // snapshots, but derive any official-current replacement in memory rather
+    // than writing it back into this persisted record.
     ownMr: finiteOrNull(
       value.ownMr ?? value.mr ?? (ownRatingType === "MR" ? ownRating : null),
     ),
@@ -885,10 +908,25 @@ function activeHistoryProfileId() {
   );
 }
 
+function historyProfilePlayer(profileId, preferredPlayer = null) {
+  const normalizedProfileId = normalizeHistoryProfileId(profileId);
+  if (!normalizedProfileId) return null;
+  return [
+    preferredPlayer,
+    historyViewPlayer,
+    trackerState.player,
+    authenticatedPlayer,
+  ].find(
+    (candidate) =>
+      normalizeHistoryProfileId(candidate?.profileId ?? candidate?.userCode) ===
+      normalizedProfileId,
+  ) ?? null;
+}
+
 function mergeMatchHistory(
   replays,
   profileId,
-  { persist = true } = {},
+  { persist = true, notify = true } = {},
 ) {
   const normalizedProfileId = normalizeHistoryProfileId(profileId);
   if (!normalizedProfileId || !Array.isArray(replays)) return false;
@@ -924,18 +962,7 @@ function mergeMatchHistory(
   store.records = retained;
   bumpHistoryRevision(normalizedProfileId);
   if (persist) persistMatchHistoryStore(normalizedProfileId, store);
-  sendHistoryState();
-  return true;
-}
-
-function applyCurrentProfileRatingsToHistory(player, { replayIds = [] } = {}) {
-  const profileId = normalizeHistoryProfileId(player?.profileId ?? player?.userCode);
-  if (!profileId) return false;
-  const store = loadMatchHistoryStore(profileId);
-  if (!applyCurrentProfileRatings(store.records, player, { replayIds })) return false;
-  bumpHistoryRevision(profileId);
-  persistMatchHistoryStore(profileId, store);
-  sendHistoryState();
+  if (notify) sendHistoryState();
   return true;
 }
 
@@ -982,6 +1009,10 @@ function publicHistoryState(
     matchHistoryFetchProgress?.profileId === normalizedProfileId
       ? matchHistoryFetchProgress
       : null;
+  const fetchSummary =
+    matchHistoryFetchSummary?.profileId === normalizedProfileId
+      ? matchHistoryFetchSummary
+      : null;
   return {
     records: store.records,
     count: store.records.length,
@@ -996,9 +1027,11 @@ function publicHistoryState(
       !fetchProgress &&
       Date.now() >= nextAllowedAt,
     fetching: Boolean(fetchProgress),
-    fetchPage: fetchProgress?.page ?? 0,
+    fetchPage: fetchProgress?.completedPages ?? fetchProgress?.page ?? 0,
+    fetchCompletedPages: fetchProgress?.completedPages ?? 0,
     fetchMaxPages: fetchProgress?.maxPages ?? MATCH_HISTORY_MAX_PAGES,
     fetchedCount: fetchProgress?.fetchedCount ?? 0,
+    fetchSummary,
     cooldownSeconds: Math.max(0, Math.ceil((nextAllowedAt - Date.now()) / 1000)),
     polling: Boolean(historyViewPlayer && historyViewPollingActive),
     pollNextAt: historyViewPlayer ? historyViewNextPollAt : null,
@@ -1013,6 +1046,30 @@ function sendHistoryState() {
   const state = publicHistoryState();
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send("history:state", state);
+  }
+}
+
+// Import progress is intentionally a lightweight event. The renderer updates
+// only the acquisition status/progress bar for these messages; the history
+// list, summaries, and charts are redrawn from a full history:state message
+// when the batch reaches a terminal state.
+function sendHistoryFetchProgress() {
+  const state = publicHistoryState();
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send("history:progress", {
+      profileId: state.profileId,
+      fetching: state.fetching,
+      fetchPage: state.fetchPage,
+      fetchCompletedPages: state.fetchCompletedPages,
+      fetchMaxPages: state.fetchMaxPages,
+      fetchedCount: state.fetchedCount,
+      fetchSummary: state.fetchSummary,
+      authenticated: state.authenticated,
+      canFetch: state.canFetch,
+      lastFetchedAt: state.lastFetchedAt,
+      nextAllowedAt: state.nextAllowedAt,
+      cooldownSeconds: state.cooldownSeconds,
+    });
   }
 }
 
@@ -1111,11 +1168,6 @@ async function runHistoryViewPoll(sessionId) {
       historyViewPlayer = await refreshProfilePlayer(playerHint, {
         force: true,
         priority: "live",
-      });
-      applyCurrentProfileRatingsToHistory(historyViewPlayer, {
-        replayIds: newReplays
-          .filter((replay) => replay.matchType === "ranked")
-          .map((replay) => replay.replayId),
       });
     }
     historyViewConsecutiveFailures = 0;
@@ -1219,7 +1271,7 @@ function publicMedianRating(sourceState) {
     sourceState?.characterId ?? sourceState?.player?.characterId ?? authenticatedPlayer?.characterId,
   ) || null;
   let values = profileId
-    ? rankedHistorySeries(profileId, characterId, ratingType).values
+    ? rankedHistorySeries(profileId, characterId, ratingType, sourceState?.player).values
         .slice(-MEDIAN_RATING_SAMPLE_LIMIT)
     : [];
   if (values.length < 2) {
@@ -1242,29 +1294,41 @@ function publicMedianRating(sourceState) {
   };
 }
 
-function rankedHistorySeries(profileId, characterId, ratingType) {
+function rankedHistorySeries(profileId, characterId, ratingType, preferredPlayer = null) {
   const normalizedProfileId = normalizeHistoryProfileId(profileId);
   if (!normalizedProfileId) return { records: [], values: [] };
   const normalizedCharacterId = Number(characterId) || null;
   const normalizedRatingType = ratingType === "LP" ? "LP" : "MR";
-  const cacheKey = `${historyRevision(normalizedProfileId)}:${normalizedCharacterId ?? "all"}:${normalizedRatingType}`;
+  const player = historyProfilePlayer(normalizedProfileId, preferredPlayer);
+  const cacheKey = [
+    historyRevision(normalizedProfileId),
+    normalizedCharacterId ?? "all",
+    normalizedRatingType,
+    String(player?.ratingSource ?? ""),
+    Number(player?.profileUpdatedAt) || 0,
+    Number(player?.characterId) || 0,
+    Number(normalizedRatingType === "LP" ? player?.lp : player?.mr) || 0,
+  ].join(":");
   const cached = historyDerivedCache.get(normalizedProfileId);
   if (cached?.key === cacheKey) return cached.value;
-  const records = loadMatchHistoryStore(normalizedProfileId).records
+  const rawRecords = loadMatchHistoryStore(normalizedProfileId).records
     .filter(
       (record) =>
         record.matchType === "ranked" &&
-        record.ownRatingType === normalizedRatingType &&
-        Number.isFinite(Number(record.ownRating)) &&
-        (normalizedRatingType !== "LP" || Number(record.ownRating) > 0) &&
         (normalizedCharacterId == null || Number(record.characterId) === normalizedCharacterId),
     )
     .sort(
       (a, b) => Number(a.playedAt ?? a.uploadedAt) - Number(b.playedAt ?? b.uploadedAt),
     );
+  const derived = deriveHistoryRatingSeries(
+    rawRecords,
+    player,
+    normalizedRatingType,
+    { characterId: normalizedCharacterId },
+  );
   const value = {
-    records,
-    values: records.map((record) => Number(record.ownRating)),
+    records: derived.records,
+    values: derived.values,
   };
   historyDerivedCache.set(normalizedProfileId, { key: cacheKey, value });
   return value;
@@ -1279,7 +1343,7 @@ function publicGraphData(sourceState) {
   ) || null;
   const ratingType = sourceState?.ratingType === "LP" ? "LP" : "MR";
   const localSeries = profileId
-    ? rankedHistorySeries(profileId, characterId, ratingType)
+    ? rankedHistorySeries(profileId, characterId, ratingType, sourceState?.player)
     : { records: [], values: [] };
   const localRecords = localSeries.records;
   if (localRecords.length) {
@@ -2013,6 +2077,7 @@ function updateDisplaySettings(
     initialLanguageSelectionRequired = false;
   }
   if (previousLocale !== displaySettings.locale) {
+    matchHistoryFetchSummary = null;
     // The Next.js build id and data route are locale-scoped. Do not reuse a
     // build id fetched from the previous language after a locale switch.
     buildId = null;
@@ -3186,6 +3251,7 @@ async function clearPrivateDataWithConfirmation() {
   stopSocialRefresh();
   matchHistoryFetchInFlight = null;
   matchHistoryFetchProgress = null;
+  matchHistoryFetchSummary = null;
   authenticationInFlight = null;
   localeRefreshInFlight = null;
   buildIdInFlight = null;
@@ -3206,6 +3272,8 @@ async function clearPrivateDataWithConfirmation() {
   profileRefreshCache.clear();
   profileRefreshInFlight.clear();
   profileCharacterNameCache.clear();
+  opponentProfileContextCache.clear();
+  opponentProfileContextInFlight.clear();
   rankingCache.clear();
   rankingInFlight.clear();
   clearAllRankingRetryTimers();
@@ -3316,7 +3384,13 @@ function fetchServiceWithRateLimit(
         socialServiceAbortControllers.delete(controller);
       }
     },
-    { priority, scope, generation },
+    {
+      priority,
+      scope,
+      generation,
+      allowConcurrent: scope === "history",
+      startGapMs: scope === "history" ? 0 : undefined,
+    },
   );
 }
 
@@ -3324,14 +3398,17 @@ async function loadBuildId(
   force = false,
   requestScope = null,
   requestPriority = "interactive",
+  localeOverride = null,
 ) {
   const generation = privateDataGeneration;
-  const requestedLocale = serviceLocale();
+  const requestedLocale = LOCALE_KEYS.has(String(localeOverride))
+    ? String(localeOverride)
+    : serviceLocale();
   if (buildId && buildIdLocale === requestedLocale && !force) return buildId;
   if (buildIdInFlight?.locale === requestedLocale) return buildIdInFlight.promise;
   const request = (async () => {
     const response = await fetchServiceWithRateLimit(
-      `${SERVICE_ORIGIN}/6/buckler/${requestedLocale}`,
+      buildServiceHomeUrl(SERVICE_ORIGIN, requestedLocale),
       {
         credentials: "include",
         redirect: "follow",
@@ -3369,23 +3446,30 @@ async function fetchServiceJson(
   retry = true,
   requestScope = null,
   requestPriority = "interactive",
+  localeOverride = null,
 ) {
-  const currentBuildId = await loadBuildId(false, requestScope, requestPriority);
+  const requestedLocale = LOCALE_KEYS.has(String(localeOverride))
+    ? String(localeOverride)
+    : serviceLocale();
+  const currentBuildId = await loadBuildId(
+    false,
+    requestScope,
+    requestPriority,
+    requestedLocale,
+  );
   if (requestScope === "social" && socialSuspended) {
     throw new Error("SOCIAL_REFRESH_SUSPENDED");
   }
-  const url = new URL(
-    `/6/buckler/_next/data/${currentBuildId}/${serviceLocale()}/${relativePath}`,
+  const url = buildServiceDataUrl(
     SERVICE_ORIGIN,
+    currentBuildId,
+    requestedLocale,
+    relativePath,
+    query,
   );
-  for (const [key, value] of Object.entries(query)) {
-    if (value != null && value !== "") {
-      url.searchParams.set(key, String(value));
-    }
-  }
 
   const response = await fetchServiceWithRateLimit(
-    url.toString(),
+    url,
     {
       credentials: "include",
       redirect: "follow",
@@ -3400,7 +3484,7 @@ async function fetchServiceJson(
 
   if (response.status === 404 && retry) {
     if (buildId === currentBuildId) {
-      await loadBuildId(true, requestScope, requestPriority);
+      await loadBuildId(true, requestScope, requestPriority, requestedLocale);
     }
     return fetchServiceJson(
       relativePath,
@@ -3408,6 +3492,7 @@ async function fetchServiceJson(
       false,
       requestScope,
       requestPriority,
+      requestedLocale,
     );
   }
   if (
@@ -4267,6 +4352,132 @@ async function refreshProfilePlayer(
   });
 }
 
+function emptyOpponentProfileContext({
+  profileId = null,
+  characterId = null,
+  characterDisplayName = "",
+  status = "empty",
+  retrievedAt = null,
+} = {}) {
+  return {
+    status,
+    profileId: profileId == null ? null : String(profileId),
+    retrievedAt: Number.isFinite(Number(retrievedAt)) ? Number(retrievedAt) : null,
+    act: null,
+    targetCharacter: {
+      characterId: Number(characterId) > 0 ? Number(characterId) : null,
+      characterDisplayName: String(characterDisplayName ?? "").slice(0, 80),
+      peakRating: null,
+      currentRating: null,
+    },
+    otherCharacter: null,
+  };
+}
+
+async function fetchHistoryOpponentContext({
+  profileId,
+  opponentUserCode,
+  characterId,
+  characterDisplayName,
+} = {}) {
+  ensureUpdateAllowed();
+  const normalizedProfileId = normalizeHistoryProfileId(profileId ?? opponentUserCode);
+  const normalizedCharacterId = Number(characterId) > 0 ? Number(characterId) : null;
+  if (!normalizedProfileId || normalizedCharacterId == null) {
+    return emptyOpponentProfileContext({
+      profileId: normalizedProfileId,
+      characterId: normalizedCharacterId,
+      characterDisplayName,
+    });
+  }
+
+  const generation = privateDataGeneration;
+  const requestedLocale = serviceLocale();
+  // The current Act is a separate cache scope. A future historical-Act view
+  // can add another explicit Act key without changing this request path.
+  const cacheKey = `${requestedLocale}:${normalizedProfileId}:current:${normalizedCharacterId}`;
+  const now = Date.now();
+  const cached = opponentProfileContextCache.get(cacheKey);
+  if (
+    cached &&
+    Number.isFinite(Number(cached.fetchedAt)) &&
+    now - Number(cached.fetchedAt) < OPPONENT_PROFILE_CONTEXT_COOLDOWN_MS
+  ) {
+    return cached.context;
+  }
+
+  // shareInFlightRequest de-duplicates identical tuples, but a renderer can
+  // still submit distinct tuples. Refuse new work once the bounded admission
+  // window is full; the existing UI renders this as a card-local error.
+  if (
+    !opponentProfileContextInFlight.has(cacheKey) &&
+    opponentProfileContextInFlight.size >= OPPONENT_PROFILE_CONTEXT_MAX_IN_FLIGHT
+  ) {
+    return emptyOpponentProfileContext({
+      profileId: normalizedProfileId,
+      characterId: normalizedCharacterId,
+      characterDisplayName,
+      status: "error",
+    });
+  }
+
+  return shareInFlightRequest(
+    opponentProfileContextInFlight,
+    cacheKey,
+    async () => {
+      const retrievedAt = Date.now();
+      try {
+        const data = await fetchServiceJson(
+          `profile/${encodeURIComponent(normalizedProfileId)}.json`,
+          {},
+          true,
+          "history",
+          "interactive",
+          requestedLocale,
+        );
+        assertPrivateDataGeneration(generation);
+        if (requestedLocale !== serviceLocale()) {
+          return emptyOpponentProfileContext({
+            profileId: normalizedProfileId,
+            characterId: normalizedCharacterId,
+            characterDisplayName,
+          });
+        }
+        const context = normalizeOpponentProfileContext(data, {
+          profileId: normalizedProfileId,
+          characterId: normalizedCharacterId,
+          characterDisplayName,
+          retrievedAt,
+        });
+        setBoundedCacheEntry(
+          opponentProfileContextCache,
+          cacheKey,
+          { fetchedAt: retrievedAt, context },
+          OPPONENT_PROFILE_CONTEXT_MAX_CACHE_ENTRIES,
+        );
+        return context;
+      } catch (error) {
+        if (error?.message === "PRIVATE_DATA_CLEARED") throw error;
+        // A profile-reference failure must never replace the already-rendered
+        // match history. The renderer receives a card-local error state.
+        const context = emptyOpponentProfileContext({
+          profileId: normalizedProfileId,
+          characterId: normalizedCharacterId,
+          characterDisplayName,
+          status: "error",
+        });
+        setBoundedCacheEntry(
+          opponentProfileContextCache,
+          cacheKey,
+          { fetchedAt: retrievedAt, context },
+          OPPONENT_PROFILE_CONTEXT_MAX_CACHE_ENTRIES,
+        );
+        return context;
+      }
+    },
+  );
+}
+
 async function refreshTrackedPlayerForLocale() {
   if (!trackerState.player && !historyViewPlayer && !authenticatedPlayer) return;
   if (localeRefreshInFlight) return localeRefreshInFlight;
@@ -4336,13 +4547,19 @@ async function fetchRankedReplaysPage(
   profileId,
   page = 1,
   priority = "live",
+  requestScope = null,
+  localeOverride = null,
 ) {
+  const requestedLocale = LOCALE_KEYS.has(String(localeOverride))
+    ? String(localeOverride)
+    : serviceLocale();
   const data = await fetchServiceJson(
     `profile/${encodeURIComponent(profileId)}/battlelog.json`,
     { page },
     true,
-    null,
+    requestScope,
     priority,
+    requestedLocale,
   );
   const rawReplays = Array.isArray(data?.pageProps?.replay_list)
     ? data.pageProps.replay_list
@@ -4359,23 +4576,33 @@ async function fetchRankedReplays(profileId) {
   return (await fetchRankedReplaysPage(profileId, 1)).replays;
 }
 
-async function fetchMatchHistoryPages(profileId, onPage = null) {
-  const replays = [];
-  for (let page = 1; page <= MATCH_HISTORY_MAX_PAGES; page += 1) {
-    const result = await fetchRankedReplaysPage(profileId, page, "history");
-    replays.push(...result.replays);
-    if (typeof onPage === "function") {
-      await onPage({ ...result, page, replays: [...result.replays] });
-    }
-    if (result.rawCount < MATCH_HISTORY_PAGE_SIZE) break;
-  }
-  return replays;
+async function fetchMatchHistoryPages(
+  profileId,
+  onPage = null,
+  localeOverride = null,
+) {
+  return fetchHistoryPagesConcurrently(
+    (page) => fetchRankedReplaysPage(
+      profileId,
+      page,
+      "history",
+      "history",
+      localeOverride,
+    ),
+    {
+      maxPages: MATCH_HISTORY_MAX_PAGES,
+      pageSize: MATCH_HISTORY_PAGE_SIZE,
+      concurrency: MATCH_HISTORY_FETCH_CONCURRENCY,
+      onPage,
+    },
+  );
 }
 
 async function fetchLocalMatchHistory() {
   ensureUpdateAllowed();
   if (matchHistoryFetchInFlight) return matchHistoryFetchInFlight;
   const generation = privateDataGeneration;
+  const requestedLocale = serviceLocale();
   const now = Date.now();
   const profileId = activeHistoryProfileId();
   const store = loadMatchHistoryStore(profileId);
@@ -4389,72 +4616,164 @@ async function fetchLocalMatchHistory() {
   }
 
   const request = (async () => {
-    const player =
-      historyViewPlayer ?? trackerState.player ?? (await checkAuthentication()).player;
-    assertPrivateDataGeneration(generation);
-    if (!player?.profileId) throw new Error("SERVICE_SELF_NOT_FOUND");
-    // Manual imports walk the paginated battle log. Live tracking continues to
-    // use one page per poll, so enabling history does not multiply polling
-    // traffic.
-    const existing = loadMatchHistoryStore(player.profileId);
-    const previousReplayIds = new Set(
-      existing.records.map((record) => record.replayId),
-    );
     let fetchedCount = 0;
+    let completedPages = 0;
+    let pagesWithData = 0;
     let newReplayCount = 0;
-    matchHistoryFetchProgress = {
-      profileId: player.profileId,
-      page: 0,
-      maxPages: MATCH_HISTORY_MAX_PAGES,
-      fetchedCount: 0,
-    };
-    sendHistoryState();
-    await fetchMatchHistoryPages(player.profileId, async ({ page, replays }) => {
+    let summaryProfileId = profileId;
+    let fetchTerminalStateSent = false;
+    try {
+      let player =
+        historyViewPlayer ?? trackerState.player ?? (await checkAuthentication()).player;
       assertPrivateDataGeneration(generation);
-      fetchedCount += replays.length;
-      for (const replay of replays) {
-        if (replay.replayId && !previousReplayIds.has(replay.replayId)) {
-          previousReplayIds.add(replay.replayId);
-          newReplayCount += 1;
-        }
-      }
+      if (!player?.profileId) throw new Error("SERVICE_SELF_NOT_FOUND");
+      summaryProfileId = player.profileId;
+      // Manual imports start all ten battle-log page requests together. Live
+      // tracking continues to use one page per poll, so enabling history does
+      // not multiply polling traffic.
+      const existing = loadMatchHistoryStore(player.profileId);
+      const previousReplayIds = new Set(
+        existing.records.map((record) => record.replayId),
+      );
+      matchHistoryFetchSummary = null;
       matchHistoryFetchProgress = {
         profileId: player.profileId,
-        page,
+        page: 0,
+        completedPages: 0,
+        maxPages: MATCH_HISTORY_MAX_PAGES,
+        fetchedCount: 0,
+      };
+      sendHistoryState();
+      await fetchMatchHistoryPages(
+        player.profileId,
+        async ({ rawCount, completedPages: completedPageCount, replays }) => {
+          assertPrivateDataGeneration(generation);
+          if (serviceLocale() !== requestedLocale) {
+            throw new Error("HISTORY_LOCALE_CHANGED");
+          }
+          fetchedCount += replays.length;
+          completedPages = Math.max(completedPages, Number(completedPageCount) || 0);
+          if (Number(rawCount) > 0) pagesWithData += 1;
+          for (const replay of replays) {
+            if (replay.replayId && !previousReplayIds.has(replay.replayId)) {
+              previousReplayIds.add(replay.replayId);
+              newReplayCount += 1;
+            }
+          }
+          matchHistoryFetchProgress = {
+            profileId: player.profileId,
+            // Requests complete out of order; expose the number of completed
+            // pages rather than the highest page number.
+            page: completedPages,
+            completedPages,
+            maxPages: MATCH_HISTORY_MAX_PAGES,
+            fetchedCount,
+          };
+          // Merge each successful page in memory so a later failure can retain
+          // the partial result, but defer the history UI redraw until the
+          // complete import result is ready.
+          mergeMatchHistory(replays, player.profileId, {
+            persist: false,
+            notify: false,
+          });
+          sendHistoryFetchProgress();
+        },
+        requestedLocale,
+      );
+      assertPrivateDataGeneration(generation);
+      if (serviceLocale() !== requestedLocale) {
+        throw new Error("HISTORY_LOCALE_CHANGED");
+      }
+      const fetchedStore = loadMatchHistoryStore(player.profileId);
+      fetchedStore.lastFetchedAt = Date.now();
+      persistMatchHistoryStore(player.profileId, fetchedStore);
+      matchHistoryFetchSummary = {
+        profileId: player.profileId,
+        status: "complete",
+        completedPages,
+        pages: pagesWithData,
         maxPages: MATCH_HISTORY_MAX_PAGES,
         fetchedCount,
+        completedAt: Date.now(),
       };
-      // Publish every page immediately so the renderer updates its summary,
-      // charts, and table. Disk writes are intentionally deferred until the
-      // import completes so progressive display does not block the next page.
-      const changed = mergeMatchHistory(replays, player.profileId, {
-        persist: false,
-      });
-      if (!changed) sendHistoryState();
-      sendTrackerState({ persist: false });
-    });
-    assertPrivateDataGeneration(generation);
-    const fetchedStore = loadMatchHistoryStore(player.profileId);
-    fetchedStore.lastFetchedAt = Date.now();
-    persistMatchHistoryStore(player.profileId, fetchedStore);
-    applyCurrentProfileRatingsToHistory(player);
-    if (
-      historyViewPlayer &&
-      historyViewPlayer.profileId === player.profileId &&
-      newReplayCount > 0
-    ) {
-      historyViewLastNewMatchAt = Date.now();
+      // The page batch is complete even if optional profile refresh or disk
+      // flushing takes longer. End the loading state now and publish one full
+      // history snapshot; later work must not turn this terminal state back
+      // into an in-progress indicator.
+      matchHistoryFetchProgress = null;
+      fetchTerminalStateSent = true;
+      sendHistoryState();
+      const latestMatchTimestamp = fetchedStore.records
+        .filter(
+          (record) =>
+            record.matchType === "ranked" &&
+            Number(record.characterId) === Number(player.characterId),
+        )
+        .map((record) => Number(record.playedAt ?? record.uploadedAt) || 0)
+        .reduce((latest, timestamp) => Math.max(latest, timestamp), 0);
+      if (
+        newReplayCount > 0 &&
+        latestMatchTimestamp > 0 &&
+        Number(player.profileUpdatedAt) < latestMatchTimestamp
+      ) {
+        player = await refreshProfilePlayer(player, {
+          force: true,
+          priority: "live",
+        });
+        assertPrivateDataGeneration(generation);
+        if (historyViewPlayer?.profileId === player.profileId) historyViewPlayer = player;
+        if (authenticatedPlayer?.profileId === player.profileId) authenticatedPlayer = player;
+        if (trackerState.player?.profileId === player.profileId) trackerState.player = player;
+        sendHistoryState();
+      }
+      if (
+        historyViewPlayer &&
+        historyViewPlayer.profileId === player.profileId &&
+        newReplayCount > 0
+      ) {
+        historyViewLastNewMatchAt = Date.now();
+      }
+      if (historyViewPlayer && historyViewPlayer.profileId === player.profileId) {
+        startHistoryViewPolling({ resetActivity: false });
+      }
+      sendTrackerState();
+      await Promise.allSettled([
+        persistedDataWriter.flush(historyStorePath(player.profileId)),
+        persistedDataWriter.flush(trackerSessionPath),
+      ]);
+      return publicHistoryState(player.profileId);
+    } catch (error) {
+      // Keep any pages that completed before the failure available after a
+      // restart as well as in the current in-memory view. Private-data
+      // clearing is the one boundary where no partial write is allowed.
+      if (
+        !privateDataClearing &&
+        completedPages > 0 &&
+        error?.message !== "PRIVATE_DATA_CLEARED" &&
+        summaryProfileId
+      ) {
+        persistMatchHistoryStore(summaryProfileId);
+        await persistedDataWriter
+          .flush(historyStorePath(summaryProfileId))
+          .catch(() => {});
+      }
+      if (
+        !fetchTerminalStateSent &&
+        !["PRIVATE_DATA_CLEARED", "HISTORY_LOCALE_CHANGED"].includes(error?.message) &&
+        summaryProfileId
+      ) {
+        matchHistoryFetchSummary = {
+          profileId: summaryProfileId,
+          status: "error",
+          completedPages,
+          pages: pagesWithData,
+          maxPages: MATCH_HISTORY_MAX_PAGES,
+          fetchedCount,
+          completedAt: Date.now(),
+        };
+      }
+      throw error;
     }
-    if (historyViewPlayer && historyViewPlayer.profileId === player.profileId) {
-      startHistoryViewPolling({ resetActivity: false });
-    }
-    sendHistoryState();
-    sendTrackerState();
-    await Promise.allSettled([
-      persistedDataWriter.flush(historyStorePath(player.profileId)),
-      persistedDataWriter.flush(trackerSessionPath),
-    ]);
-    return publicHistoryState(player.profileId);
   })();
   matchHistoryFetchInFlight = request;
   try {
@@ -4499,11 +4818,11 @@ async function selectHistoryProfile(userCode) {
     // the same target is selected repeatedly. New ranked matches, character
     // changes, and locale changes still use their force-refresh paths.
     nextHistoryViewPlayer = await refreshProfilePlayer(nextHistoryViewPlayer);
-    applyCurrentProfileRatingsToHistory(nextHistoryViewPlayer);
     assertPrivateDataGeneration(generation);
   }
   assertPrivateDataGeneration(generation);
   stopHistoryViewPolling();
+  matchHistoryFetchSummary = null;
   historyViewPlayer = nextHistoryViewPlayer;
   if (historyViewPlayer) {
     const selectedProfileId = normalizeHistoryProfileId(historyViewPlayer.profileId);
@@ -4525,6 +4844,7 @@ async function selectHistoryProfile(userCode) {
 async function clearHistoryProfileSelection() {
   ensureUpdateAllowed();
   stopHistoryViewPolling();
+  matchHistoryFetchSummary = null;
   historyViewPlayer = null;
   sendHistoryState();
   sendTrackerState();
@@ -4542,14 +4862,24 @@ async function startTrackingInternal(player) {
   stopPolling();
   const replays = await fetchRankedReplays(player.profileId);
   if (sessionId !== trackingSessionId) return publicTrackerState();
+  const latestReplayTimestamp = replays
+    .filter(
+      (replay) =>
+        replay.matchType === "ranked" &&
+        Number(replay.characterId) === Number(player.characterId),
+    )
+    .map((replay) => Number(replay.playedAt ?? replay.uploadedAt) || 0)
+    .reduce((latest, timestamp) => Math.max(latest, timestamp), 0);
+  if (
+    latestReplayTimestamp > 0 &&
+    Number(player.profileUpdatedAt) < latestReplayTimestamp
+  ) {
+    player = await refreshProfilePlayer(player, { force: true, priority: "live" });
+    if (sessionId !== trackingSessionId) return publicTrackerState();
+  }
   // Keep the existing session counter semantics while also enriching the
   // local history when the tracker already made this request.
   mergeMatchHistory(replays, player.profileId);
-  applyCurrentProfileRatingsToHistory(player, {
-    replayIds: replays
-      .filter((replay) => replay.matchType === "ranked")
-      .map((replay) => replay.replayId),
-  });
   const now = Date.now();
 
   if (resumable) {
@@ -4755,9 +5085,6 @@ async function refreshTracking(sessionId = trackingSessionId) {
       return publicTrackerState();
     }
     trackerState.player = refreshedPlayer;
-    applyCurrentProfileRatingsToHistory(refreshedPlayer, {
-      replayIds: newRankedReplays.map((replay) => replay.replayId),
-    });
     trackerState = syncCurrentPlayerRatingState(
       trackerState,
       refreshedPlayer,
@@ -4946,6 +5273,10 @@ function registerIpcHandlers() {
   ipcMain.handle(
     "history:clear-profile",
     resultHandler(() => clearHistoryProfileSelection()),
+  );
+  ipcMain.handle(
+    "history:opponent-context",
+    resultHandler((payload) => fetchHistoryOpponentContext(payload)),
   );
   ipcMain.handle(
     "social:state",

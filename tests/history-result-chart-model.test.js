@@ -7,6 +7,8 @@ const {
   buildHistoryRatingPeriod,
   buildHistoryRatingSeries,
   buildSevenDayResultChart,
+  dateKeyForHistoryRecord,
+  dateKeyForTimestamp,
   filterHistoryRatingRecords,
   thinHistoryPoints,
 } = require("../src/history-chart-model");
@@ -187,4 +189,51 @@ test("result chart returns only existing dates when fewer than seven are availab
   assert.equal(chart.slotCount, 2);
   assert.equal(chart.startDateKey, "2026-08-09");
   assert.equal(chart.endDateKey, "2026-08-12");
+});
+
+test("result chart keeps JST late-night and after-midnight matches on separate dates", () => {
+  const lateNightStart = Date.UTC(2026, 7, 25, 14, 48, 0);
+  const beforeMidnight = Date.UTC(2026, 7, 25, 14, 59, 59);
+  const afterMidnight = Date.UTC(2026, 7, 25, 15, 0, 0);
+  const firstVisibleAfterMidnight = Date.UTC(2026, 7, 25, 15, 2, 0);
+  assert.equal(dateKeyForTimestamp(lateNightStart), "2026-08-25");
+  assert.equal(dateKeyForTimestamp(beforeMidnight), "2026-08-25");
+  assert.equal(dateKeyForTimestamp(afterMidnight), "2026-08-26");
+  assert.equal(dateKeyForTimestamp(firstVisibleAfterMidnight), "2026-08-26");
+  assert.equal(dateKeyForHistoryRecord({ playedAt: beforeMidnight }), "2026-08-25");
+  assert.equal(dateKeyForHistoryRecord({ uploadedAt: afterMidnight / 1000 }), "2026-08-26");
+
+  const records = [
+    { playedAt: beforeMidnight, result: "loss" },
+    { playedAt: afterMidnight, result: "win" },
+    { playedAt: Date.UTC(2026, 7, 25, 15, 8, 0), result: "loss" },
+    { playedAt: Date.UTC(2026, 7, 25, 15, 11, 0), result: "win" },
+  ];
+  const chart = buildSevenDayResultChart(records.map((record) => ({
+    dateKey: dateKeyForHistoryRecord(record),
+    result: record.result,
+  })));
+  assert.deepEqual(chart.buckets.map(({ dateKey, win, loss, total }) => ({ dateKey, win, loss, total })), [
+    { dateKey: "2026-08-25", win: 0, loss: 1, total: 1 },
+    { dateKey: "2026-08-26", win: 2, loss: 1, total: 3 },
+  ]);
+});
+
+test("result chart date keys stay JST-stable when the process timezone is UTC", () => {
+  const beforeMidnight = Date.UTC(2026, 7, 25, 14, 59, 59);
+  const afterMidnight = Date.UTC(2026, 7, 25, 15, 0, 0);
+  assert.equal(dateKeyForTimestamp(beforeMidnight, "Asia/Tokyo"), "2026-08-25");
+  assert.equal(dateKeyForTimestamp(afterMidnight, "Asia/Tokyo"), "2026-08-26");
+  assert.equal(dateKeyForTimestamp(beforeMidnight, "UTC"), "2026-08-25");
+  assert.equal(dateKeyForTimestamp(afterMidnight, "UTC"), "2026-08-25");
+});
+
+test("result chart returns an empty state for an empty history", () => {
+  const chart = buildSevenDayResultChart([]);
+  assert.deepEqual(chart, {
+    slotCount: 0,
+    startDateKey: "",
+    endDateKey: "",
+    buckets: [],
+  });
 });

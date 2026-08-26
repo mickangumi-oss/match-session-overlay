@@ -3,6 +3,7 @@
 const SERVICE_ORIGIN = "https://www.streetfighter.com";
 const SERVICE_HOME = `${SERVICE_ORIGIN}/6/buckler/ja-jp`;
 const MATCH_TYPES = ["ranked", "battleHub", "casual"];
+const { collectProfileContextCandidates } = require("./opponent-profile-context");
 
 function classifyBattleType(type, name = "") {
   const normalizedName = String(name).toLowerCase();
@@ -344,6 +345,26 @@ function collectProfileRatingCandidates(value, path = "", result = [], depth = 0
 function normalizeProfilePlayer(data, fallbackPlayer = {}) {
   const candidates = collectProfileRatingCandidates(data);
   const characterCandidates = collectProfileCharacterCandidates(data);
+  const profileContext = collectProfileContextCandidates(data);
+  const profileAct = profileContext.explicitCurrentAct?.key
+    ? {
+        id: profileContext.explicitCurrentAct.key,
+        label: profileContext.explicitCurrentAct.label,
+      }
+    : null;
+  const profileCharacterRatings = profileAct
+    ? profileContext.candidates
+        .filter((candidate) => candidate.actKey === profileAct.id)
+        .map((candidate) => ({
+          characterId: candidate.characterId,
+          characterDisplayName: candidate.characterDisplayName,
+          currentMr: candidate.currentMr,
+          currentLp: candidate.currentLp,
+          peakMr: candidate.peakMr,
+          peakLp: candidate.peakLp,
+          act: profileAct,
+        }))
+    : [];
   const desiredCharacterId = Number(fallbackPlayer.characterId) || null;
   const matching = desiredCharacterId == null
     ? []
@@ -408,6 +429,8 @@ function normalizeProfilePlayer(data, fallbackPlayer = {}) {
     characterDisplayName: characterCandidate?.characterDisplayName ?? "",
     characterDisplayNameSource: characterCandidate ? "profile" : "",
     ratingSource: "profile",
+    profileAct,
+    profileCharacterRatings,
   };
 }
 
