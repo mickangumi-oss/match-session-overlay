@@ -3,6 +3,31 @@
 
   const DAY_MS = 24 * 60 * 60 * 1000;
   const DATE_KEY_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
+  // Buckler history timestamps are UTC epoch values. Keep the product's
+  // calendar contract explicit so a renderer/test process running in UTC
+  // cannot move a late-night JST match into the wrong result-chart bucket.
+  const HISTORY_TIME_ZONE = "Asia/Tokyo";
+
+  function dateKeyForTimestamp(raw, timeZone = HISTORY_TIME_ZONE) {
+    const timestamp = Number(raw);
+    if (!Number.isFinite(timestamp) || timestamp <= 0) return "";
+    const date = new Date(timestamp < 10_000_000_000 ? timestamp * 1000 : timestamp);
+    if (Number.isNaN(date.getTime())) return "";
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(date);
+    const values = Object.fromEntries(parts.map(({ type, value }) => [type, value]));
+    return values.year && values.month && values.day
+      ? `${values.year}-${values.month}-${values.day}`
+      : "";
+  }
+
+  function dateKeyForHistoryRecord(record, timeZone = HISTORY_TIME_ZONE) {
+    return dateKeyForTimestamp(record?.playedAt ?? record?.uploadedAt, timeZone);
+  }
 
   function isFiniteSeriesValue(value) {
     return value != null && value !== "" && Number.isFinite(Number(value));
@@ -38,9 +63,7 @@
   function localTodayKey(now = new Date()) {
     const date = now instanceof Date ? now : new Date(now);
     if (Number.isNaN(date.getTime())) return "";
-    const month = String(date.getMonth() + 1).padStart(2, "0");
-    const day = String(date.getDate()).padStart(2, "0");
-    return `${date.getFullYear()}-${month}-${day}`;
+    return dateKeyForTimestamp(date.getTime());
   }
 
   function niceStepAtLeast(value, minimum = 1) {
@@ -320,9 +343,12 @@
     buildHistoryRatingPeriod,
     buildHistoryRatingSeries,
     buildSevenDayResultChart,
+    dateKeyForHistoryRecord,
+    dateKeyForTimestamp,
     dateKeyFromOrdinal,
     dateOrdinal,
     filterHistoryRatingRecords,
+    historyTimeZone: HISTORY_TIME_ZONE,
     localTodayKey,
     thinHistoryPoints,
   };

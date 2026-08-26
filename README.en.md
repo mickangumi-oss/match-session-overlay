@@ -21,13 +21,14 @@ Open the latest release and download the installer named `Match-Session-Overlay-
 
 For step-by-step instructions, see the [English usage guide](docs/usage.en.md).
 
-## What's new in v1.9.0
+## What's new in v1.10.0
 
-- The match-result trend now groups the latest seven played dates, with same-day wins and losses combined in one stacked bar.
-- MR/LP trends share controls for all-time or weekly views and played days or all calendar days, including week navigation.
-- The latest match's MR/LP change now uses the difference from the current value, and vertical rank labels align with the other metrics.
+- Battle history can now fetch up to 10 pages and 100 matches concurrently, with visible progress and completion status.
+- The match list now uses the full available width, shows replay IDs, and lets you copy an ID by clicking it.
+- Selecting a match row now shows a current-Act-only opponent profile reference card.
+- The history layout now places the full-width match list above the charts and opponent-character results.
 
-See the [v1.9.0 release notes](https://github.com/mickangumi-oss/match-session-overlay/releases/tag/v1.9.0) for the installer checksum and security scan results.
+See the [v1.10.0 release notes](https://github.com/mickangumi-oss/match-session-overlay/releases/tag/v1.10.0) for the installer checksum and security scan results.
 
 ## What it can show
 

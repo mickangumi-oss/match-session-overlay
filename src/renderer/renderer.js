@@ -38,6 +38,14 @@ const HISTORY_PAGE_SIZE = 10;
 const RECENT_HISTORY_PREVIEW_LIMIT = 5;
 let historyPage = 0;
 let historyOpponentSort = { key: "matches", direction: "desc" };
+let selectedHistoryRecordKey = null;
+let historyOpponentProfileRequestToken = 0;
+let historyOpponentProfileState = {
+  status: "idle",
+  recordKey: null,
+  record: null,
+  context: null,
+};
 let managementChartRenderToken = 0;
 let managementResizeFrame = 0;
 let socialState = {
@@ -171,6 +179,21 @@ const elements = Object.fromEntries(
     "historyPotentialLabel",
     "historyPotentialRating",
     "historyPotentialSample",
+    "historyOpponentProfile",
+    "historyOpponentProfileState",
+    "historyOpponentProfileGrid",
+    "historyOpponentMatchCharacter",
+    "historyOpponentMatchRating",
+    "historyOpponentRecord",
+    "historyOpponentCurrentRatingLabel",
+    "historyOpponentCurrentRating",
+    "historyOpponentPeakRatingLabel",
+    "historyOpponentPeakRating",
+    "historyOpponentOtherRatingLabel",
+    "historyOpponentOtherCharacter",
+    "historyOpponentOtherRating",
+    "historyOpponentProfileAct",
+    "historyOpponentProfileRetrieved",
     "historyCount",
     "historyResultChart",
     "historyEmpty",
@@ -207,6 +230,8 @@ function showNotice(message, type = "") {
 }
 
 function dateKeyForHistory(record) {
+  const dateKeyForRecord = window.matchHistoryChartModel?.dateKeyForHistoryRecord;
+  if (typeof dateKeyForRecord === "function") return dateKeyForRecord(record);
   const timestamp = Number(record?.playedAt ?? record?.uploadedAt ?? 0);
   if (!Number.isFinite(timestamp) || timestamp <= 0) return "";
   const date = new Date(timestamp < 10_000_000_000 ? timestamp * 1000 : timestamp);
@@ -220,7 +245,9 @@ function formatHistoryDate(record) {
   const timestamp = Number(record?.playedAt ?? record?.uploadedAt ?? 0);
   const date = new Date(timestamp < 10_000_000_000 ? timestamp * 1000 : timestamp);
   if (Number.isNaN(date.getTime())) return "—";
+  const timeZone = window.matchHistoryChartModel?.historyTimeZone || "Asia/Tokyo";
   return date.toLocaleString(undefined, {
+    timeZone,
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
@@ -243,13 +270,63 @@ function historyCharacterLabel(record, own = true) {
   return id ? `#${id}` : "—";
 }
 
+function historySelectedCharacterId(player = historyState.player) {
+  const selected = String(elements.historyCharacter?.value ?? "all");
+  if (/^\d+$/.test(selected)) {
+    const selectedId = Number(selected);
+    if (selectedId > 0) return selectedId;
+  }
+  return Number(player?.characterId) > 0 ? Number(player.characterId) : null;
+}
+
+function historyDerivedRecordsForRating(
+  records,
+  ratingType,
+  player = historyState.player,
+  characterId = historySelectedCharacterId(player),
+) {
+  const input = Array.isArray(records) ? records : [];
+  const sourceRecords = Array.isArray(historyState.records) && historyState.records.length
+    ? historyState.records
+    : input;
+  const targetCharacterId = Number(characterId) > 0 ? Number(characterId) : null;
+  const derive = window.MatchHistoryCurrentRating?.deriveHistoryRatingSeries;
+  const derived = typeof derive === "function"
+    ? derive(sourceRecords, player, ratingType, {
+        characterId: targetCharacterId,
+      })
+    : { records: sourceRecords };
+  const valuesByReplayId = new Map(
+    (derived.records ?? []).map((record) => [
+      String(record?.replayId ?? ""),
+      {
+        value: record?.derivedOwnRating,
+        type: record?.derivedRatingType,
+      },
+    ]),
+  );
+  return input.map((record) => {
+    const replayId = String(record?.replayId ?? "");
+    return valuesByReplayId.has(replayId)
+      ? {
+          ...record,
+          derivedOwnRating: valuesByReplayId.get(replayId).value,
+          derivedRatingType: valuesByReplayId.get(replayId).type,
+        }
+      : { ...record };
+  });
+}
+
 function historyRatingValue(record, ratingType) {
   const normalizedType = String(ratingType || "").toUpperCase();
-  const parallelValue = normalizedType === "MR" ? record?.ownMr : record?.ownLp;
-  const parallelNumber = Number(parallelValue);
-  if (Number.isFinite(parallelNumber) && parallelNumber > 0) return parallelNumber;
-  if (String(record?.ownRatingType || "").toUpperCase() !== normalizedType) return null;
-  const primaryNumber = Number(record?.ownRating);
+  const derivedType = String(record?.derivedRatingType || "").toUpperCase();
+  if (
+    derivedType !== normalizedType &&
+    String(record?.ownRatingType || "").toUpperCase() !== normalizedType
+  ) {
+    return null;
+  }
+  const primaryNumber = Number(record?.derivedOwnRating ?? record?.ownRating);
   return Number.isFinite(primaryNumber) && primaryNumber > 0 ? primaryNumber : null;
 }
 
@@ -448,9 +525,16 @@ function renderHistoryRatingCharts(records) {
   drawHistoryRatingChart(records, "LP", elements.historyLpChart, elements.historyLpEmpty, period);
 }
 
-function drawHistoryRatingChart(records, ratingType, canvas, emptyElement, period = { mode: "all", dateMode: "played" }) {
+function drawHistoryRatingChart(historyRecords, ratingType, canvas, emptyElement, period = { mode: "all", dateMode: "played" }) {
   if (!canvas) return;
   const model = window.matchHistoryChartModel;
+  const player = historyState.player;
+  const records = historyDerivedRecordsForRating(
+    historyRecords,
+    ratingType,
+    player,
+    historySelectedCharacterId(player),
+  );
   const dateMode = normalizeHistoryRatingDateMode(period.dateMode);
   const hasFinitePointValue = (point) =>
     point?.value != null && point.value !== "" && Number.isFinite(Number(point.value));
@@ -463,13 +547,13 @@ function drawHistoryRatingChart(records, ratingType, canvas, emptyElement, perio
         timestampForRecord: (record) => record?.playedAt ?? record?.uploadedAt,
       })
     : [...records]
-        .filter((record) => historyRatingValue(record, ratingType) != null)
-        .sort((a, b) => Number(a.playedAt ?? a.uploadedAt) - Number(b.playedAt ?? b.uploadedAt))
-        .map((record, position) => ({
-          dateKey: dateKeyForHistory(record),
-          position,
-          value: historyRatingValue(record, ratingType),
-        }));
+      .filter((record) => historyRatingValue(record, ratingType) != null)
+      .sort((a, b) => Number(a.playedAt ?? a.uploadedAt) - Number(b.playedAt ?? b.uploadedAt))
+      .map((record, position) => ({
+        dateKey: dateKeyForHistory(record),
+        position,
+        value: historyRatingValue(record, ratingType),
+      }));
   const hasData = allPoints.some(hasFinitePointValue);
   if (emptyElement) emptyElement.classList.toggle("hidden", hasData);
 
@@ -646,8 +730,24 @@ function renderHistoryCharacters(records) {
   select.value = characters.some(([value]) => value === selected) ? selected : "all";
 }
 
-function appendHistoryCell(row, value, { opponentUserCode = null } = {}) {
+function appendHistoryCell(
+  row,
+  value,
+  { opponentUserCode = null, replayId = null } = {},
+) {
   const cell = document.createElement("td");
+  const normalizedReplayId = String(replayId ?? "").trim();
+  if (normalizedReplayId) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "history-replay-id";
+    button.dataset.historyReplayId = normalizedReplayId;
+    button.textContent = normalizedReplayId;
+    button.title = `${normalizedReplayId} · ${t("copyReplayId", "リプレイIDをコピー")}`;
+    cell.append(button);
+    row.append(cell);
+    return;
+  }
   if (opponentUserCode && /^\d{4,12}$/.test(String(opponentUserCode))) {
     const button = document.createElement("button");
     button.type = "button";
@@ -663,13 +763,224 @@ function appendHistoryCell(row, value, { opponentUserCode = null } = {}) {
   row.append(cell);
 }
 
+function historyRecordKey(record) {
+  const replayId = String(record?.replayId ?? "").trim();
+  if (replayId) return `replay:${replayId}`;
+  return [
+    Number(record?.uploadedAt ?? 0) || 0,
+    Number(record?.playedAt ?? 0) || 0,
+    String(record?.opponentUserCode ?? ""),
+    Number(record?.opponentCharacterId ?? 0) || 0,
+  ].join(":");
+}
+
+function opponentHistoryRecordsFor(record, records = filteredHistoryRecords()) {
+  if (!record) return [];
+  const opponentCode = String(record.opponentUserCode ?? "").trim();
+  const opponentCharacterId = Number(record.opponentCharacterId) || null;
+  const opponentName = String(record.opponentName ?? "").trim();
+  return (Array.isArray(records) ? records : []).filter((candidate) => {
+    const candidateCharacterId = Number(candidate?.opponentCharacterId) || null;
+    if (opponentCharacterId != null && candidateCharacterId !== opponentCharacterId) return false;
+    if (opponentCode) return String(candidate?.opponentUserCode ?? "").trim() === opponentCode;
+    return opponentName && String(candidate?.opponentName ?? "").trim() === opponentName;
+  });
+}
+
+function formatOpponentProfileRating(value, ratingType) {
+  const normalizedType = String(ratingType ?? "").toUpperCase();
+  const number = Number(value);
+  if (!Number.isFinite(number) || number <= 0 || !["MR", "LP"].includes(normalizedType)) return "—";
+  return `${normalizedType} ${displayNumber.integer(number, "")}`;
+}
+
+function formatOpponentProfileRetrievedAt(timestamp) {
+  const value = Number(timestamp);
+  if (!Number.isFinite(value) || value <= 0) return "—";
+  try {
+    return new Intl.DateTimeFormat(displaySettings?.locale || undefined, {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(new Date(value));
+  } catch {
+    return "—";
+  }
+}
+
+function renderHistoryOpponentProfile(record = historyOpponentProfileState.record) {
+  const card = elements.historyOpponentProfile;
+  if (!card) return;
+  const hasRecord = Boolean(record);
+  card.classList.toggle("hidden", !hasRecord);
+  if (!hasRecord) return;
+
+  const context = historyOpponentProfileState.context ?? null;
+  const status = historyOpponentProfileState.status;
+  const stateText = status === "loading"
+    ? t("historyOpponentProfileLoading", "Loading official profile reference…")
+    : status === "error"
+      ? t("historyOpponentProfileUnavailable", "Official profile reference unavailable")
+      : status === "empty"
+        ? t("historyOpponentProfileEmpty", "No official profile reference data")
+        : "";
+  if (elements.historyOpponentProfileState) {
+    elements.historyOpponentProfileState.textContent = stateText;
+    elements.historyOpponentProfileState.className = `history-opponent-profile-state ${status}`;
+  }
+
+  if (elements.historyOpponentMatchCharacter) {
+    elements.historyOpponentMatchCharacter.textContent = historyCharacterLabel(record, false);
+  }
+  if (elements.historyOpponentMatchRating) {
+    elements.historyOpponentMatchRating.textContent = formatHistoryRating(
+      record.opponentRatingType,
+      record.opponentRating,
+    );
+  }
+
+  const localRecords = opponentHistoryRecordsFor(record);
+  const wins = localRecords.filter((entry) => entry.result === "win").length;
+  const losses = localRecords.filter((entry) => entry.result === "loss").length;
+  const draws = localRecords.filter((entry) => entry.result === "draw").length;
+  const decisive = wins + losses;
+  const winRate = decisive ? (wins / decisive) * 100 : 0;
+  if (elements.historyOpponentRecord) {
+    elements.historyOpponentRecord.textContent = localRecords.length
+      ? `${wins}W / ${losses}L / ${draws}D · ${winRate.toFixed(1)}%`
+      : "—";
+  }
+
+  const target = context?.targetCharacter ?? null;
+  const current = target?.currentRating ?? null;
+  const peak = target?.peakRating ?? null;
+  if (elements.historyOpponentCurrentRatingLabel) {
+    elements.historyOpponentCurrentRatingLabel.textContent = current?.type
+      ? `${t("historyOpponentCurrentRating", "CURRENT MR / LP")} (${current.type})`
+      : t("historyOpponentCurrentRating", "CURRENT MR / LP");
+  }
+  if (elements.historyOpponentPeakRatingLabel) {
+    elements.historyOpponentPeakRatingLabel.textContent = peak?.type
+      ? `${t("historyOpponentPeakRating", "PEAK MR / LP")} (${peak.type})`
+      : t("historyOpponentPeakRating", "PEAK MR / LP");
+  }
+  if (elements.historyOpponentCurrentRating) {
+    elements.historyOpponentCurrentRating.textContent = formatOpponentProfileRating(
+      current?.value,
+      current?.type,
+    );
+  }
+  if (elements.historyOpponentPeakRating) {
+    elements.historyOpponentPeakRating.textContent = formatOpponentProfileRating(
+      peak?.value,
+      peak?.type,
+    );
+  }
+
+  const other = context?.otherCharacter ?? null;
+  if (elements.historyOpponentOtherRatingLabel) {
+    const kindLabelKey = other?.ratingKind === "peak"
+      ? "historyOpponentOtherPeak"
+      : "historyOpponentOtherCurrent";
+    const kindLabel = t(kindLabelKey, kindLabelKey === "historyOpponentOtherPeak"
+      ? "OTHER CHARACTER PEAK {type}"
+      : "OTHER CHARACTER CURRENT {type}");
+    elements.historyOpponentOtherRatingLabel.textContent = other
+      ? kindLabel.replace("{type}", other.ratingType)
+      : t("historyOpponentOtherRating", "OTHER CHARACTER");
+  }
+  if (elements.historyOpponentOtherCharacter) {
+    elements.historyOpponentOtherCharacter.textContent = other?.characterDisplayName || "—";
+  }
+  if (elements.historyOpponentOtherRating) {
+    elements.historyOpponentOtherRating.textContent = other
+      ? formatOpponentProfileRating(other.rating, other.ratingType)
+      : "—";
+  }
+  if (elements.historyOpponentProfileAct) {
+    const actLabel = context?.act?.id || context?.act?.label || "—";
+    elements.historyOpponentProfileAct.textContent = `ACT ${actLabel}`;
+  }
+  if (elements.historyOpponentProfileRetrieved) {
+    elements.historyOpponentProfileRetrieved.textContent = context?.retrievedAt
+      ? `${t("historyOpponentRetrieved", "RETRIEVED")} ${formatOpponentProfileRetrievedAt(context.retrievedAt)}`
+      : "—";
+  }
+}
+
+function selectHistoryRecord(record) {
+  const nextRecord = record ?? null;
+  const nextRecordKey = nextRecord ? historyRecordKey(nextRecord) : null;
+  if (
+    nextRecord &&
+    nextRecordKey === selectedHistoryRecordKey &&
+    historyOpponentProfileState.record &&
+    ["loading", "ready"].includes(historyOpponentProfileState.status)
+  ) {
+    renderHistoryOpponentProfile(nextRecord);
+    return;
+  }
+  selectedHistoryRecordKey = nextRecordKey;
+  const requestToken = ++historyOpponentProfileRequestToken;
+  historyOpponentProfileState = {
+    status: nextRecord ? "loading" : "idle",
+    recordKey: selectedHistoryRecordKey,
+    record: nextRecord,
+    context: null,
+  };
+  renderHistoryOpponentProfile(nextRecord);
+  if (!nextRecord) return;
+
+  const profileId = String(nextRecord.opponentUserCode ?? "").trim();
+  const characterId = Number(nextRecord.opponentCharacterId) || null;
+  if (!api.getHistoryOpponentContext || !/^\d{4,12}$/.test(profileId) || characterId == null) {
+    historyOpponentProfileState = {
+      ...historyOpponentProfileState,
+      status: "empty",
+    };
+    renderHistoryOpponentProfile(nextRecord);
+    return;
+  }
+
+  void api.getHistoryOpponentContext({
+    profileId,
+    opponentUserCode: profileId,
+    characterId,
+    characterDisplayName: nextRecord.opponentCharacterName,
+  }).then((result) => {
+    if (requestToken !== historyOpponentProfileRequestToken || selectedHistoryRecordKey !== historyRecordKey(nextRecord)) return;
+    if (!result?.ok) throw new Error(result?.error || "PROFILE_REFERENCE_FAILED");
+    historyOpponentProfileState = {
+      ...historyOpponentProfileState,
+      status: result.data?.status || "empty",
+      context: result.data ?? null,
+    };
+    renderHistoryOpponentProfile(nextRecord);
+  }).catch(() => {
+    if (requestToken !== historyOpponentProfileRequestToken || selectedHistoryRecordKey !== historyRecordKey(nextRecord)) return;
+    historyOpponentProfileState = {
+      ...historyOpponentProfileState,
+      status: "error",
+      context: null,
+    };
+    renderHistoryOpponentProfile(nextRecord);
+  });
+}
+
 function renderHistoryTable(records) {
   const body = elements.historyTableBody;
   if (!body) return;
   body.replaceChildren();
   for (const record of records) {
     const row = document.createElement("tr");
-    const result = record.result === "win" ? "W" : record.result === "loss" ? "L" : "—";
+    const recordKey = historyRecordKey(record);
+    row.dataset.historyRecordKey = recordKey;
+    row.classList.toggle("history-row-selected", selectedHistoryRecordKey === recordKey);
+    row.setAttribute("aria-selected", String(selectedHistoryRecordKey === recordKey));
+    row.tabIndex = 0;
+    const result = record.result === "win" ? "W" : record.result === "loss" ? "L" : record.result === "draw" ? "D" : "—";
     const cells = [
       formatHistoryDate(record),
       result,
@@ -679,6 +990,7 @@ function renderHistoryTable(records) {
       record.opponentName || "—",
       historyCharacterLabel(record, false),
       formatHistoryRating(record.opponentRatingType, record.opponentRating),
+      String(record.replayId ?? "").trim() || "—",
     ];
     cells.forEach((value, index) => {
       const cell = document.createElement("td");
@@ -686,6 +998,8 @@ function renderHistoryTable(records) {
       if (index === 5) {
         appendHistoryCell(row, value, { opponentUserCode: record.opponentUserCode });
         row.lastElementChild.className = cell.className;
+      } else if (index === 8) {
+        appendHistoryCell(row, value, { replayId: record.replayId });
       } else {
         cell.textContent = value;
         cell.title = value;
@@ -693,6 +1007,17 @@ function renderHistoryTable(records) {
       }
     });
     body.append(row);
+  }
+}
+
+async function copyHistoryReplayId(replayId) {
+  const normalizedReplayId = String(replayId ?? "").trim();
+  if (!normalizedReplayId) return;
+  try {
+    await unwrap(api.copyText(normalizedReplayId));
+    showNotice(t("replayIdCopied", "リプレイIDをコピーしました"), "success");
+  } catch (error) {
+    showNotice(error.message, "error");
   }
 }
 
@@ -715,7 +1040,7 @@ function renderRecentHistoryPreview(records) {
   }
   body.replaceChildren();
   for (const [index, record] of recent.entries()) {
-    const result = record.result === "win" ? "W" : record.result === "loss" ? "L" : "—";
+    const result = record.result === "win" ? "W" : record.result === "loss" ? "L" : record.result === "draw" ? "D" : "—";
     const ratingDelta = historyRatingDelta(record, records, historyState.player, {
       useCurrentRating: index === 0,
     });
@@ -764,7 +1089,7 @@ function selectHistoryMaximumRating(records) {
 }
 
 function selectHistoryPotentialRating(records, player = historyState.player) {
-  const characterId = Number(player?.characterId) || null;
+  const characterId = historySelectedCharacterId(player);
   const ratingType = player?.mr != null
     ? "MR"
     : player?.lp != null
@@ -773,16 +1098,20 @@ function selectHistoryPotentialRating(records, player = historyState.player) {
           .filter((record) => record.matchType === "ranked")
           .sort((a, b) => Number(a.playedAt ?? a.uploadedAt) - Number(b.playedAt ?? b.uploadedAt))
           .at(-1)?.ownRatingType ?? "MR";
-  const ordered = [...records]
+  const ordered = historyDerivedRecordsForRating(records, ratingType, player, characterId)
     .filter(
       (record) =>
         record.matchType === "ranked" &&
-        record.ownRatingType === ratingType &&
+        historyRatingValue(record, ratingType) != null &&
         (characterId == null || Number(record.characterId) === characterId),
     )
     .sort((a, b) => Number(a.playedAt ?? a.uploadedAt) - Number(b.playedAt ?? b.uploadedAt));
   const values = ordered
-    .map((record) => Number(record.ownRating))
+    // Use the same display-only derived value as the history graph and the
+    // management/overlay POTENTIAL calculation.  ownRating is the immutable
+    // match-time snapshot and may not include the final official profile
+    // rating applied to the terminal point.
+    .map((record) => Number(historyRatingValue(record, ratingType)))
     .filter((value) => Number.isFinite(value) && value > 0)
     .slice(-20);
   if (elements.historyPotentialLabel) {
@@ -800,6 +1129,9 @@ function renderHistoryFetchStatus() {
   const cooldown = nextAllowedAt
     ? Math.max(0, Math.ceil((nextAllowedAt - Date.now()) / 1000))
     : Math.max(0, Number(historyState.cooldownSeconds) || 0);
+  const fetchSummary = historyState.fetchSummary && typeof historyState.fetchSummary === "object"
+    ? historyState.fetchSummary
+    : null;
   const canFetch = Boolean(historyState.authenticated) &&
     !historyState.fetching &&
     (nextAllowedAt ? cooldown <= 0 : Boolean(historyState.canFetch));
@@ -808,18 +1140,28 @@ function renderHistoryFetchStatus() {
     ? t("historyFetching", "Loading…")
     : t("fetchHistory", "Import 100 matches");
   elements.historyFetchState.classList.toggle("loading", Boolean(historyState.fetching));
+  elements.historyFetchState.classList.toggle(
+    "complete",
+    !historyState.fetching && fetchSummary?.status === "complete",
+  );
+  elements.historyFetchState.classList.toggle(
+    "error",
+    !historyState.fetching && fetchSummary?.status === "error",
+  );
   if (elements.historyAcquisitionTitle) {
     elements.historyAcquisitionTitle.textContent = historyState.fetching
       ? "ACQUIRING MATCHES"
       : "MATCH HISTORY STATUS";
   }
-  const fetchedCount = Math.max(0, Number(historyState.fetchedCount) || 0);
+  const completedPages = Math.max(
+    0,
+    Number(historyState.fetchCompletedPages ?? historyState.fetchPage) || 0,
+  );
+  const maxPages = Math.max(1, Number(historyState.fetchMaxPages) || 10);
   const pageProgress = historyState.fetching
-    ? (Math.max(0, Number(historyState.fetchPage) || 0) / Math.max(1, Number(historyState.fetchMaxPages) || 10)) * 100
+    ? (Math.min(maxPages, completedPages) / maxPages) * 100
     : 0;
-  const fetchProgress = historyState.fetching
-    ? Math.min(100, fetchedCount > 0 ? fetchedCount : pageProgress)
-    : 0;
+  const fetchProgress = historyState.fetching ? Math.min(100, pageProgress) : 0;
   elements.historyFetchProgress?.classList.toggle("active", Boolean(historyState.fetching));
   if (elements.historyFetchProgressBar) {
     elements.historyFetchProgressBar.style.width = `${fetchProgress}%`;
@@ -839,10 +1181,20 @@ function renderHistoryFetchStatus() {
     }
   }
   elements.historyFetchState.textContent = historyState.fetching
-    ? t("historyFetchProgress", "Loading page {page}/{max} · {count} fetched")
-      .replace("{page}", String(historyState.fetchPage || 1))
-      .replace("{max}", String(historyState.fetchMaxPages || 10))
+    ? t("historyFetchProgress", "Loading: {completed}/{max} pages · {count} fetched")
+      .replace("{completed}", String(completedPages))
+      .replace("{max}", String(maxPages))
       .replace("{count}", String(historyState.fetchedCount || 0))
+    : fetchSummary?.status === "complete"
+      ? (Number(fetchSummary.fetchedCount) > 0
+        ? t("historyFetchComplete", "Import complete: {count} matches ({pages} pages)")
+          .replace("{count}", String(Number(fetchSummary.fetchedCount) || 0))
+          .replace("{pages}", String(Number(fetchSummary.pages) || Number(fetchSummary.completedPages) || 0))
+        : t("historyFetchCompleteEmpty", "Import complete: no matches"))
+    : fetchSummary?.status === "error"
+      ? t("historyFetchPartial", "Import stopped: {count} matches ({pages} pages)")
+        .replace("{count}", String(Number(fetchSummary.fetchedCount) || 0))
+        .replace("{pages}", String(Number(fetchSummary.pages) || Number(fetchSummary.completedPages) || 0))
     : historyState.viewingOther && historyState.polling
       ? t("historyAutoUpdating", "Automatic update: every {seconds}s").replace(
         "{seconds}",
@@ -975,6 +1327,28 @@ function renderHistoryState(nextState = historyState) {
     historyPage * HISTORY_PAGE_SIZE,
     (historyPage + 1) * HISTORY_PAGE_SIZE,
   );
+  const selectedRecord = selectedHistoryRecordKey
+    ? records.find((record) => historyRecordKey(record) === selectedHistoryRecordKey) ?? null
+    : null;
+  if (selectedHistoryRecordKey && !selectedRecord) {
+    selectedHistoryRecordKey = null;
+    historyOpponentProfileRequestToken += 1;
+    historyOpponentProfileState = {
+      status: "idle",
+      recordKey: null,
+      record: null,
+      context: null,
+    };
+    renderHistoryOpponentProfile(null);
+  } else if (selectedRecord) {
+    historyOpponentProfileState = {
+      ...historyOpponentProfileState,
+      record: selectedRecord,
+    };
+    renderHistoryOpponentProfile(selectedRecord);
+  } else {
+    renderHistoryOpponentProfile(null);
+  }
   renderHistoryTable(pageRecords);
   if (elements.historyPageInfo) {
     elements.historyPageInfo.textContent = t("historyPage", "Page {current} / {total}")
@@ -2153,6 +2527,7 @@ elements.closeHistoryButton?.addEventListener("click", () => setHistoryPanelOpen
 async function selectHistoryTarget(userCode, { autoFetch = false } = {}) {
   const normalizedCode = String(userCode ?? "").trim();
   setHistoryPanelOpen(true);
+  selectHistoryRecord(null);
   elements.selectHistoryTargetButton.disabled = true;
   try {
     const result = await unwrap(api.selectHistoryProfile(normalizedCode));
@@ -2184,13 +2559,41 @@ elements.selectHistoryTargetButton?.addEventListener("click", () =>
 for (const body of [elements.recentHistoryBody, elements.historyTableBody]) {
   body?.addEventListener("click", (event) => {
     const target = event.target instanceof Element ? event.target : null;
+    const replayButton = target?.closest("[data-history-replay-id]");
+    if (replayButton) {
+      void copyHistoryReplayId(replayButton.dataset.historyReplayId);
+      return;
+    }
     const button = target?.closest("[data-history-opponent-code]");
     if (!button) return;
     void selectHistoryTarget(button.dataset.historyOpponentCode, { autoFetch: true });
   });
 }
+elements.historyTableBody?.addEventListener("click", (event) => {
+  const target = event.target instanceof Element ? event.target : null;
+  if (target?.closest("button, a, input, select, textarea")) return;
+  const row = target?.closest("tr[data-history-record-key]");
+  if (!row) return;
+  const record = (historyState.records ?? []).find(
+    (candidate) => historyRecordKey(candidate) === row.dataset.historyRecordKey,
+  );
+  if (record) selectHistoryRecord(record);
+});
+elements.historyTableBody?.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter" && event.key !== " ") return;
+  const target = event.target instanceof Element ? event.target : null;
+  if (target?.closest("button, a, input, select, textarea")) return;
+  const row = target?.closest("tr[data-history-record-key]");
+  if (!row) return;
+  event.preventDefault();
+  const record = (historyState.records ?? []).find(
+    (candidate) => historyRecordKey(candidate) === row.dataset.historyRecordKey,
+  );
+  if (record) selectHistoryRecord(record);
+});
 elements.clearHistoryTargetButton?.addEventListener("click", async () => {
   elements.clearHistoryTargetButton.disabled = true;
+  selectHistoryRecord(null);
   try {
     historyPage = 0;
     scheduleHistoryRender(await unwrap(api.clearHistoryProfile()), { resetPage: true });
@@ -2950,6 +3353,17 @@ elements.installUpdateButton.addEventListener("click", async () => {
 });
 
 api.onState(renderTracker);
+api.onHistoryProgress?.((progress) => {
+  if (
+    progress?.profileId &&
+    historyState?.profileId &&
+    progress.profileId !== historyState.profileId
+  ) {
+    return;
+  }
+  historyState = { ...historyState, ...progress };
+  renderHistoryFetchStatus();
+});
 api.onHistoryState?.((state) => {
   scheduleHistoryRender(state);
 });
