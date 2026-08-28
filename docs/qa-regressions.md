@@ -98,5 +98,8 @@
   5. Do not fetch opponent profiles when the history panel opens; repeated selection of the same locale/profile/Act must reuse the cache or in-flight request.
   6. Verify all supported locale routes use the main-process `fetchServiceJson` path and that no URL, Cookie, or authentication data reaches the renderer.
   7. Run the UI check offscreen and confirm the card remains readable in WINDOW/OVERLAY and horizontal/vertical layouts.
+  8. Verify the normal profile payload's current `master_rating` is not used as a peak; when the official `highest/master_rating_info` response is available, accept only its `response.character_league_infos[].league_info.master_rating` values for the matching current Act.
+  9. Keep `—` for a missing, mismatched-Act, target-character-only, or otherwise unusable peak response.
+  10. Send the official endpoint's numeric `pageProps.sid` as `targetShortId`; a string ID can return an empty response even with a valid login session. Confirm the positive path shows the other character and peak MR.
 - Non-regression boundary: selecting the opponent reference row must not invoke `selectHistoryProfile`, mutate persisted history records, or alter MR/LP graph data.
 - Automation: `tests/opponent-profile-context.test.js` covers Act filtering, MR/LP separation, name/value pairing, and bounded parsing; hidden Electron UI QA covers row selection and the empty/error states.

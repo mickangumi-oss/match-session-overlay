@@ -7,6 +7,7 @@
 
 const MAX_DEPTH = 8;
 const MAX_NODES = 400;
+const { selectOtherCharacterPeakMr } = require("./opponent-insight");
 
 const ACT_VALUE_KEYS = [
   "act_id",
@@ -81,6 +82,10 @@ const CHARACTER_NAME_KEYS = [
   "characterDisplayName",
   "character_name",
   "characterName",
+  // The official PLAY response uses the localized alpha label for the
+  // character card (the same field rendered by the site itself).
+  "character_alpha",
+  "characterAlpha",
   "playing_character_display_name",
   "playingCharacterDisplayName",
   "playing_character_name",
@@ -221,6 +226,45 @@ function numberFrom(object, keys, nested = null) {
   return positiveNumber(firstOwn(nested, keys));
 }
 
+// The profile page's normal `character_league_infos` payload contains the
+// current value only. The official PLAY > character MR > highest view returns
+// a separate `{ response: { character_league_infos: [...] } }` payload from
+// `highest/master_rating_info` view (the official page sends `peak: false`);
+// in that response the same
+// `league_info.master_rating` field is explicitly the peak value. Keep this
+// adapter separate from the normal profile parser so a current MR can never be
+// mistaken for a peak when the optional response is absent.
+function collectOfficialPeakMrCandidates(value, actKey) {
+  const response = value?.response;
+  if (!response || typeof response !== "object" || !actKey) return [];
+  const responseAct = firstOwn(response, ["current_season_id", "currentSeasonId"]);
+  if (responseAct != null && String(responseAct) !== String(actKey)) return [];
+  const entries = Array.isArray(response.character_league_infos)
+    ? response.character_league_infos
+    : [];
+  return entries
+    .filter((entry) => entry && typeof entry === "object" && !Array.isArray(entry))
+    .map((entry) => {
+      const nested = entry.league_info && typeof entry.league_info === "object"
+        ? entry.league_info
+        : null;
+      return {
+        characterId: characterIdFrom(entry),
+        characterDisplayName: characterNameFrom(entry),
+        currentMr: null,
+        currentLp: null,
+        peakMr: numberFrom(entry, CURRENT_MR_KEYS, nested),
+        peakLp: null,
+        actKey: String(actKey),
+        actLabel: String(actKey),
+        actCurrent: true,
+        preferred: false,
+        path: "response.character_league_infos",
+      };
+    })
+    .filter((candidate) => candidate.characterId != null && candidate.peakMr != null);
+}
+
 function candidateFrom(object, inheritedAct, path) {
   if (!object || typeof object !== "object" || Array.isArray(object)) return null;
   const nested = nestedRatingObject(object);
@@ -297,45 +341,13 @@ function chooseCandidate(candidates, options = {}) {
     .sort((a, b) => candidateScore(b, options) - candidateScore(a, options))[0] ?? null;
 }
 
-function candidateRating(candidate) {
-  if (!candidate) return { value: null, type: null, kind: null };
-  if (candidate.peakMr != null) return { value: candidate.peakMr, type: "MR", kind: "peak" };
-  if (candidate.peakLp != null) return { value: candidate.peakLp, type: "LP", kind: "peak" };
-  if (candidate.currentMr != null) return { value: candidate.currentMr, type: "MR", kind: "current" };
-  if (candidate.currentLp != null) return { value: candidate.currentLp, type: "LP", kind: "current" };
-  return { value: null, type: null, kind: null };
-}
-
-function bestOtherCharacter(candidates, targetCharacterId, preferredRatingType = null) {
-  const eligible = candidates
-    .filter((candidate) => candidate.characterId !== targetCharacterId)
-    .map((candidate) => ({ candidate, rating: candidateRating(candidate) }))
-    .filter(({ rating }) => rating.value != null && rating.type != null);
-  const scoped = preferredRatingType
-    ? eligible.filter(({ rating }) => rating.type === preferredRatingType)
-    : eligible;
-  const ranked = scoped.length ? scoped : preferredRatingType ? [] : eligible;
-  ranked.sort((a, b) => {
-    if (a.rating.type !== b.rating.type) return a.rating.type === "MR" ? -1 : 1;
-    return b.rating.value - a.rating.value;
-  });
-  const selected = ranked[0];
-  if (!selected) return null;
-  return {
-    characterId: selected.candidate.characterId,
-    characterDisplayName: selected.candidate.characterDisplayName,
-    rating: selected.rating.value,
-    ratingType: selected.rating.type,
-    ratingKind: selected.rating.kind,
-    act: selected.candidate.actKey,
-  };
-}
-
 function normalizeOpponentProfileContext(data, {
   characterId = null,
   characterDisplayName = "",
   profileId = null,
   retrievedAt = Date.now(),
+  peakProfileData = null,
+  peakActId = null,
 } = {}) {
   const normalizedCharacterId = positiveNumber(characterId);
   const { candidates, explicitCurrentAct } = collectProfileContextCandidates(data);
@@ -367,11 +379,29 @@ function normalizeOpponentProfileContext(data, {
         ? { value: target.currentLp, type: "LP" }
         : null
     : null;
-  const other = bestOtherCharacter(
-    currentCandidates,
-    normalizedCharacterId,
-    targetCurrent?.type ?? targetPeak?.type ?? null,
+  // Keep the meaning of this card strict: it is the highest positive MR peak
+  // for a different character in the current Act. Do not fall back to LP or
+  // current MR, and use the same selector that the main process exposes.
+  const peakProfileCandidates = collectOfficialPeakMrCandidates(
+    peakProfileData,
+    peakActId ?? currentAct?.id,
   );
+  const otherPeakMr = selectOtherCharacterPeakMr(
+    [...currentCandidates, ...peakProfileCandidates].filter(
+      (candidate) => candidate.actKey === currentAct?.id,
+    ),
+    normalizedCharacterId,
+  );
+  const other = otherPeakMr
+    ? {
+        characterId: otherPeakMr.characterId,
+        characterDisplayName: otherPeakMr.characterDisplayName,
+        rating: otherPeakMr.peakMr,
+        ratingType: "MR",
+        ratingKind: "peak",
+        act: currentAct.id,
+      }
+    : null;
   return {
     status: currentAct ? "ready" : "empty",
     profileId: profileId == null ? null : String(profileId),
