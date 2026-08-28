@@ -13,13 +13,13 @@
 - 公式サイトへのログインと戦績取得に必要なインターネット接続
 - OBSで表示する場合のみ、OBS Studio（任意）
 
-公開版: v1.10.0
+公開版: v1.11.0
 
 ## ダウンロード
 
-[v1.10.0をダウンロード（GitHub Releases）](https://github.com/mickangumi-oss/match-session-overlay/releases/download/v1.10.0/Match-Session-Overlay-1.10.0-Setup.exe)
+[最新版をダウンロード（GitHub Releases）](https://github.com/mickangumi-oss/match-session-overlay/releases/latest)
 
-開いたページの「Assets」から、`Match-Session-Overlay-1.10.0-Setup.exe`をダウンロードして実行してください。最新版以外のファイルや、配布元を確認できないファイルは使用しないでください。
+開いたページの「Assets」から、`Match-Session-Overlay-1.11.0-Setup.exe`をダウンロードして実行してください。最新版以外のファイルや、配布元を確認できないファイルは使用しないでください。
 
 詳しい操作手順は[`docs/usage.md`](docs/usage.md)、表示レイアウトは[`docs/window-layout.md`](docs/window-layout.md)、対戦履歴は[`docs/match-history.md`](docs/match-history.md)、フォントは[`docs/font-settings.md`](docs/font-settings.md)をご覧ください。
 
@@ -27,7 +27,7 @@
 
 正式な配布インストーラーは、公開前にMicrosoft DefenderおよびVirusTotalでセキュリティチェックを実施します。検査結果は公開時点のものであり、完全な安全性を保証するものではありません。インストーラーは必ずこのリポジトリの公式GitHub Releaseから取得し、各リリースノートに記載されたSHA-256と一致することを確認してください。
 
-`v1.10.0`の検査結果は[`v1.10.0リリースノート`](docs/release-notes/v1.10.0.md)をご覧ください。
+`v1.11.0`の検査結果は[`v1.11.0リリースノート`](docs/release-notes/v1.11.0.md)をご覧ください。
 
 ## 画面イメージ
 
@@ -63,14 +63,15 @@ CHARACTER RANKと現在のキャラクター、セッション戦績、FRIENDS�
 
 ![合成データを表示した対戦履歴画面](docs/images/match-history-example.png)
 
-## v1.10.0の変更内容
+## v1.11.0の変更内容
 
-- 対戦履歴を最大10ページ・100件まで同時取得し、取得進捗と完了状態を表示するようにしました。
-- 対戦一覧を横幅いっぱいに広げ、リプレイIDの表示とクリックコピーに対応しました。
-- 対戦一覧の行から、現在Actに限定した相手プロフィールの参考情報を確認できるようにしました。
-- 対戦履歴の表示を、一覧・グラフ・対戦キャラクター別成績が確認しやすい配置へ整理しました。
+- 対戦行を選択すると、相手本人がその対戦で使用したキャラの対戦前の直近最大20試合を確認できるようにしました。
+- 相手本人の同キャラ履歴からPOTENTIAL MR／LPを別々に算出し、履歴が不足する場合は`—`で表示するようにしました。
+- 選択した対戦の相手情報を保存し、後から開いても同じ内容を表示するようにしました。
+- 相手プロフィールカードの情報を整理しました。
+- 相手詳細カードの長い数値を、カード幅に合わせて自動で縮小するようにしました。
 
-詳しい変更内容は[`v1.10.0リリースノート`](docs/release-notes/v1.10.0.md)をご覧ください。
+詳しい変更内容は[`v1.11.0リリースノート`](docs/release-notes/v1.11.0.md)をご覧ください。
 
 過去の変更内容は[`docs/release-notes`](docs/release-notes)をご覧ください。
 

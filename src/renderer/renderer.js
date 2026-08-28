@@ -46,6 +46,7 @@ let historyOpponentProfileState = {
   record: null,
   context: null,
 };
+const historyOpponentInsightCache = new Map();
 let managementChartRenderToken = 0;
 let managementResizeFrame = 0;
 let socialState = {
@@ -185,11 +186,8 @@ const elements = Object.fromEntries(
     "historyOpponentMatchCharacter",
     "historyOpponentMatchRating",
     "historyOpponentRecord",
-    "historyOpponentCurrentRatingLabel",
-    "historyOpponentCurrentRating",
-    "historyOpponentPeakRatingLabel",
-    "historyOpponentPeakRating",
-    "historyOpponentOtherRatingLabel",
+    "historyOpponentPotentialMr",
+    "historyOpponentPotentialLp",
     "historyOpponentOtherCharacter",
     "historyOpponentOtherRating",
     "historyOpponentProfileAct",
@@ -774,17 +772,10 @@ function historyRecordKey(record) {
   ].join(":");
 }
 
-function opponentHistoryRecordsFor(record, records = filteredHistoryRecords()) {
-  if (!record) return [];
-  const opponentCode = String(record.opponentUserCode ?? "").trim();
-  const opponentCharacterId = Number(record.opponentCharacterId) || null;
-  const opponentName = String(record.opponentName ?? "").trim();
-  return (Array.isArray(records) ? records : []).filter((candidate) => {
-    const candidateCharacterId = Number(candidate?.opponentCharacterId) || null;
-    if (opponentCharacterId != null && candidateCharacterId !== opponentCharacterId) return false;
-    if (opponentCode) return String(candidate?.opponentUserCode ?? "").trim() === opponentCode;
-    return opponentName && String(candidate?.opponentName ?? "").trim() === opponentName;
-  });
+function historyOpponentInsightKey(record) {
+  const profileId = String(record?.opponentUserCode ?? "").trim();
+  const characterId = Number(record?.opponentCharacterId) || 0;
+  return profileId && characterId > 0 ? `${profileId}:${characterId}` : "";
 }
 
 function formatOpponentProfileRating(value, ratingType) {
@@ -808,6 +799,37 @@ function formatOpponentProfileRetrievedAt(timestamp) {
   } catch {
     return "—";
   }
+}
+
+function historyInsightFromRecord(record) {
+  const snapshots = record?.opponentInsightSnapshots;
+  if (!snapshots || typeof snapshots !== "object") return null;
+  const first = Object.values(snapshots).find(
+    (snapshot) =>
+      (Number(snapshot?.wins) || 0) +
+        (Number(snapshot?.losses) || 0) +
+        (Number(snapshot?.draws) || 0) >
+      0,
+  ) ?? snapshots.MR ?? snapshots.LP ?? null;
+  if (!first) return null;
+  const rating = (type) => {
+    const snapshot = snapshots[type];
+    return {
+      potential: snapshot?.status === "ready" && snapshot.complete === true
+        ? snapshot.potential
+        : null,
+    };
+  };
+  return {
+    matches: ["wins", "losses", "draws"].reduce(
+      (sum, key) => sum + (Number(first[key]) || 0),
+      0,
+    ),
+    wins: Number(first.wins) || 0,
+    losses: Number(first.losses) || 0,
+    draws: Number(first.draws) || 0,
+    ratings: { MR: rating("MR"), LP: rating("LP") },
+  };
 }
 
 function renderHistoryOpponentProfile(record = historyOpponentProfileState.record) {
@@ -841,56 +863,35 @@ function renderHistoryOpponentProfile(record = historyOpponentProfileState.recor
     );
   }
 
-  const localRecords = opponentHistoryRecordsFor(record);
-  const wins = localRecords.filter((entry) => entry.result === "win").length;
-  const losses = localRecords.filter((entry) => entry.result === "loss").length;
-  const draws = localRecords.filter((entry) => entry.result === "draw").length;
-  const decisive = wins + losses;
-  const winRate = decisive ? (wins / decisive) * 100 : 0;
+  // A persisted replay-keyed snapshot is authoritative for this card. Never
+  // fall back to a current profile value after a historical snapshot exists.
+  const insight = historyInsightFromRecord(record) ?? context?.opponentInsight ?? null;
+  const wins = Number(insight?.wins) || 0;
+  const losses = Number(insight?.losses) || 0;
+  const draws = Number(insight?.draws) || 0;
+  const matches = Number(insight?.matches) || 0;
   if (elements.historyOpponentRecord) {
-    elements.historyOpponentRecord.textContent = localRecords.length
-      ? `${wins}W / ${losses}L / ${draws}D · ${winRate.toFixed(1)}%`
+    elements.historyOpponentRecord.textContent = matches
+      ? `${wins}W / ${losses}L / ${draws}D (${matches}match)`
       : "—";
   }
 
-  const target = context?.targetCharacter ?? null;
-  const current = target?.currentRating ?? null;
-  const peak = target?.peakRating ?? null;
-  if (elements.historyOpponentCurrentRatingLabel) {
-    elements.historyOpponentCurrentRatingLabel.textContent = current?.type
-      ? `${t("historyOpponentCurrentRating", "CURRENT MR / LP")} (${current.type})`
-      : t("historyOpponentCurrentRating", "CURRENT MR / LP");
-  }
-  if (elements.historyOpponentPeakRatingLabel) {
-    elements.historyOpponentPeakRatingLabel.textContent = peak?.type
-      ? `${t("historyOpponentPeakRating", "PEAK MR / LP")} (${peak.type})`
-      : t("historyOpponentPeakRating", "PEAK MR / LP");
-  }
-  if (elements.historyOpponentCurrentRating) {
-    elements.historyOpponentCurrentRating.textContent = formatOpponentProfileRating(
-      current?.value,
-      current?.type,
+  const potentialMr = insight?.ratings?.MR?.potential;
+  const potentialLp = insight?.ratings?.LP?.potential;
+  if (elements.historyOpponentPotentialMr) {
+    elements.historyOpponentPotentialMr.textContent = formatOpponentProfileRating(
+      potentialMr,
+      "MR",
     );
   }
-  if (elements.historyOpponentPeakRating) {
-    elements.historyOpponentPeakRating.textContent = formatOpponentProfileRating(
-      peak?.value,
-      peak?.type,
+  if (elements.historyOpponentPotentialLp) {
+    elements.historyOpponentPotentialLp.textContent = formatOpponentProfileRating(
+      potentialLp,
+      "LP",
     );
   }
 
   const other = context?.otherCharacter ?? null;
-  if (elements.historyOpponentOtherRatingLabel) {
-    const kindLabelKey = other?.ratingKind === "peak"
-      ? "historyOpponentOtherPeak"
-      : "historyOpponentOtherCurrent";
-    const kindLabel = t(kindLabelKey, kindLabelKey === "historyOpponentOtherPeak"
-      ? "OTHER CHARACTER PEAK {type}"
-      : "OTHER CHARACTER CURRENT {type}");
-    elements.historyOpponentOtherRatingLabel.textContent = other
-      ? kindLabel.replace("{type}", other.ratingType)
-      : t("historyOpponentOtherRating", "OTHER CHARACTER");
-  }
   if (elements.historyOpponentOtherCharacter) {
     elements.historyOpponentOtherCharacter.textContent = other?.characterDisplayName || "—";
   }
@@ -908,16 +909,18 @@ function renderHistoryOpponentProfile(record = historyOpponentProfileState.recor
       ? `${t("historyOpponentRetrieved", "RETRIEVED")} ${formatOpponentProfileRetrievedAt(context.retrievedAt)}`
       : "—";
   }
+  fitManagementScoreValues();
 }
 
-function selectHistoryRecord(record) {
+function selectHistoryRecord(record, { forceRefresh = false } = {}) {
   const nextRecord = record ?? null;
   const nextRecordKey = nextRecord ? historyRecordKey(nextRecord) : null;
   if (
     nextRecord &&
     nextRecordKey === selectedHistoryRecordKey &&
     historyOpponentProfileState.record &&
-    ["loading", "ready"].includes(historyOpponentProfileState.status)
+    ["loading", "ready"].includes(historyOpponentProfileState.status) &&
+    !forceRefresh
   ) {
     renderHistoryOpponentProfile(nextRecord);
     return;
@@ -949,6 +952,10 @@ function selectHistoryRecord(record) {
     opponentUserCode: profileId,
     characterId,
     characterDisplayName: nextRecord.opponentCharacterName,
+    historyOwnerProfileId: historyState?.profileId,
+    replayId: nextRecord.replayId,
+    selectedRecord: nextRecord,
+    forceRefresh,
   }).then((result) => {
     if (requestToken !== historyOpponentProfileRequestToken || selectedHistoryRecordKey !== historyRecordKey(nextRecord)) return;
     if (!result?.ok) throw new Error(result?.error || "PROFILE_REFERENCE_FAILED");
@@ -957,7 +964,10 @@ function selectHistoryRecord(record) {
       status: result.data?.status || "empty",
       context: result.data ?? null,
     };
+    const insightKey = historyOpponentInsightKey(nextRecord);
+    if (insightKey && result.data) historyOpponentInsightCache.set(insightKey, result.data);
     renderHistoryOpponentProfile(nextRecord);
+    renderHistoryState();
   }).catch(() => {
     if (requestToken !== historyOpponentProfileRequestToken || selectedHistoryRecordKey !== historyRecordKey(nextRecord)) return;
     historyOpponentProfileState = {
@@ -965,7 +975,10 @@ function selectHistoryRecord(record) {
       status: "error",
       context: null,
     };
+    const insightKey = historyOpponentInsightKey(nextRecord);
+    if (insightKey) historyOpponentInsightCache.delete(insightKey);
     renderHistoryOpponentProfile(nextRecord);
+    renderHistoryState();
   });
 }
 
@@ -1362,14 +1375,17 @@ function renderHistoryState(nextState = historyState) {
     elements.historyNextButton.disabled = !totalPages || historyPage >= totalPages - 1;
   }
   renderHistoryFetchStatus();
+  fitManagementScoreValues();
 }
 
 function scheduleHistoryRender(nextState = historyState, { resetPage = false } = {}) {
   const previousProfileId = historyState?.profileId ?? null;
   historyState = nextState || { records: [], canFetch: false, authenticated: false, cooldownSeconds: 0 };
+  const nextProfileId = historyState?.profileId ?? null;
+  if (previousProfileId !== nextProfileId) historyOpponentInsightCache.clear();
   pendingHistoryRenderState = historyState;
   pendingHistoryPageReset = pendingHistoryPageReset || resetPage ||
-    previousProfileId !== (historyState?.profileId ?? null);
+    previousProfileId !== nextProfileId;
   if (!historyPanelOpen) {
     const records = Array.isArray(historyState.records) ? historyState.records : [];
     renderRecentHistoryPreview(records);
@@ -1472,13 +1488,14 @@ function fitPlayerName() {
   });
 }
 
-function fitScoreValue(element, minimumSize = 10) {
+function fitScoreValue(element, minimumSize = 8) {
   if (!element) return;
-  element.style.fontSize = "";
+  element.style.removeProperty("font-size");
 
   // Custom fonts and italics can be wider than the default condensed face.
   // Keep the card width fixed and reduce only the value when it overflows.
   requestAnimationFrame(() => {
+    if (!element.isConnected || element.clientWidth <= 0) return;
     const baseSize = Number.parseFloat(getComputedStyle(element).fontSize) || 16;
     let size = baseSize;
     while (size > minimumSize && element.scrollWidth > element.clientWidth + 1) {
@@ -1501,6 +1518,16 @@ function fitManagementScoreValues() {
     elements.currentCharacter,
     elements.sessionPeakRating,
     elements.currentMrRank,
+    elements.historyWinsLosses,
+    elements.historyWinRate,
+    elements.historyMaxStreak,
+    elements.historyMaxRating,
+    elements.historyPotentialRating,
+    elements.historyOpponentMatchRating,
+    elements.historyOpponentRecord,
+    elements.historyOpponentPotentialMr,
+    elements.historyOpponentPotentialLp,
+    elements.historyOpponentOtherRating,
   ]) {
     fitScoreValue(element);
   }
@@ -2105,7 +2132,11 @@ function applyAuthenticatedPlayer(player) {
   renderSessionPeak();
   renderCurrentMrRank();
   setStatus(elements.authStatus, t("loggedIn", "ログイン済み"), "ok");
-  elements.startTrackingButton.disabled = false;
+  // Refreshing the official session also runs while a tracker session is
+  // active. Keep the action disabled in that state so the active indicator
+  // retains its recording color instead of reverting to the idle button skin.
+  elements.startTrackingButton.disabled =
+    Boolean(trackerState?.readOnly) || !selectedPlayer || Boolean(trackerState?.active);
   if (api.getHistoryState) {
     api.getHistoryState().then((result) => {
       if (result?.ok) {
