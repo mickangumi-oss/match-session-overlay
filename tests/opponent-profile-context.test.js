@@ -267,6 +267,22 @@ test("bounds recursive candidate collection", () => {
   assert.ok(candidates.length <= 400);
 });
 
+test("bounds official peak character entries before mapping", () => {
+  const entries = Array.from({ length: 121 }, (_, index) => ({
+    character_id: index + 1,
+    character_alpha: `Character ${index + 1}`,
+    league_info: { master_rating: 1500 + index },
+  }));
+  const result = normalizeOpponentProfileContext(officialProfilePayload(), {
+    characterId: 27,
+    peakProfileData: {
+      response: { current_season_id: 13, character_league_infos: entries },
+    },
+    peakActId: "13",
+  });
+  assert.equal(result.otherCharacter.rating, 1619);
+});
+
 test("bounds profile context cache entries and refreshes recency", () => {
   const cache = new Map();
   setBoundedCacheEntry(cache, "a", 1, 2);

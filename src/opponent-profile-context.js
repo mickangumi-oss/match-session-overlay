@@ -7,6 +7,7 @@
 
 const MAX_DEPTH = 8;
 const MAX_NODES = 400;
+const MAX_PROFILE_ARRAY_ENTRIES = 120;
 const { selectOtherCharacterPeakMr } = require("./opponent-insight");
 
 const ACT_VALUE_KEYS = [
@@ -240,7 +241,7 @@ function collectOfficialPeakMrCandidates(value, actKey) {
   const responseAct = firstOwn(response, ["current_season_id", "currentSeasonId"]);
   if (responseAct != null && String(responseAct) !== String(actKey)) return [];
   const entries = Array.isArray(response.character_league_infos)
-    ? response.character_league_infos
+    ? response.character_league_infos.slice(0, MAX_PROFILE_ARRAY_ENTRIES)
     : [];
   return entries
     .filter((entry) => entry && typeof entry === "object" && !Array.isArray(entry))
