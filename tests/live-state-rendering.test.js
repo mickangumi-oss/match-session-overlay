@@ -29,3 +29,16 @@ test("closed history details still render the always-visible recent matches", ()
 test("social pushes render without a panel visibility gate", () => {
   assert.match(rendererSource, /api\.onSocialState\?\.\(renderSocialState\)/);
 });
+
+test("session refresh keeps the tracking action in its active state", () => {
+  const start = rendererSource.indexOf("function applyAuthenticatedPlayer(");
+  const end = rendererSource.indexOf("\nasync function unwrap", start);
+  assert.notEqual(start, -1);
+  assert.notEqual(end, -1);
+  const applySource = rendererSource.slice(start, end);
+  assert.match(
+    applySource,
+    /elements\.startTrackingButton\.disabled\s*=\s*\n?\s*Boolean\(trackerState\?\.readOnly\) \|\| !selectedPlayer \|\| Boolean\(trackerState\?\.active\)/,
+  );
+  assert.doesNotMatch(applySource, /startTrackingButton\.disabled\s*=\s*false/);
+});

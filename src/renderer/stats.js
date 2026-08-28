@@ -156,7 +156,7 @@ function unwrap(result) {
 
 function fitStatsValue(element, minimumSize = 8) {
   if (!element) return;
-  element.style.fontSize = "";
+  element.style.removeProperty("font-size");
   requestAnimationFrame(() => {
     if (!element.isConnected || element.clientWidth <= 0) return;
     const computedSize = Number.parseFloat(getComputedStyle(element).fontSize);

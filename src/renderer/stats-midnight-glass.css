@@ -25,12 +25,12 @@
 .stats-window .record-labels,.stats-window .summary small{color:var(--text)!important}
 .stats-window .summary strong,.stats-window .record-values{color:var(--text)!important;text-shadow:0 0 12px color-mix(in srgb,var(--text) 42%,transparent)!important}
 .stats-window .summary>.metric-group:nth-of-type(even)>strong,.stats-window .potential-group>strong{color:var(--text)!important;text-shadow:0 0 12px color-mix(in srgb,var(--text) 42%,transparent)!important}
-.stats-window .rank-delta{color:#c783ff!important;font-size:min(calc(15px * var(--stats-value-scale)),2.4vw)!important;line-height:1!important}
+.stats-window .rank-delta{color:#c783ff!important;font-size:min(calc(15px * var(--stats-value-scale)),2.4vw);line-height:1!important}
 .stats-window .rank-delta.rank-up{color:#d76b82!important;text-shadow:0 0 9px rgba(215,107,130,.42)!important}
 .stats-window .rank-delta.rank-down{color:#668fcf!important;text-shadow:0 0 9px rgba(102,143,207,.42)!important}
 .stats-window .stats-chart>header::before,
 .stats-window .stats-chart>header::after{display:none!important}
-.stats-window.vertical .rank-delta{font-size:clamp(calc(17px * var(--stats-value-scale)),calc(4.6vw * var(--stats-value-scale)),calc(28px * var(--stats-value-scale)))!important}
+.stats-window.vertical .rank-delta{font-size:clamp(calc(17px * var(--stats-value-scale)),calc(4.6vw * var(--stats-value-scale)),calc(28px * var(--stats-value-scale)))}
 .stats-window.horizontal .stats-chart,
 .stats-window.vertical .stats-chart,
 .stats-window.overlay.horizontal .stats-chart,

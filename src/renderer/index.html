@@ -466,7 +466,6 @@
         <section class="history-opponent-profile hidden" id="historyOpponentProfile" aria-live="polite" aria-labelledby="historyOpponentProfileTitle">
           <header>
             <span class="control-label" id="historyOpponentProfileTitle" data-i18n="historyOpponentProfile">OPPONENT PROFILE REFERENCE</span>
-            <span class="history-reference-badge" data-i18n="historyReferenceBadge">REFERENCE</span>
           </header>
           <div class="history-opponent-profile-state" id="historyOpponentProfileState"></div>
           <div class="history-opponent-profile-grid" id="historyOpponentProfileGrid">
@@ -479,19 +478,19 @@
               <strong id="historyOpponentMatchRating">—</strong>
             </div>
             <div class="history-opponent-profile-field">
-              <span data-i18n="historyOpponentRecord">LOCAL RECORD</span>
+              <span data-i18n="historyOpponentRecord">LAST 20 BEFORE MATCH</span>
               <strong id="historyOpponentRecord">—</strong>
             </div>
             <div class="history-opponent-profile-field">
-              <span id="historyOpponentCurrentRatingLabel" data-i18n="historyOpponentCurrentRating">CURRENT MR / LP</span>
-              <strong id="historyOpponentCurrentRating">—</strong>
+              <span data-i18n="historyOpponentPotentialMr">CHARACTER POTENTIAL MR</span>
+              <strong id="historyOpponentPotentialMr">—</strong>
             </div>
             <div class="history-opponent-profile-field">
-              <span id="historyOpponentPeakRatingLabel" data-i18n="historyOpponentPeakRating">PEAK MR / LP</span>
-              <strong id="historyOpponentPeakRating">—</strong>
+              <span data-i18n="historyOpponentPotentialLp">CHARACTER POTENTIAL LP</span>
+              <strong id="historyOpponentPotentialLp">—</strong>
             </div>
             <div class="history-opponent-profile-field history-opponent-profile-other">
-              <span id="historyOpponentOtherRatingLabel" data-i18n="historyOpponentOtherRating">OTHER CHARACTER</span>
+              <span data-i18n="historyOpponentOtherPeak">CURRENT OTHER CHARACTER PEAK MR</span>
               <strong id="historyOpponentOtherCharacter">—</strong>
               <small id="historyOpponentOtherRating">—</small>
             </div>
@@ -598,6 +597,7 @@
     <script src="../display-number-format.js"></script>
     <script src="../potential-rating.js"></script>
     <script src="../history-current-rating.js"></script>
+    <script src="../opponent-insight.js"></script>
     <script src="./i18n.js"></script>
     <script src="./renderer.js"></script>
   </body>

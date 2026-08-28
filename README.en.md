@@ -17,18 +17,19 @@ Match Session Overlay is an unofficial Windows app that retrieves Street Fighter
 
 [Get the latest version from GitHub Releases](https://github.com/mickangumi-oss/match-session-overlay/releases/latest)
 
-Open the latest release and download the installer named `Match-Session-Overlay-x.x.x-Setup.exe` from **Assets**. Do not use installers from an unverified source.
+Open the latest release and download the installer named `Match-Session-Overlay-1.11.0-Setup.exe` from **Assets**. Do not use installers from an unverified source.
 
 For step-by-step instructions, see the [English usage guide](docs/usage.en.md).
 
-## What's new in v1.10.0
+## What's new in v1.11.0
 
-- Battle history can now fetch up to 10 pages and 100 matches concurrently, with visible progress and completion status.
-- The match list now uses the full available width, shows replay IDs, and lets you copy an ID by clicking it.
-- Selecting a match row now shows a current-Act-only opponent profile reference card.
-- The history layout now places the full-width match list above the charts and opponent-character results.
+- Selecting a match now shows the opponent's last up to 20 matches before that match, using the character from the selected match.
+- The opponent's character-specific POTENTIAL MR and LP are calculated separately, and insufficient history is shown as `—`.
+- Opponent details for the selected match are saved so the same information is shown when you reopen it.
+- The opponent profile card information was streamlined.
+- Long numbers in the opponent detail card shrink automatically to fit the card width.
 
-See the [v1.10.0 release notes](https://github.com/mickangumi-oss/match-session-overlay/releases/tag/v1.10.0) for the installer checksum and security scan results.
+See the [v1.11.0 release notes](https://github.com/mickangumi-oss/match-session-overlay/releases/tag/v1.11.0) for the installer checksum and security scan results.
 
 ## What it can show
 

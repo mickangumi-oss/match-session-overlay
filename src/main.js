@@ -124,6 +124,12 @@ const {
   setBoundedCacheEntry,
 } = require("./opponent-profile-context");
 const {
+  INSIGHT_MATCH_LIMIT,
+  buildHistoricalOpponentSnapshots,
+  mergeSnapshotObject,
+  snapshotObject,
+} = require("./opponent-insight");
+const {
   assertUpdateAllowed,
   resolveUpdateRequirement,
 } = require("./update-policy");
@@ -337,15 +343,31 @@ const HISTORY_PROFILE_LOOKUP_COOLDOWN_MS = 10 * 60 * 1000;
 // selection). Keep a short cache so a retry or character switch cannot turn
 // one polling cycle into a request burst.
 const PROFILE_REFRESH_COOLDOWN_MS = 90 * 1000;
-// Opponent profile references are fetched only when a history row is opened.
-// Keep a separate cache from the selected-player profile cache so opening a
-// row never changes the history target or tracker state.
+// Opponent profile references are fetched for acquisition-time history
+// snapshots and when a history row is opened. Keep a separate cache from the
+// selected-player profile cache so neither path changes the history target or
+// tracker state.
 const OPPONENT_PROFILE_CONTEXT_COOLDOWN_MS = 5 * 60 * 1000;
 // The profile-reference IPC accepts renderer-selected tuples. Bound both the
 // waiting work and retained results so distinct untrusted keys cannot grow
 // scheduler backlog or process memory without limit.
 const OPPONENT_PROFILE_CONTEXT_MAX_IN_FLIGHT = 16;
 const OPPONENT_PROFILE_CONTEXT_MAX_CACHE_ENTRIES = 128;
+const OPPONENT_INSIGHT_MAX_PAGES = Math.ceil(
+  INSIGHT_MATCH_LIMIT / MATCH_HISTORY_PAGE_SIZE,
+);
+const OPPONENT_INSIGHT_FETCH_CONCURRENCY = OPPONENT_INSIGHT_MAX_PAGES;
+const opponentInsightFetchOptions = {
+  maxPages: OPPONENT_INSIGHT_MAX_PAGES,
+  concurrency: OPPONENT_INSIGHT_FETCH_CONCURRENCY,
+};
+const OPPONENT_OFFICIAL_HISTORY_MAX_CACHE_ENTRIES = 64;
+// The official PLAY page obtains character peak MR from this API rather than
+// from profile/<id>.json. Its response is joined to the profile payload only
+// after the current Act has been identified.
+const OPPONENT_PEAK_PROFILE_API_PATH =
+  "/6/buckler/api/profile/play/act/highest/master_rating_info";
+
 fs.mkdirSync(userDataPath, { recursive: true });
 fs.mkdirSync(sessionDataPath, { recursive: true });
 fs.mkdirSync(matchHistoryDirectory, { recursive: true });
@@ -430,6 +452,8 @@ const profileRefreshInFlight = new Map();
 const profileCharacterNameCache = new Map();
 const opponentProfileContextCache = new Map();
 const opponentProfileContextInFlight = new Map();
+const opponentOfficialHistoryCache = new Map();
+const opponentOfficialHistoryInFlight = new Map();
 let matchHistoryFetchInFlight = null;
 let matchHistoryFetchProgress = null;
 let matchHistoryFetchSummary = null;
@@ -728,6 +752,9 @@ function normalizeStoredHistoryRecord(value) {
   const ownRatingType = ["MR", "LP"].includes(value.ownRatingType ?? value.ratingType)
     ? value.ownRatingType ?? value.ratingType
     : null;
+  const normalizedOpponentInsightSnapshots = snapshotObject(
+    value.opponentInsightSnapshots,
+  );
   return {
     replayId,
     profileId,
@@ -760,6 +787,17 @@ function normalizeStoredHistoryRecord(value) {
     opponentRatingType: ["MR", "LP"].includes(value.opponentRatingType)
       ? value.opponentRatingType
       : null,
+    opponentMr: finiteOrNull(
+      value.opponentMr ??
+        (value.opponentRatingType === "MR" ? value.opponentRating : null),
+    ),
+    opponentLp: finiteOrNull(
+      value.opponentLp ??
+        (value.opponentRatingType === "LP" ? value.opponentRating : null),
+    ),
+    ...(normalizedOpponentInsightSnapshots
+      ? { opponentInsightSnapshots: normalizedOpponentInsightSnapshots }
+      : {}),
   };
 }
 
@@ -934,21 +972,28 @@ function mergeMatchHistory(
   const existing = new Map(
     store.records.map((record) => [record.replayId, record]),
   );
+  const normalizedIncoming = replays
+    .map((replay) => {
+      const replayId = String(replay?.replayId ?? "").trim();
+      const previous = replayId ? existing.get(replayId) : null;
+      return normalizeStoredHistoryRecord({
+        ...previous,
+        ...replay,
+        // Prefer a fresh battle-log value, while retaining profile-enriched
+        // parallel ratings when an older API response omits one of them.
+        ownMr: replay?.ownMr ?? replay?.mr ?? previous?.ownMr,
+        ownLp: replay?.ownLp ?? replay?.lp ?? previous?.ownLp,
+        profileId: normalizedProfileId,
+      });
+    })
+    .filter(Boolean);
   let changed = false;
-  for (const replay of replays) {
-    const replayId = String(replay?.replayId ?? "").trim();
-    const previous = replayId ? existing.get(replayId) : null;
-    const normalized = normalizeStoredHistoryRecord({
-      ...previous,
-      ...replay,
-      // Prefer a fresh battle-log value, while retaining profile-enriched
-      // parallel ratings when an older API response omits one of them.
-      ownMr: replay?.ownMr ?? replay?.mr ?? previous?.ownMr,
-      ownLp: replay?.ownLp ?? replay?.lp ?? previous?.ownLp,
-      profileId: normalizedProfileId,
-    });
-    if (!normalized) continue;
-    if (!previous || JSON.stringify(previous) !== JSON.stringify(normalized)) {
+  for (const replay of normalizedIncoming) {
+    const replayId = replay.replayId;
+    const previous = existing.get(replayId) ?? null;
+    const merged = { ...previous, ...replay, profileId: normalizedProfileId };
+    const normalized = normalizeStoredHistoryRecord(merged);
+    if (normalized && JSON.stringify(previous) !== JSON.stringify(normalized)) {
       existing.set(normalized.replayId, normalized);
       changed = true;
     }
@@ -962,6 +1007,40 @@ function mergeMatchHistory(
   store.records = retained;
   bumpHistoryRevision(normalizedProfileId);
   if (persist) persistMatchHistoryStore(normalizedProfileId, store);
+  if (notify) sendHistoryState();
+  return true;
+}
+
+// Derived opponent history is attached to the exact local replay record. It
+// is intentionally not part of the normal battle-log merge payload, so a
+// later import cannot replace a completed historical snapshot with current or
+// incomplete profile data.
+function persistOpponentInsightSnapshots(
+  historyOwnerProfileId,
+  replayId,
+  snapshots,
+  { notify = true } = {},
+) {
+  const profileId = normalizeHistoryProfileId(historyOwnerProfileId);
+  const normalizedReplayId = String(replayId ?? "").trim();
+  const incoming = snapshotObject(snapshots);
+  if (!profileId || !normalizedReplayId || !incoming) return false;
+  const store = loadMatchHistoryStore(profileId);
+  const index = store.records.findIndex(
+    (record) => record.replayId === normalizedReplayId,
+  );
+  if (index < 0) return false;
+  const previous = snapshotObject(store.records[index].opponentInsightSnapshots) ?? {};
+  const merged = mergeSnapshotObject(previous, incoming) ?? {};
+  const changed = JSON.stringify(previous) !== JSON.stringify(merged);
+  if (!changed) return false;
+  store.records[index] = normalizeStoredHistoryRecord({
+    ...store.records[index],
+    opponentInsightSnapshots: merged,
+  });
+  if (!store.records[index]) return false;
+  bumpHistoryRevision(profileId);
+  persistMatchHistoryStore(profileId, store);
   if (notify) sendHistoryState();
   return true;
 }
@@ -3274,6 +3353,8 @@ async function clearPrivateDataWithConfirmation() {
   profileCharacterNameCache.clear();
   opponentProfileContextCache.clear();
   opponentProfileContextInFlight.clear();
+  opponentOfficialHistoryCache.clear();
+  opponentOfficialHistoryInFlight.clear();
   rankingCache.clear();
   rankingInFlight.clear();
   clearAllRankingRetryTimers();
@@ -4352,6 +4433,22 @@ async function refreshProfilePlayer(
   });
 }
 
+function emptyOpponentOfficialInsight() {
+  const emptyRating = () => ({
+    values: [],
+    potential: null,
+    currentValue: null,
+    currentApplied: false,
+  });
+  return {
+    matches: 0,
+    wins: 0,
+    losses: 0,
+    draws: 0,
+    ratings: { MR: emptyRating(), LP: emptyRating() },
+  };
+}
+
 function emptyOpponentProfileContext({
   profileId = null,
   characterId = null,
@@ -4371,23 +4468,257 @@ function emptyOpponentProfileContext({
       currentRating: null,
     },
     otherCharacter: null,
+    opponentInsight: emptyOpponentOfficialInsight(),
   };
 }
 
-async function fetchHistoryOpponentContext({
+function opponentInsightFromSnapshots(snapshots) {
+  const normalized = snapshotObject(snapshots) ?? {};
+  const first = Object.values(normalized).find(
+    (snapshot) => snapshot.wins + snapshot.losses + snapshot.draws > 0,
+  ) ?? normalized.MR ?? normalized.LP ?? null;
+  const insight = {
+    matches: first ? first.wins + first.losses + first.draws : 0,
+    wins: first?.wins ?? 0,
+    losses: first?.losses ?? 0,
+    draws: first?.draws ?? 0,
+    ratings: {},
+  };
+  for (const type of ["MR", "LP"]) {
+    const snapshot = normalized[type];
+    insight.ratings[type] = {
+      values: [],
+      potential: snapshot?.status === "ready" && snapshot.complete === true
+        ? snapshot.potential
+        : null,
+      currentValue: snapshot?.matchTimeRating ?? null,
+      currentApplied: false,
+    };
+  }
+  return insight;
+}
+
+function opponentOfficialHistoryCacheKey(profileId, requestedLocale) {
+  const normalizedProfileId = normalizeHistoryProfileId(profileId);
+  return normalizedProfileId && requestedLocale
+    ? `${requestedLocale}:${normalizedProfileId}`
+    : "";
+}
+
+async function fetchOpponentPeakProfile({
   profileId,
-  opponentUserCode,
-  characterId,
-  characterDisplayName,
+  actId,
+  generation,
+  requestedLocale,
+} = {}) {
+  const normalizedProfileId = normalizeHistoryProfileId(profileId);
+  const targetSeasonId = Number(actId);
+  if (
+    !normalizedProfileId ||
+    !Number.isInteger(targetSeasonId) ||
+    targetSeasonId < 0 ||
+    !requestedLocale
+  ) {
+    return null;
+  }
+  const requestHeaders = {
+    Accept: "application/json",
+    "Content-Type": "application/json",
+    Origin: SERVICE_ORIGIN,
+    Referer: `${buildServiceHomeUrl(SERVICE_ORIGIN, requestedLocale)}/profile/${encodeURIComponent(normalizedProfileId)}/play`,
+  };
+  const requestEndpoint = async (endpointPath, body, optionOverrides = {}) =>
+    fetchServiceWithRateLimit(
+      new URL(endpointPath, SERVICE_ORIGIN).toString(),
+      {
+        method: "POST",
+        credentials: "include",
+        redirect: "follow",
+        headers: requestHeaders,
+        body: JSON.stringify(body),
+        ...optionOverrides,
+      },
+      { scope: "history", priority: "interactive" },
+    );
+  const requestBody = {
+    // The official PLAY page passes the numeric `sid` from its profile
+    // payload. Keep the same wire type; the endpoint returns an empty object
+    // for the string form even when the login session is valid.
+    targetShortId: Number(normalizedProfileId),
+    targetSeasonId,
+    locale: requestedLocale,
+    // The official PLAY page sends peak:false for the highest/master_rating_info
+    // view; the endpoint itself defines the returned master_rating as peak.
+    peak: false,
+  };
+  const response = await requestEndpoint(OPPONENT_PEAK_PROFILE_API_PATH, requestBody);
+  assertPrivateDataGeneration(generation);
+  if (response.status === 429) {
+    throw serviceRateLimitError(response.headers.get("retry-after"));
+  }
+  if (
+    response.status === 401 ||
+    response.status === 403 ||
+    response.url.includes("/auth/loginep")
+  ) {
+    throw new Error("SERVICE_AUTH_REQUIRED");
+  }
+  if (!response.ok) throw new Error(`SERVICE_HTTP_${response.status}`);
+  const contentType = response.headers.get("content-type") || "";
+  if (!contentType.includes("json")) throw new Error("SERVICE_AUTH_REQUIRED");
+  const value = await response.json();
+  return value;
+}
+
+async function fetchOpponentOfficialHistory({
+  profileId,
+  generation,
+  requestedLocale,
+  selectedRecord = null,
+} = {}) {
+  const normalizedProfileId = normalizeHistoryProfileId(profileId);
+  const cacheKey = opponentOfficialHistoryCacheKey(
+    normalizedProfileId,
+    requestedLocale,
+  );
+  if (!cacheKey) return { data: null, records: [], retrievedAt: null };
+  const now = Date.now();
+  const cached = opponentOfficialHistoryCache.get(cacheKey);
+  const history = cached?.history ?? {
+    data: null,
+    records: [],
+    pages: {},
+    rawCounts: {},
+    retrievedAt: null,
+    complete: false,
+  };
+  const retrievedAt = history.retrievedAt ?? now;
+  const save = () => setBoundedCacheEntry(
+    opponentOfficialHistoryCache,
+    cacheKey,
+    { fetchedAt: now, history },
+    OPPONENT_OFFICIAL_HISTORY_MAX_CACHE_ENTRIES,
+  );
+  if (!history.data) {
+    const profileData = await shareInFlightRequest(
+      opponentOfficialHistoryInFlight,
+      `${cacheKey}:profile`,
+      () => fetchServiceJson(
+        `profile/${encodeURIComponent(normalizedProfileId)}.json`,
+        {},
+        true,
+        "history",
+        "interactive",
+        requestedLocale,
+      ),
+    );
+    assertPrivateDataGeneration(generation);
+    if (requestedLocale !== serviceLocale()) throw new Error("HISTORY_LOCALE_CHANGED");
+    history.data = profileData;
+    history.retrievedAt = retrievedAt;
+  }
+  const selectedReplayId = String(selectedRecord?.replayId ?? "").trim();
+  const selectedCharacterId = Number(selectedRecord?.opponentCharacterId) || null;
+  const hasEnoughBeforeCutoff = () => {
+    const cutoff = history.records.find((record) => record.replayId === selectedReplayId);
+    if (!cutoff || !selectedCharacterId) return false;
+    const cutoffTime = Number(cutoff.playedAt ?? cutoff.uploadedAt);
+    if (!Number.isFinite(cutoffTime) || cutoffTime <= 0) return false;
+    return history.records.filter((record) =>
+      record.replayId !== selectedReplayId &&
+      record.matchType === "ranked" &&
+      Number(record.characterId) === selectedCharacterId &&
+      Number(record.playedAt ?? record.uploadedAt) < cutoffTime,
+    ).length >= INSIGHT_MATCH_LIMIT;
+  };
+  let lastPageWasShort = false;
+  const safeMaxPages = Math.max(
+    opponentInsightFetchOptions.maxPages,
+    MATCH_HISTORY_MAX_PAGES,
+  );
+  for (let page = 1; page <= safeMaxPages; page += 1) {
+    if (history.pages[page]) {
+      lastPageWasShort = Number(history.pages[page].rawCount) < MATCH_HISTORY_PAGE_SIZE;
+    } else {
+      const pageResult = await shareInFlightRequest(
+        opponentOfficialHistoryInFlight,
+        `${cacheKey}:page:${page}`,
+        () => fetchRankedReplaysPage(
+          normalizedProfileId,
+          page,
+          "history",
+          "history",
+          requestedLocale,
+        ),
+      );
+      assertPrivateDataGeneration(generation);
+      if (requestedLocale !== serviceLocale()) throw new Error("HISTORY_LOCALE_CHANGED");
+      history.pages[page] = {
+        rawCount: Number(pageResult?.rawCount) || 0,
+        records: Array.isArray(pageResult?.replays) ? pageResult.replays : [],
+      };
+      const byReplayId = new Map(history.records.map((record) => [record.replayId, record]));
+      for (const record of history.pages[page].records) {
+        if (record?.replayId) byReplayId.set(record.replayId, record);
+      }
+      history.records = [...byReplayId.values()];
+      history.rawCounts[page] = history.pages[page].rawCount;
+      lastPageWasShort = history.pages[page].rawCount < MATCH_HISTORY_PAGE_SIZE;
+      save();
+    }
+    if (hasEnoughBeforeCutoff() || lastPageWasShort) break;
+  }
+  history.complete = hasEnoughBeforeCutoff() || lastPageWasShort;
+  save();
+  return history;
+}
+
+async function fetchHistoryOpponentContext({
+  profileId: _profileId,
+  opponentUserCode: _opponentUserCode,
+  characterId: _characterId,
+  characterDisplayName: _characterDisplayName,
+  historyOwnerProfileId,
+  replayId,
+  selectedRecord = null,
+  forceRefresh = false,
 } = {}) {
   ensureUpdateAllowed();
-  const normalizedProfileId = normalizeHistoryProfileId(profileId ?? opponentUserCode);
-  const normalizedCharacterId = Number(characterId) > 0 ? Number(characterId) : null;
+  const activeOwnerProfileId = activeHistoryProfileId();
+  const requestedOwnerProfileId = normalizeHistoryProfileId(
+    historyOwnerProfileId,
+  );
+  if (
+    requestedOwnerProfileId &&
+    activeOwnerProfileId &&
+    requestedOwnerProfileId !== activeOwnerProfileId
+  ) {
+    return emptyOpponentProfileContext({ status: "empty" });
+  }
+  const ownerProfileId = activeOwnerProfileId ?? requestedOwnerProfileId;
+  const requestedReplayId = String(replayId ?? selectedRecord?.replayId ?? "").trim();
+  const ownerStore = ownerProfileId ? loadMatchHistoryStore(ownerProfileId) : null;
+  const resolvedRecord = ownerStore?.records?.find(
+    (record) => record.replayId === requestedReplayId,
+  ) ?? null;
+  if (!resolvedRecord) {
+    return emptyOpponentProfileContext({
+      profileId: ownerProfileId,
+      status: "empty",
+    });
+  }
+  const normalizedProfileId = normalizeHistoryProfileId(
+    resolvedRecord.opponentUserCode,
+  );
+  const normalizedCharacterId = Number(resolvedRecord.opponentCharacterId) > 0
+    ? Number(resolvedRecord.opponentCharacterId)
+    : null;
+  const resolvedCharacterDisplayName = resolvedRecord.opponentCharacterName;
   if (!normalizedProfileId || normalizedCharacterId == null) {
     return emptyOpponentProfileContext({
       profileId: normalizedProfileId,
       characterId: normalizedCharacterId,
-      characterDisplayName,
+      characterDisplayName: resolvedCharacterDisplayName,
     });
   }
 
@@ -4395,7 +4726,17 @@ async function fetchHistoryOpponentContext({
   const requestedLocale = serviceLocale();
   // The current Act is a separate cache scope. A future historical-Act view
   // can add another explicit Act key without changing this request path.
-  const cacheKey = `${requestedLocale}:${normalizedProfileId}:current:${normalizedCharacterId}`;
+  const cacheKey = `${requestedLocale}:${ownerProfileId}:${requestedReplayId}:${normalizedProfileId}:${normalizedCharacterId}`;
+  if (forceRefresh === true) {
+    // A new local match can make the selected opponent's official history
+    // stale. The renderer only sends this flag after detecting a genuinely
+    // new replay for the displayed opponent, so one refresh can bypass the
+    // normal five-minute cache without turning the card into a live poll.
+    opponentProfileContextCache.delete(cacheKey);
+    opponentOfficialHistoryCache.delete(
+      opponentOfficialHistoryCacheKey(normalizedProfileId, requestedLocale),
+    );
+  }
   const now = Date.now();
   const cached = opponentProfileContextCache.get(cacheKey);
   if (
@@ -4416,7 +4757,7 @@ async function fetchHistoryOpponentContext({
     return emptyOpponentProfileContext({
       profileId: normalizedProfileId,
       characterId: normalizedCharacterId,
-      characterDisplayName,
+      characterDisplayName: resolvedCharacterDisplayName,
       status: "error",
     });
   }
@@ -4427,7 +4768,22 @@ async function fetchHistoryOpponentContext({
     async () => {
       const retrievedAt = Date.now();
       try {
-        const data = await fetchServiceJson(
+        const storedSnapshots = snapshotObject(
+          resolvedRecord.opponentInsightSnapshots,
+        );
+        // A persisted snapshot is authoritative even when it records a
+        // definitive insufficiency. Transient network/auth failures are not
+        // persisted, so only rows without any snapshot need battle-log I/O.
+        const hasPersistedSnapshot = Object.keys(storedSnapshots ?? {}).length > 0;
+        const officialHistory = hasPersistedSnapshot
+          ? null
+          : await fetchOpponentOfficialHistory({
+              profileId: normalizedProfileId,
+              generation,
+              requestedLocale,
+              selectedRecord: resolvedRecord,
+            });
+        const data = officialHistory?.data ?? await fetchServiceJson(
           `profile/${encodeURIComponent(normalizedProfileId)}.json`,
           {},
           true,
@@ -4435,27 +4791,73 @@ async function fetchHistoryOpponentContext({
           "interactive",
           requestedLocale,
         );
+        const opponentRecords = officialHistory?.records ?? [];
+        if (!data) throw new Error("PROFILE_REFERENCE_EMPTY");
         assertPrivateDataGeneration(generation);
-        if (requestedLocale !== serviceLocale()) {
-          return emptyOpponentProfileContext({
-            profileId: normalizedProfileId,
-            characterId: normalizedCharacterId,
-            characterDisplayName,
-          });
-        }
-        const context = normalizeOpponentProfileContext(data, {
+        if (requestedLocale !== serviceLocale()) throw new Error("HISTORY_LOCALE_CHANGED");
+        const baseContext = normalizeOpponentProfileContext(data, {
           profileId: normalizedProfileId,
           characterId: normalizedCharacterId,
-          characterDisplayName,
+          characterDisplayName: resolvedCharacterDisplayName,
           retrievedAt,
         });
+        let peakProfileData = null;
+        if (baseContext.act?.id != null) {
+          try {
+            peakProfileData = await fetchOpponentPeakProfile({
+              profileId: normalizedProfileId,
+              actId: baseContext.act.id,
+              generation,
+              requestedLocale,
+            });
+          } catch {
+            // Peak MR is an optional companion request. Keep the already
+            // normalized profile context (and its strict dash fallback) when
+            // the official peak endpoint is unavailable.
+          }
+        }
+        assertPrivateDataGeneration(generation);
+        if (requestedLocale !== serviceLocale()) throw new Error("HISTORY_LOCALE_CHANGED");
+        const context = peakProfileData
+          ? normalizeOpponentProfileContext(data, {
+              profileId: normalizedProfileId,
+              characterId: normalizedCharacterId,
+              characterDisplayName: resolvedCharacterDisplayName,
+              retrievedAt,
+              peakProfileData,
+              peakActId: baseContext.act.id,
+            })
+          : baseContext;
+        let snapshots = storedSnapshots;
+        if (!hasPersistedSnapshot) {
+          snapshots = buildHistoricalOpponentSnapshots({
+            records: opponentRecords,
+            selectedRecord: resolvedRecord,
+            historyOwnerProfileId: ownerProfileId,
+            opponentUserCode: normalizedProfileId,
+            characterId: normalizedCharacterId,
+            potentialRatingValue,
+            historyComplete: Boolean(officialHistory?.complete),
+            capturedAt: retrievedAt,
+          });
+          persistOpponentInsightSnapshots(
+            ownerProfileId,
+            resolvedRecord.replayId,
+            snapshots,
+          );
+        }
+        const opponentInsight = opponentInsightFromSnapshots(snapshots);
+        const enrichedContext = {
+          ...context,
+          opponentInsight,
+        };
         setBoundedCacheEntry(
           opponentProfileContextCache,
           cacheKey,
-          { fetchedAt: retrievedAt, context },
+          { fetchedAt: retrievedAt, context: enrichedContext },
           OPPONENT_PROFILE_CONTEXT_MAX_CACHE_ENTRIES,
         );
-        return context;
+        return enrichedContext;
       } catch (error) {
         if (error?.message === "PRIVATE_DATA_CLEARED") throw error;
         // A profile-reference failure must never replace the already-rendered
@@ -4463,15 +4865,12 @@ async function fetchHistoryOpponentContext({
         const context = emptyOpponentProfileContext({
           profileId: normalizedProfileId,
           characterId: normalizedCharacterId,
-          characterDisplayName,
+          characterDisplayName: resolvedCharacterDisplayName,
           status: "error",
         });
-        setBoundedCacheEntry(
-          opponentProfileContextCache,
-          cacheKey,
-          { fetchedAt: retrievedAt, context },
-          OPPONENT_PROFILE_CONTEXT_MAX_CACHE_ENTRIES,
-        );
+        // Network/auth failures are transient. Do not persist/cache this
+        // card-local error as a historical insufficiency; the next row click
+        // must be allowed to retry acquisition.
         return context;
       }
     },
@@ -4622,6 +5021,8 @@ async function fetchLocalMatchHistory() {
     let newReplayCount = 0;
     let summaryProfileId = profileId;
     let fetchTerminalStateSent = false;
+    let completedReplays = [];
+    let importMerged = false;
     try {
       let player =
         historyViewPlayer ?? trackerState.player ?? (await checkAuthentication()).player;
@@ -4644,7 +5045,7 @@ async function fetchLocalMatchHistory() {
         fetchedCount: 0,
       };
       sendHistoryState();
-      await fetchMatchHistoryPages(
+      const orderedReplays = await fetchMatchHistoryPages(
         player.profileId,
         async ({ rawCount, completedPages: completedPageCount, replays }) => {
           assertPrivateDataGeneration(generation);
@@ -4669,17 +5070,23 @@ async function fetchLocalMatchHistory() {
             maxPages: MATCH_HISTORY_MAX_PAGES,
             fetchedCount,
           };
-          // Merge each successful page in memory so a later failure can retain
-          // the partial result, but defer the history UI redraw until the
-          // complete import result is ready.
-          mergeMatchHistory(replays, player.profileId, {
-            persist: false,
-            notify: false,
-          });
+          // Keep pages in memory until every request has settled so the final
+          // import is independent of completion order; partial results are
+          // merged only in the error path.
+          completedReplays.push(...replays);
           sendHistoryFetchProgress();
         },
         requestedLocale,
       );
+      const importReplays = Array.isArray(orderedReplays) && orderedReplays.length
+        ? orderedReplays
+        : completedReplays;
+      assertPrivateDataGeneration(generation);
+      if (serviceLocale() !== requestedLocale) {
+        throw new Error("HISTORY_LOCALE_CHANGED");
+      }
+      mergeMatchHistory(importReplays, player.profileId, { persist: false, notify: false });
+      importMerged = true;
       assertPrivateDataGeneration(generation);
       if (serviceLocale() !== requestedLocale) {
         throw new Error("HISTORY_LOCALE_CHANGED");
@@ -4752,6 +5159,13 @@ async function fetchLocalMatchHistory() {
         error?.message !== "PRIVATE_DATA_CLEARED" &&
         summaryProfileId
       ) {
+        if (!importMerged && completedReplays.length) {
+          mergeMatchHistory(completedReplays, summaryProfileId, {
+            persist: false,
+            notify: false,
+          });
+          importMerged = true;
+        }
         persistMatchHistoryStore(summaryProfileId);
         await persistedDataWriter
           .flush(historyStorePath(summaryProfileId))
