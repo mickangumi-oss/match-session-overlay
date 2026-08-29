@@ -31,7 +31,7 @@ test("security preflight uses the separated Luna/high profile", () => {
   assert.match(config.outputDirectory, new RegExp(`v${version.replaceAll(".", "\\.")}-preflight$`));
 });
 
-test("formal release profile remains strict and separate from preflight output", () => {
+test("formal release profile uses Luna/high and remains separate from preflight output", () => {
   const release = printConfig([]);
   const preflight = printConfig(["--preflight"]);
   assert.equal(release.status, 0, release.stderr);
@@ -39,8 +39,8 @@ test("formal release profile remains strict and separate from preflight output",
   const releaseConfig = JSON.parse(release.stdout);
   const preflightConfig = JSON.parse(preflight.stdout);
   assert.equal(releaseConfig.profile, "release");
-  assert.equal(releaseConfig.model, "gpt-5.6-sol");
-  assert.equal(releaseConfig.effort, "xhigh");
+  assert.equal(releaseConfig.model, "gpt-5.6-luna");
+  assert.equal(releaseConfig.effort, "high");
   assert.notEqual(releaseConfig.outputDirectory, preflightConfig.outputDirectory);
 });
 

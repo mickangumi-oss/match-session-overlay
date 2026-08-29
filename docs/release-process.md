@@ -54,7 +54,7 @@ $env:CODEX_SECURITY_PREFLIGHT_MAX_COST = "4.5" # 任意。組織の予算に合�
 pnpm release:security:preflight
 ```
 
-preflightは開発中の確認専用です。Lunaの結果だけで公開可否を決めず、リリース候補の最終判定には必ず次の厳格な`release:security`を明示実行します。これは正式ゲートの検出品質と再現性を、日常確認のコスト最適化から分離するためです。
+preflightは開発中の確認専用です。Lunaの結果だけで公開可否を決めず、リリース候補では次の厳格な`release:security`を明示実行します。正式スキャンもLuna/highで実行しますが、GitHub公開・署名・外部送信の最終判断はSolが短く確認します。これにより、正式ゲートを維持しながらリリース時のトークン消費を抑えます。
 
 続いて、固定済みコミットを読み取り専用の標準スキャンにかけます。
 
@@ -67,7 +67,7 @@ pnpm release:security
 - 対象: このGitリポジトリ全体
 - 認証: 既存のChatGPTサインイン（自動ログインやAPIキー保存は行わない）
 - 結果: `..\_tools\codex-security\results\match-session-overlay\v<version>`
-- 判定: Medium以上の検出、スキャンエラー、不完全なcoverageで停止
+- 判定: Medium以上の検出、スキャンエラー、不完全なcoverageで停止（モデルはLuna/high）
 - 再実行: 同じバージョンの前回結果はCLIのアーカイブ機能で退避
 
 `report.md`、`findings.json`、`coverage.json`を確認します。Lowの指摘も公開前に内容を確認します。誤検知の判断や修正は別作業として行い、ソースまたは依存関係を変更した場合は、リリース候補を再度固定してCodex Securityをやり直します。
