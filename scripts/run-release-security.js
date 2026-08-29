@@ -63,9 +63,10 @@ const profile = preflight
     }
   : {
       name: "release",
-      // Keep the formal release gate on the CLI's existing strict defaults.
-      model: "gpt-5.6-sol",
-      effort: "xhigh",
+      // Keep the formal scan strict while using Luna so a release remains
+      // affordable. Sol retains the short final publication decision.
+      model: "gpt-5.6-luna",
+      effort: "high",
       outputDirectory,
     };
 
