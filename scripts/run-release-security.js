@@ -29,17 +29,45 @@ const outputDirectory = path.join(
   securityRoot,
   "results",
   "match-session-overlay",
-  `v${packageJson.version}`,
+  `v${packageJson.version}${process.argv.includes("--preflight") ? "-preflight" : ""}`,
 );
 
 const options = new Set(process.argv.slice(2));
-const supportedOptions = new Set(["--dry-run"]);
+const supportedOptions = new Set(["--dry-run", "--preflight", "--print-config"]);
 for (const option of options) {
   if (!supportedOptions.has(option)) {
     throw new Error(`Unsupported option: ${option}`);
   }
 }
 const dryRunOnly = options.has("--dry-run");
+const preflight = options.has("--preflight");
+const printConfigOnly = options.has("--print-config");
+const preflightMaxCost = preflight
+  ? process.env.CODEX_SECURITY_PREFLIGHT_MAX_COST?.trim()
+  : undefined;
+if (
+  preflightMaxCost !== undefined &&
+  (!/^\d+(?:\.\d+)?$/.test(preflightMaxCost) || Number(preflightMaxCost) <= 0)
+) {
+  throw new Error(
+    "CODEX_SECURITY_PREFLIGHT_MAX_COST must be a positive number.",
+  );
+}
+
+const profile = preflight
+  ? {
+      name: "preflight",
+      model: "gpt-5.6-terra",
+      effort: "high",
+      outputDirectory,
+    }
+  : {
+      name: "release",
+      // Keep the formal release gate on the CLI's existing strict defaults.
+      model: "gpt-5.6-sol",
+      effort: "xhigh",
+      outputDirectory,
+    };
 
 function isSameOrWithin(parent, candidate) {
   const relative = path.relative(path.resolve(parent), path.resolve(candidate));
@@ -75,6 +103,19 @@ if (!isSameOrWithin(securityRoot, outputDirectory)) {
 }
 if (isSameOrWithin(root, outputDirectory)) {
   throw new Error(`Security output must be outside the repository: ${outputDirectory}`);
+}
+
+if (printConfigOnly) {
+  process.stdout.write(
+    `${JSON.stringify({
+      profile: profile.name,
+      model: profile.model,
+      effort: profile.effort,
+      outputDirectory: profile.outputDirectory,
+      maxCost: preflightMaxCost || null,
+    })}\n`,
+  );
+  process.exit(0);
 }
 
 const [nodeMajor, nodeMinor] = process.versions.node.split(".").map(Number);
@@ -116,12 +157,18 @@ const commonArguments = [
   outputDirectory,
   "--auth",
   "chatgpt",
+  "--mode",
+  "standard",
 ];
+// Pin both profiles so a future CLI default change cannot silently alter the
+// formal gate or the documented low-cost preflight.
+const profileArguments = ["--model", profile.model, "--effort", profile.effort];
+if (preflightMaxCost) profileArguments.push("--max-cost", preflightMaxCost);
 
 console.log(`Codex Security target: ${root}`);
 console.log(`Codex Security output: ${outputDirectory}`);
-console.log("Running credential-free release scan dry-run...");
-const dryRunArguments = [...commonArguments, "--dry-run"];
+console.log(`Running credential-free ${profile.name} scan dry-run...`);
+const dryRunArguments = [...commonArguments, ...profileArguments, "--dry-run"];
 if (fs.existsSync(outputDirectory)) dryRunArguments.push("--archive-existing");
 const dryRun = run(process.execPath, dryRunArguments, {
   env: environment,
@@ -130,14 +177,13 @@ const dryRun = run(process.execPath, dryRunArguments, {
 if (dryRun.status !== 0) process.exit(dryRun.status ?? 2);
 
 if (dryRunOnly) {
-  console.log("Codex Security release scan dry-run passed. No scan was started.");
+  console.log(`Codex Security ${profile.name} scan dry-run passed. No scan was started.`);
   process.exit(0);
 }
 
 const scanArguments = [
   ...commonArguments,
-  "--mode",
-  "standard",
+  ...profileArguments,
   "--headless",
   "--fail-on-severity",
   "medium",
@@ -146,13 +192,13 @@ const scanArguments = [
 ];
 if (fs.existsSync(outputDirectory)) scanArguments.push("--archive-existing");
 
-console.log("Running read-only Codex Security release scan...");
+console.log(`Running read-only Codex Security ${profile.name} scan...`);
 const scan = run(process.execPath, scanArguments, {
   env: environment,
   stdio: "inherit",
 });
 if (scan.status !== 0) {
-  console.error(`Codex Security release gate did not pass. Review: ${outputDirectory}`);
+  console.error(`Codex Security ${profile.name} scan did not pass. Review: ${outputDirectory}`);
   process.exit(scan.status ?? 2);
 }
 
@@ -177,5 +223,9 @@ if (coverage.completeness !== "complete") {
   );
 }
 
-console.log("Codex Security release gate passed with complete coverage.");
+console.log(
+  preflight
+    ? "Codex Security preflight passed with complete coverage. It is not a release gate."
+    : "Codex Security release gate passed with complete coverage.",
+);
 console.log(`Review the report before building: ${path.join(outputDirectory, "report.md")}`);
