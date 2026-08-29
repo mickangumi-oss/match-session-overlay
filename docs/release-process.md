@@ -2,6 +2,12 @@
 
 この手順は、Match Session OverlayのWindows向け正式リリースに使用します。公開対象を固定し、ソース、完成したインストーラー、更新マニフェストを別々に検証します。
 
+## 0. code-review-graphのリリース前preflight
+
+- リリース作業を始める前に、このリポジトリを明示してcode-review-graphのread-only `detect_changes_tool` または `get_review_context_tool` を実行し、変更対象と依存関係の最小コンテキストを取得する。
+- MCPが見えない場合は、同じタスクの検証済みCLIで代替する。グラフDBはリポジトリ外の `C:\Users\zuga\CodexWork\tools\code-review-graph\data` 配下に置き、認証情報、秘密鍵、ブラウザデータ、個人情報、外部操作権限を渡さない。
+- graph preflightは以降のcheck、QA、Codex Security、build、署名、ハッシュ、Defender、VirusTotal、公開後確認の入口を整理するためのものであり、これらのゲートや明示承認を省略・代替しない。ソース、依存、設定を変更したらグラフを更新し、影響するQAをやり直す。
+
 ## 1. リリース候補を固定する
 
 - バージョン、README、リリースノート、依存関係を更新する
