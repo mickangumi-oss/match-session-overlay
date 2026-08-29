@@ -17,6 +17,8 @@
     "prepare": "node scripts/install-local-hooks.js",
     "build": "electron-builder --win nsis --publish never",
     "release:security:dry-run": "node scripts/run-release-security.js --dry-run",
+    "release:security:preflight": "node scripts/run-release-security.js --preflight",
+    "release:security:preflight:dry-run": "node scripts/run-release-security.js --preflight --dry-run",
     "release:security": "node scripts/run-release-security.js",
     "release:manifest": "node scripts/create-release-manifest.js"
   },
