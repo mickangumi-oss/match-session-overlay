@@ -57,7 +57,7 @@ if (
 const profile = preflight
   ? {
       name: "preflight",
-      model: "gpt-5.6-terra",
+      model: "gpt-5.6-luna",
       effort: "high",
       outputDirectory,
     }
