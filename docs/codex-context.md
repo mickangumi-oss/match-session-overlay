@@ -80,7 +80,7 @@ At the start of a new Match Session Overlay task:
 Match Session Overlayの全タスク（調査、実装、テスト、ビルド、リリース、LP、分析、運用確認）は、作業開始時に対象リポジトリを明示したcode-review-graphのread-only preflightを行う。最初に `detect_changes_tool` または `get_review_context_tool` を使い、必要な場合だけ `query_graph_tool` と `semantic_search_nodes_tool` を追加する。グラフ結果で依頼に直接関係するファイルと依存関係を絞り、リポジトリ全文や過去会話を読み込まない。
 
 - ビルド／リリースでもgraph preflightを `pnpm check`、`pnpm qa:local`、security、installer、manifest、署名、ハッシュ、Defender、VirusTotal、公開後確認より先に実行する。既存の `docs/release-process.md` の全ゲートと明示承認を維持し、graphを成功判定や公開判定の代替にしない。
-- グラフDBはリポジトリ外の `C:\Users\zuga\CodexWork\tools\code-review-graph\data` を使い、認証情報、秘密鍵、ブラウザデータ、個人情報、外部操作権限を渡さない。ソース・依存・設定変更後はグラフを更新し、QAを再実行する。
+- グラフDBはリポジトリ外の `%USERPROFILE%\CodexWork\tools\code-review-graph\data` を使い、認証情報、秘密鍵、ブラウザデータ、個人情報、外部操作権限を渡さない。ソース・依存・設定変更後はグラフを更新し、QAを再実行する。
 - MCPが見えない既存タスクでは同じタスクの検証済みCLIで同じread-only照会を行う。MCP/CLIが利用不能なら理由を記録し、最小範囲の直接確認へフォールバックする。トークン削減推定はテスト、差分、SHA、セキュリティ、署名、公開ゲートを省略する理由にならない。
 - 本体と兄弟LPは別リポジトリとしてgraph、変更、QA、コミット、公開を分離する。完了報告には対象リポジトリ、graph preflight結果、変更ファイル、テスト終了コード、未解決事項を残す。
 
@@ -88,7 +88,7 @@ Match Session Overlayの全タスク（調査、実装、テスト、ビルド�
 
 - このタスクは長い過去会話を正本にしない。開始時は本ファイル、依頼に直接関係するソース・テスト、必要なGit状態だけを読む。過去スレッド全文、既存の推論、無関係な変更履歴、巨大な生成物を再読しない。
 - `renderer.js`などの大きなファイルは全体をQwenへ渡さない。`rg`等で対象関数・状態遷移・回帰テストを絞り、必要なら固有run IDの一時フォルダへ非機密の最小スニペットだけを作る。一時物は検証後に削除する。
-- Qwen委任前に同じタスクのterminalから `C:\Users\zuga\AppData\Local\OpenWebUI\venv\Scripts\python.exe C:\Users\zuga\.codex\local-agents\qwen_delegate_cli.py status` を実行し、現行モデル名、更新日時、利用可能状態、コンテキスト上限を確認する。`qwen_local` MCPが見える場合も同じ確認を行う。
+- Qwen委任前に同じタスクのterminalから `%LOCALAPPDATA%\OpenWebUI\venv\Scripts\python.exe %USERPROFILE%\.codex\local-agents\qwen_delegate_cli.py status` を実行し、現行モデル名、更新日時、利用可能状態、コンテキスト上限を確認する。`qwen_local` MCPが見える場合も同じ確認を行う。
 - 通常のMatch実装は OpenAI Luna が編集・テスト・統合し、Qwenはread-onlyレビューを担当する。Qwen-lunaの編集は明示した機械的変更だけ、`output_paths`を必須とする。Qwen-terraは常にread-onlyとし、Solは高難度の要件・設計・公開・破壊的変更だけを担当する。
 - Qwenへの入力はシステム指示、タスク、選択ファイル、出力予約、安全余白の総量を見積もる。8,000未満はqwen-luna、8,000〜24,000は作業種別で選択、24,000〜48,000はqwen-terra、48,000超または安全予算超は生成せず分割案だけを受け取る。結果は800トークン以内に抑え、長いログはファイルへ保存する。
 - Qwenの結果だけで設計・統合・公開を確定しない。Lunaが実ファイル、diff、テスト終了コードを確認して採否を決める。Qwenが利用不能、同じ原因で2回失敗、または再検証コスト過大ならLunaが直接確認し、必要時だけTerraへ切り替える。
