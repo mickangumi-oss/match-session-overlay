@@ -75,6 +75,15 @@ At the start of a new Match Session Overlay task:
 5. For normal low-risk implementation, OpenAI Luna implements, validates Qwen's read-only review, runs tests, and integrates the change. Sol handles only high-difficulty requirement/design decisions, final review, external publication, destructive changes, or other high-risk actions. Store only a short result (conclusion, `file:line`, diff, tests/exit code, unresolved items, or split plan) in the conversation; keep long logs in files.
 6. Store durable decisions here or in the relevant repository documentation instead of relying on conversation history.
 
+## code-review-graph必須契約
+
+Match Session Overlayの全タスク（調査、実装、テスト、ビルド、リリース、LP、分析、運用確認）は、作業開始時に対象リポジトリを明示したcode-review-graphのread-only preflightを行う。最初に `detect_changes_tool` または `get_review_context_tool` を使い、必要な場合だけ `query_graph_tool` と `semantic_search_nodes_tool` を追加する。グラフ結果で依頼に直接関係するファイルと依存関係を絞り、リポジトリ全文や過去会話を読み込まない。
+
+- ビルド／リリースでもgraph preflightを `pnpm check`、`pnpm qa:local`、security、installer、manifest、署名、ハッシュ、Defender、VirusTotal、公開後確認より先に実行する。既存の `docs/release-process.md` の全ゲートと明示承認を維持し、graphを成功判定や公開判定の代替にしない。
+- グラフDBはリポジトリ外の `C:\Users\zuga\CodexWork\tools\code-review-graph\data` を使い、認証情報、秘密鍵、ブラウザデータ、個人情報、外部操作権限を渡さない。ソース・依存・設定変更後はグラフを更新し、QAを再実行する。
+- MCPが見えない既存タスクでは同じタスクの検証済みCLIで同じread-only照会を行う。MCP/CLIが利用不能なら理由を記録し、最小範囲の直接確認へフォールバックする。トークン削減推定はテスト、差分、SHA、セキュリティ、署名、公開ゲートを省略する理由にならない。
+- 本体と兄弟LPは別リポジトリとしてgraph、変更、QA、コミット、公開を分離する。完了報告には対象リポジトリ、graph preflight結果、変更ファイル、テスト終了コード、未解決事項を残す。
+
 ## Match専用のコンテキスト節約契約
 
 - このタスクは長い過去会話を正本にしない。開始時は本ファイル、依頼に直接関係するソース・テスト、必要なGit状態だけを読む。過去スレッド全文、既存の推論、無関係な変更履歴、巨大な生成物を再読しない。
