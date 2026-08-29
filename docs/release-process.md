@@ -40,7 +40,7 @@
 pnpm release:security:dry-run
 ```
 
-通常の開発中は、変更の早期確認として軽量なpreflightを使えます。正式リリース結果とは別の外部ディレクトリへ保存し、標準スキャンとGit diff・complete coverage・Medium以上での停止は維持しますが、モデルを`gpt-5.6-terra`、推論を`high`に固定してコストを抑えます。
+通常の開発中は、必要な場合だけ軽量なpreflightを使えます。日常の編集・テストでSecurityを自動起動せず、明示的にこのコマンドを実行した場合だけスキャンします。正式リリース結果とは別の外部ディレクトリへ保存し、標準スキャンとGit diff・complete coverage・Medium以上での停止は維持しますが、モデルを`gpt-5.6-luna`、推論を`high`に固定してコストを抑えます。
 
 ```powershell
 pnpm release:security:preflight:dry-run
@@ -54,7 +54,7 @@ $env:CODEX_SECURITY_PREFLIGHT_MAX_COST = "4.5" # 任意。組織の予算に合�
 pnpm release:security:preflight
 ```
 
-preflightは開発中の確認専用です。Terra/Lunaの結果だけで公開可否を決めず、リリース候補の最終判定には必ず次の厳格な`release:security`を実行します。これは正式ゲートの検出品質と再現性を、日常確認のコスト最適化から分離するためです。
+preflightは開発中の確認専用です。Lunaの結果だけで公開可否を決めず、リリース候補の最終判定には必ず次の厳格な`release:security`を明示実行します。これは正式ゲートの検出品質と再現性を、日常確認のコスト最適化から分離するためです。
 
 続いて、固定済みコミットを読み取り専用の標準スキャンにかけます。
 
