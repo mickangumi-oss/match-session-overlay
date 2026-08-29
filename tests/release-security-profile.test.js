@@ -21,12 +21,12 @@ function printConfig(args, environment = {}) {
   return result;
 }
 
-test("security preflight uses the separated Terra/high profile", () => {
+test("security preflight uses the separated Luna/high profile", () => {
   const result = printConfig(["--preflight"]);
   assert.equal(result.status, 0, result.stderr);
   const config = JSON.parse(result.stdout);
   assert.equal(config.profile, "preflight");
-  assert.equal(config.model, "gpt-5.6-terra");
+  assert.equal(config.model, "gpt-5.6-luna");
   assert.equal(config.effort, "high");
   assert.match(config.outputDirectory, new RegExp(`v${version.replaceAll(".", "\\.")}-preflight$`));
 });
