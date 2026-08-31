@@ -62,7 +62,10 @@ const {
 } = require("./stats-window-size");
 const { suggestedInitialLocale } = require("./initial-language");
 const { buildPresentationState } = require("./presentation-model");
-const { deriveHistoryRatingSeries } = require("./history-current-rating");
+const {
+  currentProfileRating,
+  deriveHistoryRatingSeries,
+} = require("./history-current-rating");
 const { potentialRatingValue } = require("./potential-rating");
 const {
   buildTrackerSessionPayload,
@@ -946,6 +949,32 @@ function activeHistoryProfileId() {
   );
 }
 
+function historyProfileCoversLatestRecord(player, records) {
+  const latest = (Array.isArray(records) ? records : [])
+    .filter(
+      (record) =>
+        record?.matchType === "ranked" &&
+        Number(record?.characterId) === Number(player?.characterId) &&
+        ["MR", "LP"].includes(String(record?.ownRatingType || "").toUpperCase()) &&
+        Number.isFinite(Number(record?.ownRating)),
+    )
+    .sort(
+      (left, right) =>
+        Number(left?.playedAt ?? left?.uploadedAt) -
+        Number(right?.playedAt ?? right?.uploadedAt),
+    )
+    .at(-1);
+  if (!latest) return true;
+  return (
+    currentProfileRating(
+      player,
+      String(latest.ownRatingType).toUpperCase(),
+      latest.characterId,
+      latest.playedAt ?? latest.uploadedAt,
+    ) != null
+  );
+}
+
 function historyProfilePlayer(profileId, preferredPlayer = null) {
   const normalizedProfileId = normalizeHistoryProfileId(profileId);
   if (!normalizedProfileId) return null;
@@ -1178,7 +1207,7 @@ function startHistoryViewPolling({ resetActivity = true } = {}) {
   scheduleHistoryViewPolling();
 }
 
-function scheduleHistoryViewPolling(delayMs = null) {
+function scheduleHistoryViewPolling(delayMs = null, { publish = true } = {}) {
   if (!historyViewPlayer || !historyViewPollingActive || updateRequired) return;
   if (historyViewPollTimer) clearTimeout(historyViewPollTimer);
   const nextDelay =
@@ -1196,7 +1225,7 @@ function scheduleHistoryViewPolling(delayMs = null) {
     nextDelay,
   );
   sendTrackerState();
-  sendHistoryState();
+  if (publish) sendHistoryState();
 }
 
 async function runHistoryViewPoll(sessionId) {
@@ -1211,6 +1240,7 @@ async function runHistoryViewPoll(sessionId) {
     return;
   }
   historyViewPollInFlight = true;
+  let publishHistoryState = true;
   const profileId = historyViewPlayer.profileId;
   try {
     const store = loadMatchHistoryStore(profileId);
@@ -1227,12 +1257,9 @@ async function runHistoryViewPoll(sessionId) {
     const newReplays = replays.filter(
       (replay) => replay.replayId && !previousReplayIds.has(replay.replayId),
     );
-    mergeMatchHistory(replays, profileId);
-    const fetchedStore = loadMatchHistoryStore(profileId);
-    fetchedStore.lastFetchedAt = Date.now();
-    persistMatchHistoryStore(profileId, fetchedStore);
+    let refreshedPlayer = null;
     if (newReplays.length) {
-      historyViewLastNewMatchAt = Date.now();
+      publishHistoryState = false;
       const newest = [...newReplays].sort(
         (a, b) => Number(b.uploadedAt) - Number(a.uploadedAt),
       )[0];
@@ -1244,10 +1271,24 @@ async function runHistoryViewPoll(sessionId) {
         newest?.characterId,
         newest?.ownCharacterName,
       );
-      historyViewPlayer = await refreshProfilePlayer(playerHint, {
+      refreshedPlayer = await refreshProfilePlayer(playerHint, {
         force: true,
         priority: "live",
       });
+      if (!historyProfileCoversLatestRecord(refreshedPlayer, [...store.records, ...replays])) {
+        throw new Error("PROFILE_REFRESH_NOT_CONFIRMED");
+      }
+    }
+    // Do not persist or notify about newly discovered rows until the official
+    // profile snapshot has been refreshed and verified for the latest row.
+    mergeMatchHistory(replays, profileId, { notify: false });
+    const fetchedStore = loadMatchHistoryStore(profileId);
+    fetchedStore.lastFetchedAt = Date.now();
+    persistMatchHistoryStore(profileId, fetchedStore);
+    if (refreshedPlayer) {
+      historyViewPlayer = refreshedPlayer;
+      historyViewLastNewMatchAt = Date.now();
+      publishHistoryState = true;
     }
     historyViewConsecutiveFailures = 0;
     if (shouldAutoStopForInactivity(historyViewLastNewMatchAt)) {
@@ -1255,7 +1296,7 @@ async function runHistoryViewPoll(sessionId) {
     } else {
       scheduleHistoryViewPolling();
     }
-    sendHistoryState();
+    if (publishHistoryState) sendHistoryState();
     sendTrackerState();
   } catch (error) {
     if (
@@ -1278,9 +1319,9 @@ async function runHistoryViewPoll(sessionId) {
         errorBackoffMs(historyViewConsecutiveFailures),
         Number.isFinite(retryAfterMs) ? retryAfterMs : 0,
       );
-      scheduleHistoryViewPolling(retryDelay);
+      scheduleHistoryViewPolling(retryDelay, { publish: publishHistoryState });
     }
-    sendHistoryState();
+    if (publishHistoryState) sendHistoryState();
     sendTrackerState();
   } finally {
     historyViewPollInFlight = false;
@@ -5014,6 +5055,7 @@ async function fetchLocalMatchHistory() {
     throw error;
   }
 
+  let publishHistoryState = true;
   const request = (async () => {
     let fetchedCount = 0;
     let completedPages = 0;
@@ -5085,6 +5127,20 @@ async function fetchLocalMatchHistory() {
       if (serviceLocale() !== requestedLocale) {
         throw new Error("HISTORY_LOCALE_CHANGED");
       }
+      if (newReplayCount > 0) {
+        publishHistoryState = false;
+        const nextPlayer = await refreshProfilePlayer(player, {
+          force: true,
+          priority: "live",
+        });
+        assertPrivateDataGeneration(generation);
+        if (!historyProfileCoversLatestRecord(nextPlayer, [...existing.records, ...importReplays])) {
+          throw new Error("PROFILE_REFRESH_NOT_CONFIRMED");
+        }
+        player = nextPlayer;
+      }
+      // Treat the profile refresh as part of committing a new-history batch.
+      // Until it succeeds, neither the rows nor a complete status are public.
       mergeMatchHistory(importReplays, player.profileId, { persist: false, notify: false });
       importMerged = true;
       assertPrivateDataGeneration(generation);
@@ -5094,6 +5150,11 @@ async function fetchLocalMatchHistory() {
       const fetchedStore = loadMatchHistoryStore(player.profileId);
       fetchedStore.lastFetchedAt = Date.now();
       persistMatchHistoryStore(player.profileId, fetchedStore);
+      if (newReplayCount > 0) {
+        if (historyViewPlayer?.profileId === player.profileId) historyViewPlayer = player;
+        if (authenticatedPlayer?.profileId === player.profileId) authenticatedPlayer = player;
+        if (trackerState.player?.profileId === player.profileId) trackerState.player = player;
+      }
       matchHistoryFetchSummary = {
         profileId: player.profileId,
         status: "complete",
@@ -5103,36 +5164,9 @@ async function fetchLocalMatchHistory() {
         fetchedCount,
         completedAt: Date.now(),
       };
-      // The page batch is complete even if optional profile refresh or disk
-      // flushing takes longer. End the loading state now and publish one full
-      // history snapshot; later work must not turn this terminal state back
-      // into an in-progress indicator.
       matchHistoryFetchProgress = null;
       fetchTerminalStateSent = true;
-      sendHistoryState();
-      const latestMatchTimestamp = fetchedStore.records
-        .filter(
-          (record) =>
-            record.matchType === "ranked" &&
-            Number(record.characterId) === Number(player.characterId),
-        )
-        .map((record) => Number(record.playedAt ?? record.uploadedAt) || 0)
-        .reduce((latest, timestamp) => Math.max(latest, timestamp), 0);
-      if (
-        newReplayCount > 0 &&
-        latestMatchTimestamp > 0 &&
-        Number(player.profileUpdatedAt) < latestMatchTimestamp
-      ) {
-        player = await refreshProfilePlayer(player, {
-          force: true,
-          priority: "live",
-        });
-        assertPrivateDataGeneration(generation);
-        if (historyViewPlayer?.profileId === player.profileId) historyViewPlayer = player;
-        if (authenticatedPlayer?.profileId === player.profileId) authenticatedPlayer = player;
-        if (trackerState.player?.profileId === player.profileId) trackerState.player = player;
-        sendHistoryState();
-      }
+      if (newReplayCount > 0) publishHistoryState = true;
       if (
         historyViewPlayer &&
         historyViewPlayer.profileId === player.profileId &&
@@ -5159,7 +5193,7 @@ async function fetchLocalMatchHistory() {
         error?.message !== "PRIVATE_DATA_CLEARED" &&
         summaryProfileId
       ) {
-        if (!importMerged && completedReplays.length) {
+        if (!importMerged && newReplayCount === 0 && completedReplays.length) {
           mergeMatchHistory(completedReplays, summaryProfileId, {
             persist: false,
             notify: false,
@@ -5185,6 +5219,7 @@ async function fetchLocalMatchHistory() {
           fetchedCount,
           completedAt: Date.now(),
         };
+        if (newReplayCount > 0) publishHistoryState = true;
       }
       throw error;
     }
@@ -5196,7 +5231,7 @@ async function fetchLocalMatchHistory() {
     if (matchHistoryFetchInFlight === request) {
       matchHistoryFetchInFlight = null;
       matchHistoryFetchProgress = null;
-      sendHistoryState();
+      if (publishHistoryState) sendHistoryState();
     }
   }
 }
