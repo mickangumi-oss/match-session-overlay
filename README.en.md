@@ -17,9 +17,15 @@ Match Session Overlay is an unofficial Windows app that retrieves Street Fighter
 
 [Get the latest version from GitHub Releases](https://github.com/mickangumi-oss/match-session-overlay/releases/latest)
 
-Open the latest release and download the installer named `Match-Session-Overlay-1.11.0-Setup.exe` from **Assets**. Do not use installers from an unverified source.
+Open the latest release and download the installer named `Match-Session-Overlay-1.11.1-Setup.exe` from **Assets**. Do not use installers from an unverified source.
 
 For step-by-step instructions, see the [English usage guide](docs/usage.en.md).
+
+## What's new in v1.11.1
+
+- Fixed an issue where the latest match's MR/LP delta could be incorrectly displayed as `+0`.
+
+See the [v1.11.1 release notes](https://github.com/mickangumi-oss/match-session-overlay/releases/tag/v1.11.1) for the installer checksum and security scan results.
 
 ## What's new in v1.11.0
 

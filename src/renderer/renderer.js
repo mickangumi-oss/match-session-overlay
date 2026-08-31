@@ -340,8 +340,31 @@ function historyRatingDelta(record, records, player, { useCurrentRating = false 
   const characterId = Number(record?.characterId) || null;
   const playerCharacterId = Number(player?.characterId) || null;
   if (useCurrentRating && (playerCharacterId == null || playerCharacterId === characterId)) {
-    const currentRating = Number(ratingType === "MR" ? player?.mr : player?.lp);
-    if (Number.isFinite(currentRating) && currentRating > 0) {
+    const latestRecordTimestamp = (Array.isArray(records) ? records : [])
+      .filter((candidate) =>
+        String(candidate?.ownRatingType || "").toUpperCase() === ratingType &&
+        (Number(candidate?.characterId) || null) === characterId &&
+        Number.isFinite(Number(candidate?.ownRating)),
+      )
+      .reduce(
+        (latest, candidate) =>
+          Math.max(latest, Number(candidate?.playedAt ?? candidate?.uploadedAt) || 0),
+        0,
+      );
+    const currentProfileRating =
+      typeof window === "object"
+        ? window.MatchHistoryCurrentRating?.currentProfileRating
+        : null;
+    const currentRating =
+      typeof currentProfileRating === "function"
+        ? currentProfileRating(
+            player,
+            ratingType,
+            characterId,
+            latestRecordTimestamp || null,
+          )
+        : null;
+    if (currentRating != null) {
       return Math.round(currentRating - rating);
     }
   }
