@@ -252,3 +252,41 @@ test("history character filter drives potential and rating derivation", () => {
   assert.equal(result.sampleCount, 2);
   assert.equal(result.value, potentialRatingValue([1880, 1890], "MR"));
 });
+
+test("history graph uses the current MR only after the latest match", () => {
+  const rendererSource = fs.readFileSync(
+    path.resolve(__dirname, "..", "src", "renderer", "renderer.js"),
+    "utf8",
+  );
+  const selectedStart = rendererSource.indexOf("function historySelectedCharacterId(");
+  const selectedEnd = rendererSource.indexOf("\nfunction historyDerivedRecordsForRating", selectedStart);
+  const derivedStart = selectedEnd;
+  const derivedEnd = rendererSource.indexOf("\nfunction historyRatingValue", derivedStart);
+  assert.ok([selectedStart, selectedEnd, derivedStart, derivedEnd].every((index) => index >= 0));
+
+  const records = [record("a", 100, 1450), record("b", 200, 1457)];
+  const context = {
+    elements: { historyCharacter: { value: "all" } },
+    historyState: { records, player: {
+      characterId: 1,
+      mr: 1465,
+      ratingSource: "profile",
+      profileUpdatedAt: 201,
+    } },
+    window: { MatchHistoryCurrentRating: { deriveHistoryRatingSeries } },
+  };
+  vm.runInNewContext(
+    rendererSource.slice(selectedStart, selectedEnd) + rendererSource.slice(derivedStart, derivedEnd),
+    context,
+  );
+
+  assert.deepEqual(
+    context.historyDerivedRecordsForRating(records, "MR").map((item) => item.derivedOwnRating),
+    [1450, 1465],
+  );
+  context.historyState.player.profileUpdatedAt = 199;
+  assert.deepEqual(
+    context.historyDerivedRecordsForRating(records, "MR").map((item) => item.derivedOwnRating),
+    [1450, 1457],
+  );
+});

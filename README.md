@@ -13,13 +13,13 @@
 - 公式サイトへのログインと戦績取得に必要なインターネット接続
 - OBSで表示する場合のみ、OBS Studio（任意）
 
-公開版: v1.11.0
+公開版: v1.11.1
 
 ## ダウンロード
 
 [最新版をダウンロード（GitHub Releases）](https://github.com/mickangumi-oss/match-session-overlay/releases/latest)
 
-開いたページの「Assets」から、`Match-Session-Overlay-1.11.0-Setup.exe`をダウンロードして実行してください。最新版以外のファイルや、配布元を確認できないファイルは使用しないでください。
+開いたページの「Assets」から、`Match-Session-Overlay-1.11.1-Setup.exe`をダウンロードして実行してください。最新版以外のファイルや、配布元を確認できないファイルは使用しないでください。
 
 詳しい操作手順は[`docs/usage.md`](docs/usage.md)、表示レイアウトは[`docs/window-layout.md`](docs/window-layout.md)、対戦履歴は[`docs/match-history.md`](docs/match-history.md)、フォントは[`docs/font-settings.md`](docs/font-settings.md)をご覧ください。
 
@@ -27,7 +27,7 @@
 
 正式な配布インストーラーは、公開前にMicrosoft DefenderおよびVirusTotalでセキュリティチェックを実施します。検査結果は公開時点のものであり、完全な安全性を保証するものではありません。インストーラーは必ずこのリポジトリの公式GitHub Releaseから取得し、各リリースノートに記載されたSHA-256と一致することを確認してください。
 
-`v1.11.0`の検査結果は[`v1.11.0リリースノート`](docs/release-notes/v1.11.0.md)をご覧ください。
+`v1.11.1`の検査結果は[`v1.11.1リリースノート`](docs/release-notes/v1.11.1.md)をご覧ください。
 
 ## 画面イメージ
 
@@ -62,6 +62,12 @@ CHARACTER RANKと現在のキャラクター、セッション戦績、FRIENDS�
 取得済みの対戦を絞り込み、勝敗、勝率、最大連勝、MR／LP推移、直近7試合日分の勝敗グラフ、相手キャラクター別成績を確認できます。
 
 ![合成データを表示した対戦履歴画面](docs/images/match-history-example.png)
+
+## v1.11.1の変更内容
+
+- 最新試合のMR／LP差分が誤って`+0`などと表示される問題を修正しました。
+
+詳しい変更内容は[`v1.11.1リリースノート`](docs/release-notes/v1.11.1.md)をご覧ください。
 
 ## v1.11.0の変更内容
 
