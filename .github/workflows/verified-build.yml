@@ -19,7 +19,17 @@ jobs:
       - name: Install pnpm
         uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         with:
-          version: 10
+          version: 11.19.0
+
+      - name: Verify pnpm version against package.json
+        shell: pwsh
+        run: |
+          $packageManager = (Get-Content package.json -Raw | ConvertFrom-Json).packageManager
+          $expected = ($packageManager -split '@', 2)[1]
+          $actual = (pnpm --version).Trim()
+          if ($actual -ne $expected) {
+            throw "pnpm version mismatch: expected $expected, got $actual"
+          }
 
       - name: Install Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -32,6 +42,9 @@ jobs:
 
       - name: Check source
         run: pnpm check
+
+      - name: Lint source and scripts
+        run: pnpm lint
 
       - name: Build Windows installer
         run: pnpm build
