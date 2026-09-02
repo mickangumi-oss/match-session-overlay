@@ -10,9 +10,21 @@
 
 ## 1. リリース候補を固定する
 
+### 開発完了時の必須確認
+
+- 変更箇所に対応するfocused回帰テストを実行する
+- `pnpm check`を実行する
+- `pnpm lint`を実行する
+- `pnpm qa:local`を実行する。これはローカルの`test-local/`を使う非表示・offscreen QAであり、画面を占有しない
+- `test-local/`またはrunnerが欠損している場合はコマンドが非ゼロで失敗する。承認済みのQA環境を復元してから再実行し、実行されていないQAを合格扱いにしない
+- `git diff --check`を実行する
+
+focusedテストと`qa:local`は役割が異なるため、変更箇所の回帰確認とアプリ全体の非表示QAをそれぞれ一度実施する。同じコマンドを意味なく重複実行しない。workflowのclean checkoutにはローカル専用`test-local/`を含めないため、workflowのbuild成功だけでこのQAを代替しない。
+
 - バージョン、README、リリースノート、依存関係を更新する
-- `pnpm check`を完了する
 - 公開予定の変更をレビューし、リリース候補をコミットする
+- `git rev-parse HEAD`と`git status --short`を記録する
+- 候補コミット後にcode-review-graphを更新し、graphのcommit SHAと候補HEADが一致することを確認する
 - `git status --short`が空であることを確認する
 
 ## QAの適用範囲
@@ -94,6 +106,8 @@ pnpm release:manifest
 - `pnpm release:manifest`は、署名後にアプリ内の公開鍵でも検証し、一致しない鍵では失敗する
 
 Codex Securityを通過した後にリリース入力を変更した場合は、再スキャン後にインストーラーも作り直します。
+
+通常のpre-push hookは`check`、lint、`qa:local`に加えてbuildを実行するため、push時にインストーラーが再生成されることがあります。build後にinstallerまたはmanifestのバイト列・SHA-256が変わった場合、元の成果物に対するmanifest検証、package/app.asar監査、Defender、VirusTotal、最終ハッシュ確認は失効します。新しい最終成果物に対して全てやり直してください。`--no-verify`は通常手順にせず、同等のcheck・lint・QAを手動で成功させたうえで、Sol司令塔が対象pushを一回限り承認した場合だけ使用します。
 
 ## 4. 完成物を検査する
 
