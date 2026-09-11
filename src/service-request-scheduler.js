@@ -174,7 +174,7 @@ class ServiceRequestScheduler {
     } catch (error) {
       result = Promise.reject(error);
     }
-    Promise.resolve(result).then(entry.resolve, entry.reject).finally(() => {
+    return Promise.resolve(result).then(entry.resolve, entry.reject).finally(() => {
       this.active.delete(entry);
       this.#pump();
     });

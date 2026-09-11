@@ -1,6 +1,8 @@
 (function exposeHistoryOpponentCharacterStats(globalScope) {
   "use strict";
 
+  const JAPANESE_SOURCE_LABEL = /[\u3040-\u30ff\u3400-\u9fff]/u;
+
   function recordTimestamp(record) {
     const timestamps = [record?.playedAt, record?.uploadedAt]
       .map(Number)
@@ -8,16 +10,30 @@
     return timestamps.length ? Math.max(...timestamps) : Number.NEGATIVE_INFINITY;
   }
 
+  function knownActRecord(record) {
+    const actId = Number(record?.actId);
+    if (!Number.isInteger(actId) || actId < 0 || record?.actIdKnown === false) return false;
+    return actId > 0 || record?.actIdKnown === true;
+  }
+
   function filterHistoryRecords(records, filters = {}, dateKeyForRecord = () => "") {
     const from = String(filters.from ?? "");
     const to = String(filters.to ?? "");
     const mode = String(filters.mode ?? "all");
     const character = String(filters.character ?? "all");
+    const act = String(filters.act ?? "all");
+    const includeUnknownAct = filters.includeUnknownAct === true;
+    const inputType = String(filters.inputType ?? "all");
     return (Array.isArray(records) ? records : []).filter((record) => {
       const date = String(dateKeyForRecord(record) ?? "");
+      const actMatches = act === "all" ||
+        (knownActRecord(record) && String(record.actId) === act) ||
+        (includeUnknownAct && !knownActRecord(record));
       return (!from || date >= from) &&
         (!to || date <= to) &&
         (mode === "all" || record?.matchType === mode) &&
+        actMatches &&
+        (inputType === "all" || record?.opponentBattleInputType === inputType) &&
         (character === "all" || String(record?.characterId ?? "") === character);
     });
   }
@@ -39,7 +55,8 @@
     });
   }
 
-  function buildOpponentCharacterStats(records) {
+  function buildOpponentCharacterStats(records, options = {}) {
+    const locale = String(options.locale ?? "").trim();
     const statsByCharacterId = new Map();
 
     for (const record of Array.isArray(records) ? records : []) {
@@ -60,7 +77,24 @@
       else if (record?.result === "loss") entry.losses += 1;
       else entry.draws += 1;
 
-      const label = String(record?.opponentCharacterName ?? "").trim();
+      const localizedLabel = locale
+        ? record?.characterNamesByLocale?.[locale]?.opponent
+        : "";
+      const hasLocaleSnapshot = Boolean(
+        record?.characterNamesByLocale &&
+        typeof record.characterNamesByLocale === "object" &&
+        !Array.isArray(record.characterNamesByLocale),
+      );
+      const candidateLabel = String(
+        localizedLabel ?? (hasLocaleSnapshot ? "" : record?.opponentCharacterName ?? ""),
+      ).trim();
+      // A non-Japanese locale must not render a retained Japanese source
+      // label while its selected-locale snapshot is missing. Leave the label
+      // empty so the shared ID resolver can provide a verified mapping or an
+      // explicit unknown marker instead.
+      const label = locale && locale !== "ja-jp" && JAPANESE_SOURCE_LABEL.test(candidateLabel)
+        ? ""
+        : candidateLabel;
       const timestamp = recordTimestamp(record);
       if (label && timestamp >= entry.labelTimestamp) {
         entry.label = label;
@@ -70,13 +104,17 @@
     }
 
     return sortOpponentCharacterStats([...statsByCharacterId.values()]
-      .map(({ labelTimestamp, ...entry }) => ({
-        ...entry,
-        winRate:
-          entry.wins + entry.losses > 0
-            ? (entry.wins / (entry.wins + entry.losses)) * 100
-            : 0,
-      })));
+      .map((entry) => {
+        const publicEntry = { ...entry };
+        delete publicEntry.labelTimestamp;
+        return {
+          ...publicEntry,
+          winRate:
+            entry.wins + entry.losses > 0
+              ? (entry.wins / (entry.wins + entry.losses)) * 100
+              : 0,
+        };
+      }));
   }
 
   const api = {

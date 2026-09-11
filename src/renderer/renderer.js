@@ -7,6 +7,8 @@ const t = (key, fallback = key) =>
   localeApi?.t ? localeApi.t(key) : fallback;
 function applyLocale(locale = "ja-jp") {
   localeApi?.applyTranslations?.(document, locale);
+  localeApi?.resetCharacterNamesByLocale?.();
+  characterLabelScopeKey = null;
   if (elements.languageInput && locale) elements.languageInput.value = locale;
 }
 const FONT_STACKS = {
@@ -28,7 +30,15 @@ function fontStackFor(value) {
 let selectedPlayer = null;
 let trackerState = null;
 let displaySettings = { matchType: "ranked" };
-let historyState = { records: [], canFetch: false, authenticated: false, cooldownSeconds: 0 };
+let historyState = {
+  records: [],
+  canFetch: false,
+  authenticated: false,
+  cooldownSeconds: 0,
+  currentActId: null,
+  currentActVerified: false,
+  currentActStatus: "unavailable",
+};
 let historyPanelOpen = false;
 let pendingHistoryRenderState = null;
 let historyRenderFrame = null;
@@ -37,11 +47,63 @@ let historyRatingPeriod = { mode: "all", weekOffset: 0, dateMode: "played" };
 const HISTORY_PAGE_SIZE = 10;
 const RECENT_HISTORY_PREVIEW_LIMIT = 5;
 let historyPage = 0;
+let historyActUserSelected = false;
+let historyActProfileScope = "";
+let historyAutoFetchInFlight = null;
+let historyAutoFetchAttemptedScope = "";
+let historyAutoFetchReadinessKey = "";
+let historyResolvedLatestActProof = {
+  profileId: "",
+  actId: null,
+  source: null,
+};
+let historyTargetSelectionInFlight = null;
+let historyTargetInputTimer = null;
 let historyOpponentSort = { key: "matches", direction: "desc" };
 let selectedHistoryRecordKey = null;
 let historyOpponentProfileRequestToken = 0;
+let characterLabelScopeKey = null;
+let officialOpponentCharacterStatsState = {
+  status: "idle",
+  profileId: null,
+  locale: null,
+  rows: [],
+  progress: null,
+};
+let officialOpponentCharacterStatsRequestKey = "";
+let officialOpponentCharacterStatsRequestToken = 0;
+let officialOpponentCharacterStatsRetryAt = 0;
+const OFFICIAL_OPPONENT_CHARACTER_STATS_RETRY_COOLDOWN_MS = 5 * 60 * 1000;
+let officialCharacterNamesState = {
+  status: "idle",
+  profileId: null,
+  locale: null,
+  labels: {},
+};
+let officialCharacterNamesRequestKey = "";
+let officialCharacterNamesRequestToken = 0;
+let officialCharacterNamesRetryAt = 0;
+let historyCurrentActLateRefetchKey = "";
+
+function historyContextScopeKey(state = historyState, record = null) {
+  const locale = localeApi?.getLocale?.() || document.documentElement.lang || "ja-jp";
+  const profile = String(state?.profileId ?? state?.player?.userCode ?? "anonymous").trim();
+  const recordAct = historyRecordActIsKnown(record) ? record.actId : null;
+  const act = Number(recordAct ?? selectedHistoryRoundTrendActId() ?? state?.currentActId);
+  const cutoff = Number(record?.playedAt ?? record?.uploadedAt);
+  return `${locale}:${profile}:${Number.isInteger(act) && act >= 0 ? act : "unknown"}:${Number.isFinite(cutoff) && cutoff > 0 ? cutoff : "unknown"}`;
+}
 let historyOpponentProfileState = {
   status: "idle",
+  recordKey: null,
+  record: null,
+  ownerProfileId: null,
+  preserveOnTargetChange: false,
+  context: null,
+};
+let matchupReturnToHistory = false;
+let matchupState = {
+  status: "unavailable",
   recordKey: null,
   record: null,
   context: null,
@@ -70,6 +132,8 @@ const elements = Object.fromEntries(
     "startTrackingButton",
     "startTrackingLabel",
     "nextUpdateInfo",
+    "nextUpdateLabel",
+    "nextUpdateValue",
     "stopTrackingButton",
     "openHistoryButton",
     "recordWins",
@@ -97,7 +161,9 @@ const elements = Object.fromEntries(
     "managementChartState",
     "resetTrackingButton",
     "toggleStatsButton",
+    "toggleStatsLabel",
     "overlayLockButton",
+    "overlayLockLabel",
     "windowOrientationControl",
     "optionsButton",
     "closeOptionsButton",
@@ -169,6 +235,8 @@ const elements = Object.fromEntries(
     "historyFetchProgressBar",
     "historyAcquisitionTitle",
     "historyLastUpdate",
+    "historyAct",
+    "historyActState",
     "historyDateFrom",
     "historyDateTo",
     "historyMatchType",
@@ -183,6 +251,8 @@ const elements = Object.fromEntries(
     "historyOpponentProfile",
     "historyOpponentProfileState",
     "historyOpponentProfileGrid",
+    "historySelectedRoundResults",
+    "historySelectedRoundResultsBody",
     "historyOpponentMatchCharacter",
     "historyOpponentMatchRating",
     "historyOpponentRecord",
@@ -207,12 +277,29 @@ const elements = Object.fromEntries(
     "historyTableBody",
     "historyOpponentStatsBody",
     "historyOpponentStatsEmpty",
+    "historyOpponentStatsState",
     "historyOpponentMatchesHeader",
     "historyOpponentMatchesSort",
     "historyOpponentMatchesSortIndicator",
     "historyOpponentWinRateHeader",
     "historyOpponentWinRateSort",
     "historyOpponentWinRateSortIndicator",
+    "openMatchupButton",
+    "closeHistoryOpponentProfileButton",
+    "matchupPanel",
+    "refreshMatchupButton",
+    "closeMatchupButton",
+    "matchupState",
+    "matchupBucklerState",
+    "matchupBucklerCard",
+    "matchupMetrics",
+    "matchupRoundCard",
+    "matchupRoundState",
+    "matchupRoundScope",
+    "matchupRoundMetrics",
+    "matchupRoundNote",
+    "matchupProfileAct",
+    "matchupProfileRetrieved",
     "historyPreviousButton",
     "historyNextButton",
     "historyPageInfo",
@@ -262,10 +349,39 @@ function historyModeLabel(value) {
 }
 
 function historyCharacterLabel(record, own = true) {
-  const value = own ? record?.ownCharacterName : record?.opponentCharacterName;
-  if (value) return String(value).toLocaleUpperCase();
+  const locale = String(document.documentElement.lang || "").trim();
+  const localizedRecordLabel = own
+    ? record?.characterNamesByLocale?.[locale]?.own
+    : record?.characterNamesByLocale?.[locale]?.opponent;
+  const fallbackLabel = own
+    ? record?.ownCharacterName
+    : record?.opponentCharacterName;
+  const sourceLabelAllowed = locale === "ja-jp" ||
+    !/[\u3040-\u30ff\u3400-\u9fff]/u.test(String(fallbackLabel ?? ""));
+  // A locale snapshot can be partial (for example, only the player's side
+  // was captured). Keep the record label as a retry-safe source candidate
+  // instead of turning the missing side into a numeric id fallback.
+  const value = localizedRecordLabel ?? (sourceLabelAllowed ? fallbackLabel : "");
   const id = own ? record?.characterId : record?.opponentCharacterId;
-  return id ? `#${id}` : "—";
+  const selectedAct = selectedHistoryActId();
+  const officialAct = Number(officialCharacterNamesState.act);
+  const officialNamesAreScoped = officialCharacterNamesState.status === "ready" &&
+    (selectedAct == null
+      ? Number.isInteger(officialAct) && officialAct > 0
+      : officialAct === selectedAct);
+  if (!localizedRecordLabel && !officialNamesAreScoped) return "—";
+  const localized = localeApi?.characterName?.(value ?? "", id);
+  const displayLabel = localized && localized !== "—"
+    ? localized
+    : (localizedRecordLabel ? value : "");
+  return displayLabel ? String(displayLabel).toLocaleUpperCase() : "—";
+}
+
+function historyInputTypeLabel(value) {
+  const normalized = String(value ?? "").trim().toUpperCase();
+  if (normalized === "C") return t("classic", "C");
+  if (normalized === "M") return t("modern", "M");
+  return t("unknown", "—");
 }
 
 function historySelectedCharacterId(player = historyState.player) {
@@ -324,7 +440,10 @@ function historyRatingValue(record, ratingType) {
   ) {
     return null;
   }
-  const primaryNumber = Number(record?.derivedOwnRating ?? record?.ownRating);
+  const parallelSnapshot = normalizedType === "LP" ? record?.ownLp : record?.ownMr;
+  const primaryNumber = Number(
+    record?.derivedOwnRating ?? record?.ownRating ?? parallelSnapshot,
+  );
   return Number.isFinite(primaryNumber) && primaryNumber > 0 ? primaryNumber : null;
 }
 
@@ -335,8 +454,8 @@ function formatHistoryRating(ratingType, value) {
 
 function historyRatingDelta(record, records, player, { useCurrentRating = false } = {}) {
   const ratingType = String(record?.ownRatingType || "").toUpperCase();
-  const rating = Number(record?.ownRating);
-  if (!Number.isFinite(rating) || !["MR", "LP"].includes(ratingType)) return null;
+  const rating = historyRatingValue(record, ratingType);
+  if (rating == null || !["MR", "LP"].includes(ratingType)) return null;
   const characterId = Number(record?.characterId) || null;
   const playerCharacterId = Number(player?.characterId) || null;
   if (useCurrentRating && (playerCharacterId == null || playerCharacterId === characterId)) {
@@ -344,7 +463,7 @@ function historyRatingDelta(record, records, player, { useCurrentRating = false 
       .filter((candidate) =>
         String(candidate?.ownRatingType || "").toUpperCase() === ratingType &&
         (Number(candidate?.characterId) || null) === characterId &&
-        Number.isFinite(Number(candidate?.ownRating)),
+        historyRatingValue(candidate, ratingType) != null,
       )
       .reduce(
         (latest, candidate) =>
@@ -374,10 +493,16 @@ function historyRatingDelta(record, records, player, { useCurrentRating = false 
       String(candidate?.ownRatingType || "").toUpperCase() === ratingType &&
       (Number(candidate?.characterId) || null) === characterId &&
       Number(candidate?.playedAt ?? candidate?.uploadedAt) > timestamp &&
-      Number.isFinite(Number(candidate?.ownRating)))
+      historyRatingValue(candidate, ratingType) != null)
     .sort((a, b) => Number(a?.playedAt ?? a?.uploadedAt) - Number(b?.playedAt ?? b?.uploadedAt))[0];
-  const nextRating = Number(nextRecord?.ownRating);
-  return Number.isFinite(nextRating) ? Math.round(nextRating - rating) : null;
+  const nextRating = historyRatingValue(nextRecord, ratingType);
+  return nextRating != null ? Math.round(nextRating - rating) : null;
+}
+
+function historyRecordActIsKnown(record) {
+  const actId = Number(record?.actId);
+  if (!Number.isInteger(actId) || actId < 0 || record?.actIdKnown === false) return false;
+  return actId > 0 || record?.actIdKnown === true;
 }
 
 function filteredHistoryRecords() {
@@ -385,11 +510,26 @@ function filteredHistoryRecords() {
   const to = elements.historyDateTo?.value || "";
   const mode = elements.historyMatchType?.value || "all";
   const character = elements.historyCharacter?.value || "all";
+  const act = selectedHistoryActId();
+  const sourceRecords = Array.isArray(historyState.records) ? historyState.records : [];
+  // Older locally stored rows may not carry Act evidence. Keep those rows
+  // visible while the UI reports the missing Act scope; do not assign them to
+  // the verified latest Act. An explicitly selected Act remains strict.
+  const latestActWithUnknownRecords = act != null && !historyActUserSelected &&
+    sourceRecords.some((record) => !historyRecordActIsKnown(record));
+  const actFilter = act == null ? "all" : String(act);
   const filterRecords = window.matchHistoryOpponentCharacterStats?.filterHistoryRecords;
   const filtered = typeof filterRecords === "function"
     ? filterRecords(
-        historyState.records,
-        { from, to, mode, character },
+        sourceRecords,
+        {
+          from,
+          to,
+          mode,
+          character,
+          act: actFilter,
+          includeUnknownAct: latestActWithUnknownRecords,
+        },
         dateKeyForHistory,
       )
     : [];
@@ -855,15 +995,40 @@ function historyInsightFromRecord(record) {
   };
 }
 
+function registerScopedContextCharacterLabels(context) {
+  const sourceLocale = String(context?.locale ?? "").trim();
+  const activeLocale = localeApi?.getLocale?.() || document.documentElement.lang || "";
+  if (!sourceLocale || sourceLocale !== activeLocale) return;
+  const sourceLabels = context?.characterNamesByLocale?.[sourceLocale];
+  if (!sourceLabels || typeof sourceLabels !== "object" || Array.isArray(sourceLabels)) return;
+  const verified = {};
+  for (const [id, label] of Object.entries(sourceLabels)) {
+    const numericId = Number(id);
+    const text = String(label ?? "").trim();
+    if (Number.isFinite(numericId) && numericId > 0 && text) verified[numericId] = text;
+  }
+  if (Object.keys(verified).length) {
+    localeApi?.registerCharacterNamesByLocale?.({ [sourceLocale]: verified });
+  }
+}
+
 function renderHistoryOpponentProfile(record = historyOpponentProfileState.record) {
   const card = elements.historyOpponentProfile;
   if (!card) return;
   const hasRecord = Boolean(record);
   card.classList.toggle("hidden", !hasRecord);
-  if (!hasRecord) return;
+  if (elements.openMatchupButton) elements.openMatchupButton.disabled = !hasRecord;
+  if (!hasRecord) {
+    elements.historySelectedRoundResultsBody?.replaceChildren();
+    return;
+  }
 
   const context = historyOpponentProfileState.context ?? null;
-  const status = historyOpponentProfileState.status;
+  const baseStatus = historyOpponentProfileState.status;
+  const selectedLocale = localeApi?.getLocale?.() || document.documentElement.lang || "";
+  const labelConflict = [record.characterId, record.opponentCharacterId]
+    .some((id) => localeApi?.hasCharacterNameConflict?.(selectedLocale, id) === true);
+  const status = labelConflict && baseStatus === "ready" ? "partial" : baseStatus;
   const stateText = status === "loading"
     ? t("historyOpponentProfileLoading", "Loading official profile reference…")
     : status === "error"
@@ -875,6 +1040,8 @@ function renderHistoryOpponentProfile(record = historyOpponentProfileState.recor
     elements.historyOpponentProfileState.textContent = stateText;
     elements.historyOpponentProfileState.className = `history-opponent-profile-state ${status}`;
   }
+
+  registerScopedContextCharacterLabels(context);
 
   if (elements.historyOpponentMatchCharacter) {
     elements.historyOpponentMatchCharacter.textContent = historyCharacterLabel(record, false);
@@ -916,7 +1083,9 @@ function renderHistoryOpponentProfile(record = historyOpponentProfileState.recor
 
   const other = context?.otherCharacter ?? null;
   if (elements.historyOpponentOtherCharacter) {
-    elements.historyOpponentOtherCharacter.textContent = other?.characterDisplayName || "—";
+    elements.historyOpponentOtherCharacter.textContent = other
+      ? (localeApi?.characterName?.(other.characterDisplayName, other.characterId) || "—").toLocaleUpperCase()
+      : "—";
   }
   if (elements.historyOpponentOtherRating) {
     elements.historyOpponentOtherRating.textContent = other
@@ -932,32 +1101,501 @@ function renderHistoryOpponentProfile(record = historyOpponentProfileState.recor
       ? `${t("historyOpponentRetrieved", "RETRIEVED")} ${formatOpponentProfileRetrievedAt(context.retrievedAt)}`
       : "—";
   }
+  renderSelectedRoundResults(record);
   fitManagementScoreValues();
+}
+
+const ROUND_FINISH_CODES = new Map([
+  [1, "V"], [2, "C"], [3, "T"], [4, "D"],
+  [5, "OD"], [6, "SA"], [7, "CA"], [8, "P"],
+]);
+
+function roundResultBattles(summary) {
+  if (!summary || typeof summary !== "object") return [];
+  if (Array.isArray(summary.battles)) {
+    return summary.battles.map((battle) => Array.isArray(battle?.values) ? battle.values : []);
+  }
+  return Array.isArray(summary.values) ? [summary.values] : [];
+}
+
+function roundResultCell(code, winner) {
+  const numeric = Number(code);
+  const method = ROUND_FINISH_CODES.get(numeric);
+  if (!method || !winner) return "—";
+  return `${winner}（${method}）`;
+}
+
+function renderSelectedRoundResults(record) {
+  const body = elements.historySelectedRoundResultsBody;
+  if (!body) return;
+  body.replaceChildren();
+  const selfBattles = roundResultBattles(record?.roundResults?.self);
+  const opponentBattles = roundResultBattles(record?.roundResults?.opponent);
+  const battleCount = Math.max(selfBattles.length, opponentBattles.length);
+  if (!battleCount) {
+    const empty = document.createElement("span");
+    empty.className = "history-selected-round-results-empty";
+    empty.textContent = "—";
+    body.append(empty);
+    return;
+  }
+  for (let battleIndex = 0; battleIndex < battleCount; battleIndex += 1) {
+    const selfRounds = selfBattles[battleIndex] ?? [];
+    const opponentRounds = opponentBattles[battleIndex] ?? [];
+    const roundCount = Math.max(selfRounds.length, opponentRounds.length);
+    const battle = document.createElement("div");
+    battle.className = "history-selected-round-battle";
+    const title = document.createElement("div");
+    title.className = "history-selected-round-battle-title";
+    title.textContent = `${t("battleLabel", "BATTLE")} ${battleIndex + 1}`;
+    battle.append(title);
+    for (let roundIndex = 0; roundIndex < roundCount; roundIndex += 1) {
+      const selfCode = Number(selfRounds[roundIndex]);
+      const opponentCode = Number(opponentRounds[roundIndex]);
+      const selfKnown = ROUND_FINISH_CODES.has(selfCode);
+      const opponentKnown = ROUND_FINISH_CODES.has(opponentCode);
+      const selfWinner = selfKnown && !opponentKnown ? "W" : null;
+      const opponentWinner = opponentKnown && !selfKnown ? "W" : null;
+      const row = document.createElement("div");
+      row.className = "history-selected-round-row";
+      const label = document.createElement("span");
+      label.className = "history-selected-round-label";
+      label.textContent = `${t("roundLabel", "ROUND")} ${roundIndex + 1}`;
+      const self = document.createElement("span");
+      self.textContent = `${t("self", "SELF")} ${selfWinner ? roundResultCell(selfCode, selfWinner) : (opponentWinner ? "L" : "—")}`;
+      const opponent = document.createElement("span");
+      opponent.textContent = `${t("opponent", "OPPONENT")} ${opponentWinner ? roundResultCell(opponentCode, opponentWinner) : (selfWinner ? "L" : "—")}`;
+      row.append(label, self, opponent);
+      battle.append(row);
+    }
+    body.append(battle);
+  }
+}
+
+function matchupStatusForContext(context, profileStatus = null) {
+  if (profileStatus === "loading" || context?.status === "loading") return "loading";
+  if (profileStatus === "error") return "error";
+  if (profileStatus === "empty" || !context) return "unavailable";
+  return ["ready", "partial", "insufficient_sample", "unavailable", "error"].includes(context.status)
+    ? context.status
+    : "unavailable";
+}
+
+function matchupDisplayStatus(status) {
+  return String(status || "unavailable").toUpperCase();
+}
+
+function formatPlayComparisonValue(item) {
+  if (!item || item.value == null || item.comparable === false) return "—";
+  const value = Number(item.value);
+  if (!Number.isFinite(value)) return "—";
+  if (item.average != null && item.count != null) {
+    return t("countUnit", "{value} times").replace("{value}", Number(item.average).toFixed(1));
+  }
+  if (item.unit === "%") return `${value.toFixed(2)}%`;
+  if (item.unit === "seconds") return t("secondsUnit", "{value} sec").replace("{value}", value.toFixed(1));
+  return t("countUnit", "{value} times").replace("{value}", value.toFixed(1));
+}
+
+const MATCHUP_GROUP_I18N = Object.freeze({
+  driveGaugeUsage: "metricDriveGaugeUsage",
+  saGaugeUsage: "metricSaGaugeUsage",
+  directActions: "metricDirectActions",
+  driveImpactSelf: "metricDriveImpactSelf",
+  driveImpactOpponent: "metricDriveImpactOpponent",
+  stun: "metricStun",
+  throws: "metricThrows",
+  cornerTime: "metricCornerTime",
+});
+const MATCHUP_ITEM_I18N = Object.freeze({
+  driveParry: "metricDriveParry", driveImpact: "metricDriveImpact", overdriveArts: "metricOverdriveArts",
+  parryDriveRush: "metricParryDriveRush", cancelDriveRush: "metricCancelDriveRush", driveReversal: "metricDriveReversal",
+  damage: "metricDamage", level1: "metricLevel1", level2: "metricLevel2", level3: "metricLevel3", ca: "metricCa",
+  driveParrySuccess: "metricDriveParrySuccess", driveParryThrowOpponent: "metricDriveParryThrowOpponent",
+  driveParryThrownByOpponent: "metricDriveParryThrownByOpponent", justParry: "metricJustParry",
+  landed: "metricLanded", punishCounter: "metricPunishCounter", counteredOpponent: "metricCounteredOpponent",
+  received: "metricReceived", returnedByOpponent: "metricReturnedByOpponent", dealt: "metricDealt",
+  receivedStun: "metricStunReceived", teched: "metricTeched",
+  opponentCornered: "metricOpponentCornered", selfCornered: "metricSelfCornered",
+});
+const MATCHUP_ITEM_GROUP_I18N = Object.freeze({
+  "directActions.driveReversal": "metricDriveReversalUse",
+  "directActions.driveParrySuccess": "metricDriveParrySuccess",
+  "directActions.driveParryThrowOpponent": "metricDriveParryThrowOpponent",
+  "directActions.driveParryThrownByOpponent": "metricDriveParryThrownByOpponent",
+  "directActions.justParry": "metricJustParry",
+  "stun.dealt": "metricDealt", "stun.received": "metricStunReceived",
+  "throws.landed": "metricThrowLanded", "throws.received": "metricThrowReceived",
+  "driveImpactSelf.landed": "metricLanded", "driveImpactSelf.punishCounter": "metricPunishCounter",
+  "driveImpactOpponent.received": "metricReceived", "driveImpactOpponent.punishCounter": "metricPunishCounter",
+});
+
+function matchupLabel(key, fallback, map) {
+  const translationKey = map?.[key];
+  return translationKey ? t(translationKey, fallback) : fallback;
+}
+
+function matchupNumericValue(item) {
+  const value = item?.comparable === false ? null : Number(item?.value);
+  return Number.isFinite(value) ? value : null;
+}
+
+function appendDriveGaugeGroup(container, group) {
+  const wrapper = document.createElement("div");
+  wrapper.className = "matchup-drive-radar-layout";
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.classList.add("matchup-drive-radar");
+  svg.setAttribute("viewBox", "0 0 240 220");
+  svg.setAttribute("role", "img");
+  svg.setAttribute("aria-label", matchupLabel(group.id, group.label || "Drive gauge usage", MATCHUP_GROUP_I18N));
+  const center = { x: 120, y: 110 };
+  const radius = 78;
+  const count = group.items.length;
+  const point = (index, value) => {
+    const angle = -Math.PI / 2 + (Math.PI * 2 * index) / count;
+    const scale = Math.max(0, Math.min(100, Number(value) || 0)) / 100;
+    return `${center.x + Math.cos(angle) * radius * scale},${center.y + Math.sin(angle) * radius * scale}`;
+  };
+  const axisPoint = (index) => {
+    const angle = -Math.PI / 2 + (Math.PI * 2 * index) / count;
+    return {
+      x: center.x + Math.cos(angle) * (radius + 18),
+      y: center.y + Math.sin(angle) * (radius + 18),
+    };
+  };
+  // 10% auxiliary rings with stronger 20% major rings make small differences
+  // readable without introducing a second numeric scale.
+  for (const scale of [10, 20, 30, 40, 50, 60, 70, 80, 90, 100]) {
+    const polygon = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
+    polygon.setAttribute("points", group.items.map((_, index) => point(index, scale)).join(" "));
+    polygon.classList.add("matchup-radar-grid", scale % 20 === 0 ? "major" : "minor");
+    svg.append(polygon);
+  }
+  const lines = document.createElementNS("http://www.w3.org/2000/svg", "g");
+  for (let index = 0; index < count; index += 1) {
+    const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+    const end = point(index, 100).split(",");
+    line.setAttribute("x1", String(center.x)); line.setAttribute("y1", String(center.y));
+    line.setAttribute("x2", end[0]); line.setAttribute("y2", end[1]);
+    line.classList.add("matchup-radar-axis"); lines.append(line);
+  }
+  svg.append(lines);
+  group.items.forEach((item, index) => {
+    const position = axisPoint(index);
+    const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    const labelText = matchupLabel(item.id, item.label || `#${index + 1}`, MATCHUP_ITEM_I18N);
+    const characters = [...String(labelText)];
+    const chunks = characters.length > 10
+      ? [characters.slice(0, Math.ceil(characters.length / 2)).join(""), characters.slice(Math.ceil(characters.length / 2)).join("")]
+      : [String(labelText)];
+    label.setAttribute("x", String(position.x)); label.setAttribute("y", String(position.y - (chunks.length - 1) * 4));
+    label.setAttribute("text-anchor", "middle"); label.classList.add("matchup-radar-axis-label", "full");
+    chunks.forEach((chunk, chunkIndex) => {
+      const tspan = document.createElementNS("http://www.w3.org/2000/svg", "tspan");
+      tspan.setAttribute("x", String(position.x)); tspan.setAttribute("dy", chunkIndex === 0 ? "0" : "8");
+      tspan.textContent = chunk; label.append(tspan);
+    });
+    svg.append(label);
+    const number = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    number.setAttribute("x", String(position.x)); number.setAttribute("y", String(position.y));
+    number.setAttribute("text-anchor", "middle"); number.classList.add("matchup-radar-axis-label", "number");
+    number.textContent = String(index + 1); svg.append(number);
+  });
+  for (const [side, color] of [["self", "#16dfff"], ["opponent", "#b34fff"]]) {
+    const polygon = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
+    polygon.setAttribute("points", group.items.map((item, index) => point(index, matchupNumericValue(item[side]))).join(" "));
+    polygon.setAttribute("fill", `${color}33`); polygon.setAttribute("stroke", color);
+    polygon.classList.add("matchup-radar-series", side); svg.append(polygon);
+  }
+  wrapper.append(svg);
+  const table = document.createElement("div"); table.className = "matchup-drive-radar-table";
+  group.items.forEach((item, index) => {
+    const row = document.createElement("div"); row.className = "matchup-drive-radar-row";
+    const number = document.createElement("b"); number.className = "axis-number"; number.textContent = `${index + 1}.`;
+    const label = document.createElement("span"); label.textContent = matchupLabel(item.id, item.label || "—", MATCHUP_ITEM_I18N);
+    const self = document.createElement("b"); self.className = "self"; self.textContent = formatPlayComparisonValue(item.self);
+    const opponent = document.createElement("b"); opponent.className = "opponent"; opponent.textContent = formatPlayComparisonValue(item.opponent);
+    row.append(number, label, self, opponent); table.append(row);
+  });
+  wrapper.append(table); container.append(wrapper);
+}
+
+function appendSaGaugeGroup(container, group) {
+  const wrapper = document.createElement("div"); wrapper.className = "matchup-sa-bars";
+  for (const [side, label] of [["self", t("matchupSelf", "SELF")], ["opponent", t("matchupOpponent", "OPPONENT")]]) {
+    const row = document.createElement("div"); row.className = "matchup-sa-row";
+    const heading = document.createElement("strong"); heading.className = side; heading.textContent = label;
+    const bar = document.createElement("div"); bar.className = "matchup-sa-bar";
+    for (const item of group.items) {
+      const segment = document.createElement("span"); const value = matchupNumericValue(item[side]);
+      segment.style.width = `${value == null ? 0 : Math.max(0, Math.min(100, value))}%`;
+      segment.textContent = value == null ? "" : `${value.toFixed(2)}%`;
+      segment.title = `${matchupLabel(item.id, item.label || "—", MATCHUP_ITEM_I18N)} ${formatPlayComparisonValue(item[side])}`;
+      segment.className = `level-${item.id}`; bar.append(segment);
+    }
+    row.append(heading, bar); wrapper.append(row);
+  }
+  const legend = document.createElement("div"); legend.className = "matchup-sa-legend";
+  for (const item of group.items) { const span = document.createElement("span"); span.textContent = matchupLabel(item.id, item.label || "—", MATCHUP_ITEM_I18N); span.className = `level-${item.id}`; legend.append(span); }
+  wrapper.append(legend); container.append(wrapper);
+}
+
+function renderPlayComparison(comparison) {
+  if (!comparison || !elements.matchupMetrics) return false;
+  const validStates = ["ready", "partial", "insufficient", "insufficient_sample", "unavailable", "error", "loading"];
+  const status = validStates.includes(comparison.status) ? comparison.status : "unavailable";
+  if (elements.matchupBucklerState) {
+    elements.matchupBucklerState.textContent = matchupDisplayStatus(status);
+    elements.matchupBucklerState.className = `matchup-state matchup-state-inline ${status}`;
+  }
+  elements.matchupMetrics.replaceChildren();
+  for (const group of Array.isArray(comparison.groups) ? comparison.groups : []) {
+    const groupHeader = document.createElement("div");
+    groupHeader.className = "matchup-play-group-header";
+    const title = document.createElement("strong");
+    title.textContent = matchupLabel(group.id, group.label || "比較指標", MATCHUP_GROUP_I18N);
+    groupHeader.append(title);
+    elements.matchupMetrics.append(groupHeader);
+    if (group.id === "driveGaugeUsage") {
+      appendDriveGaugeGroup(elements.matchupMetrics, group);
+      continue;
+    }
+    if (group.id === "saGaugeUsage") {
+      appendSaGaugeGroup(elements.matchupMetrics, group);
+      continue;
+    }
+    for (const item of Array.isArray(group.items) ? group.items : []) {
+      const row = document.createElement("div");
+      row.className = "matchup-play-metric-row";
+      const self = item.self ?? null;
+      const opponent = item.opponent ?? null;
+      const selfText = document.createElement("span");
+      selfText.className = "matchup-metric-value self";
+      selfText.textContent = formatPlayComparisonValue(self);
+      const opponentText = document.createElement("span");
+      opponentText.className = "matchup-metric-value opponent";
+      opponentText.textContent = formatPlayComparisonValue(opponent);
+      const label = document.createElement("b");
+      label.textContent = t(
+        MATCHUP_ITEM_GROUP_I18N[`${group.id}.${item.id}`] || MATCHUP_ITEM_I18N[item.id] || "",
+        item.label || "—",
+      );
+      const selfNumber = self?.comparable === false ? null : Number(self?.value);
+      const opponentNumber = opponent?.comparable === false ? null : Number(opponent?.value);
+      const percentageScale = self?.unit === "%" || opponent?.unit === "%";
+      const max = percentageScale
+        ? 100
+        : Math.max(Number.isFinite(selfNumber) ? selfNumber : 0, Number.isFinite(opponentNumber) ? opponentNumber : 0);
+      const track = document.createElement("span");
+      track.className = "matchup-dumbbell-track";
+      const selfPoint = document.createElement("i"); selfPoint.className = "matchup-dumbbell-point self";
+      const opponentPoint = document.createElement("i"); opponentPoint.className = "matchup-dumbbell-point opponent";
+      if (Number.isFinite(selfNumber) && Number.isFinite(opponentNumber) && selfNumber === opponentNumber) {
+        selfPoint.classList.add("same-value"); opponentPoint.classList.add("same-value");
+      }
+      selfPoint.style.left = `${max > 0 && Number.isFinite(selfNumber) ? Math.max(0, Math.min(100, selfNumber / max * 100)) : 0}%`;
+      opponentPoint.style.left = `${max > 0 && Number.isFinite(opponentNumber) ? Math.max(0, Math.min(100, opponentNumber / max * 100)) : 0}%`;
+      track.append(selfPoint, opponentPoint);
+      // Keep the semantic order explicit: label, self value, opponent value,
+      // then the shared comparison track. CSS reflows this into a two-row
+      // layout on narrow viewports without changing the reading order.
+      row.append(label, selfText, opponentText, track);
+      elements.matchupMetrics.append(row);
+    }
+  }
+  return true;
+}
+
+function roundTrendValue(side, index) {
+  const item = side?.codes?.[index];
+  if (!item || item.percentage == null || item.count == null) return "—";
+  const count = t("countUnit", "{value} times").replace("{value}", Number(item.count).toFixed(1));
+  return `${Number(item.percentage).toFixed(1)}% · ${count}`;
+}
+
+function renderRoundTrend(trend) {
+  if (!elements.matchupRoundMetrics) return;
+  const validStates = ["ready", "partial", "insufficient_sample", "unknown", "unavailable", "error", "loading"];
+  const status = validStates.includes(trend?.status) ? trend.status : "unavailable";
+  if (elements.matchupRoundState) {
+    elements.matchupRoundState.textContent = matchupDisplayStatus(status);
+    elements.matchupRoundState.className = `matchup-state matchup-state-inline ${status}`;
+  }
+  if (elements.matchupRoundScope) {
+    elements.matchupRoundScope.replaceChildren();
+    const formatMatches = (value, hideZero = false) => {
+      const count = hideZero && Number(value) === 0 ? "—" : String(value ?? "—");
+      const unit = t("matchUnit", "Match");
+      return unit === "試合" ? `${count}${unit}` : `${count} ${unit}`;
+    };
+    const formatWonRounds = (value) => t("wonRounds", "{value} rounds won").replace("{value}", String(value ?? "—"));
+    const sourceStatuses = Array.isArray(trend?.sourceStatuses) ? trend.sourceStatuses : [];
+    const sideStatus = (index, side) => sourceStatuses[index] || (side?.matches > 0 ? "ready" : "unavailable");
+    const hideZero = trend?.zeroIsUnknown === true;
+    const values = [
+      `${t("matchupSelf", "SELF")}: ${formatMatches(trend?.self?.matches, hideZero)} / ${formatWonRounds(trend?.self?.wonRounds)} · ${matchupDisplayStatus(sideStatus(0, trend?.self))}`,
+      `${t("matchupOpponent", "OPPONENT")}: ${formatMatches(trend?.opponent?.matches, hideZero)} / ${formatWonRounds(trend?.opponent?.wonRounds)} · ${matchupDisplayStatus(sideStatus(1, trend?.opponent))}`,
+    ];
+    values.forEach((value, index) => {
+      const span = document.createElement("span");
+      span.className = `matchup-round-scope-side ${index === 0 ? "self" : "opponent"}`;
+      span.dataset.trendStatus = sideStatus(index, index === 0 ? trend?.self : trend?.opponent);
+      span.textContent = value;
+      elements.matchupRoundScope.append(span);
+    });
+  }
+  elements.matchupRoundMetrics.replaceChildren();
+  const codes = Array.isArray(trend?.codes) ? trend.codes : ["V", "C", "T", "D", "OD", "SA", "CA", "P"];
+  for (let index = 0; index < codes.length; index += 1) {
+    const row = document.createElement("div");
+    row.className = "matchup-round-metric-row";
+    const self = trend?.self?.codes?.[index] ?? null;
+    const opponent = trend?.opponent?.codes?.[index] ?? null;
+    const selfText = document.createElement("span");
+    selfText.className = "matchup-metric-value self";
+    selfText.textContent = roundTrendValue(trend?.self, index);
+    const opponentText = document.createElement("span");
+    opponentText.className = "matchup-metric-value opponent";
+    opponentText.textContent = roundTrendValue(trend?.opponent, index);
+    const label = document.createElement("b");
+    label.textContent = codes[index];
+    const selfBar = document.createElement("i");
+    selfBar.className = "matchup-metric-bar self";
+    const opponentBar = document.createElement("i");
+    opponentBar.className = "matchup-metric-bar opponent";
+    selfBar.style.setProperty("--metric-value", `${self?.percentage == null ? 0 : Math.max(0, Math.min(100, Number(self.percentage)))}%`);
+    opponentBar.style.setProperty("--metric-value", `${opponent?.percentage == null ? 0 : Math.max(0, Math.min(100, Number(opponent.percentage)))}%`);
+    row.append(selfText, selfBar, label, opponentBar, opponentText);
+    elements.matchupRoundMetrics.append(row);
+  }
+  if (elements.matchupRoundNote) {
+    const unknown = Number(trend?.self?.unknownRounds ?? 0) + Number(trend?.opponent?.unknownRounds ?? 0);
+    elements.matchupRoundNote.textContent = unknown > 0
+      ? t("matchupUnknownRoundNote", "{count} unknown round codes were excluded from classification and win/loss totals.").replace("{count}", String(unknown))
+      : t("matchupNoUnknownRoundNote", "Zeros, missing values, and unavailable results are excluded from won-round totals and shown as unavailable.");
+  }
+}
+
+function renderMatchupAnalysis() {
+  const context = matchupState.context;
+  const status = matchupState.status;
+
+  if (elements.matchupState) {
+    elements.matchupState.textContent = matchupDisplayStatus(status);
+    elements.matchupState.className = `matchup-state ${status}`;
+  }
+  if (elements.matchupProfileAct) {
+    const actLabel = context?.act?.id || context?.act?.label || "—";
+    elements.matchupProfileAct.textContent = `ACT ${actLabel}`;
+  }
+  if (elements.matchupProfileRetrieved) {
+    elements.matchupProfileRetrieved.textContent = context?.retrievedAt
+      ? `${t("historyOpponentRetrieved", "RETRIEVED")} ${formatOpponentProfileRetrievedAt(context.retrievedAt)}`
+      : "—";
+  }
+  const playComparison = context?.playComparison ?? {
+    status: status === "error" ? "error" : status === "loading" ? "loading" : "unavailable",
+    groups: [],
+    sameSample: false,
+  };
+  renderPlayComparison(playComparison);
+  renderRoundTrend(context?.roundTrend ?? {
+    status: status === "error" ? "error" : status === "loading" ? "loading" : "unavailable",
+    codes: ["V", "C", "T", "D", "OD", "SA", "CA", "P"],
+  });
+}
+
+function syncOpenMatchupForHistoryProfile(record) {
+  if (!document.body.classList.contains("matchup-screen-open")) return;
+  const recordKey = record ? historyRecordKey(record) : null;
+  if (!recordKey || matchupState.recordKey !== recordKey) return;
+  matchupState = {
+    ...matchupState,
+    status: matchupStatusForContext(historyOpponentProfileState.context, historyOpponentProfileState.status),
+    context: historyOpponentProfileState.context ?? null,
+  };
+  renderMatchupAnalysis();
+}
+
+function setMatchupOpen(open) {
+  const visible = Boolean(open);
+  document.body.classList.toggle("matchup-screen-open", visible);
+  elements.matchupPanel?.classList.toggle("hidden", !visible);
+  elements.matchupPanel?.setAttribute("aria-hidden", String(!visible));
+  if (visible) {
+    elements.historyPanel?.classList.add("hidden");
+  } else if (matchupReturnToHistory) {
+    setHistoryPanelOpen(true);
+  }
+}
+
+function clearSelectedHistoryRecord() {
+  selectHistoryRecord(null);
+  renderHistoryState();
+}
+
+function openMatchupAnalysis(record = historyOpponentProfileState.record) {
+  matchupReturnToHistory = historyPanelOpen;
+  if (historyLatestContextNeedsRefetch(record)) {
+    selectHistoryRecord(record, { forceRefresh: true });
+  }
+  matchupState = {
+    status: matchupStatusForContext(historyOpponentProfileState.context, historyOpponentProfileState.status),
+    recordKey: record ? historyRecordKey(record) : null,
+    record: record ?? null,
+    context: historyOpponentProfileState.context ?? null,
+  };
+  renderMatchupAnalysis();
+  setMatchupOpen(true);
+}
+
+function refreshMatchupAnalysis() {
+  if (!matchupState.record) return;
+  selectHistoryRecord(matchupState.record, { forceRefresh: true });
+  matchupState = { ...matchupState, status: "loading" };
+  renderMatchupAnalysis();
 }
 
 function selectHistoryRecord(record, { forceRefresh = false } = {}) {
   const nextRecord = record ?? null;
   const nextRecordKey = nextRecord ? historyRecordKey(nextRecord) : null;
+  const requestScope = historyContextScopeKey(historyState, nextRecord);
   if (
     nextRecord &&
     nextRecordKey === selectedHistoryRecordKey &&
     historyOpponentProfileState.record &&
     ["loading", "ready"].includes(historyOpponentProfileState.status) &&
+    historyOpponentProfileState.requestScope === requestScope &&
     !forceRefresh
   ) {
     renderHistoryOpponentProfile(nextRecord);
     return;
   }
+  const preservePinnedOpponentProfile = Boolean(
+    nextRecord &&
+    historyOpponentProfileState.recordKey === nextRecordKey &&
+    historyOpponentProfileState.preserveOnTargetChange === true &&
+    historyOpponentProfileState.ownerProfileId &&
+    historyOpponentProfileState.ownerProfileId !== historyStateProfileId(historyState),
+  );
   selectedHistoryRecordKey = nextRecordKey;
   const requestToken = ++historyOpponentProfileRequestToken;
   historyOpponentProfileState = {
     status: nextRecord ? "loading" : "idle",
     recordKey: selectedHistoryRecordKey,
     record: nextRecord,
+    ownerProfileId: nextRecord
+      ? preservePinnedOpponentProfile
+        ? historyOpponentProfileState.ownerProfileId
+        : historyStateProfileId(historyState)
+      : null,
+    preserveOnTargetChange: preservePinnedOpponentProfile,
+    requestScope,
     context: null,
   };
   renderHistoryOpponentProfile(nextRecord);
-  if (!nextRecord) return;
+  syncOpenMatchupForHistoryProfile(nextRecord);
+  if (!nextRecord) return Promise.resolve(null);
 
   const profileId = String(nextRecord.opponentUserCode ?? "").trim();
   const characterId = Number(nextRecord.opponentCharacterId) || null;
@@ -967,21 +1605,31 @@ function selectHistoryRecord(record, { forceRefresh = false } = {}) {
       status: "empty",
     };
     renderHistoryOpponentProfile(nextRecord);
-    return;
+    syncOpenMatchupForHistoryProfile(nextRecord);
+    return Promise.resolve(null);
   }
 
-  void api.getHistoryOpponentContext({
+  const actSelection = historyOpponentContextActSelection(historyState);
+  const request = api.getHistoryOpponentContext({
     profileId,
     opponentUserCode: profileId,
     characterId,
     characterDisplayName: nextRecord.opponentCharacterName,
     historyOwnerProfileId: historyState?.profileId,
     replayId: nextRecord.replayId,
+    ...actSelection,
+    currentActStatus: historyState?.currentActStatus ?? officialCharacterNamesState.status,
     selectedRecord: nextRecord,
     forceRefresh,
   }).then((result) => {
-    if (requestToken !== historyOpponentProfileRequestToken || selectedHistoryRecordKey !== historyRecordKey(nextRecord)) return;
+    const selected = requestToken === historyOpponentProfileRequestToken &&
+      selectedHistoryRecordKey === historyRecordKey(nextRecord);
+    const pinnedAcrossTarget = historyOpponentProfileState.preserveOnTargetChange === true &&
+      historyOpponentProfileState.ownerProfileId &&
+      historyOpponentProfileState.ownerProfileId !== historyStateProfileId(historyState);
+    if (!selected || (requestScope !== historyContextScopeKey(historyState, nextRecord) && !pinnedAcrossTarget)) return;
     if (!result?.ok) throw new Error(result?.error || "PROFILE_REFERENCE_FAILED");
+    registerScopedContextCharacterLabels(result.data);
     historyOpponentProfileState = {
       ...historyOpponentProfileState,
       status: result.data?.status || "empty",
@@ -991,8 +1639,14 @@ function selectHistoryRecord(record, { forceRefresh = false } = {}) {
     if (insightKey && result.data) historyOpponentInsightCache.set(insightKey, result.data);
     renderHistoryOpponentProfile(nextRecord);
     renderHistoryState();
+    syncOpenMatchupForHistoryProfile(nextRecord);
   }).catch(() => {
-    if (requestToken !== historyOpponentProfileRequestToken || selectedHistoryRecordKey !== historyRecordKey(nextRecord)) return;
+    const selected = requestToken === historyOpponentProfileRequestToken &&
+      selectedHistoryRecordKey === historyRecordKey(nextRecord);
+    const pinnedAcrossTarget = historyOpponentProfileState.preserveOnTargetChange === true &&
+      historyOpponentProfileState.ownerProfileId &&
+      historyOpponentProfileState.ownerProfileId !== historyStateProfileId(historyState);
+    if (!selected || (requestScope !== historyContextScopeKey(historyState, nextRecord) && !pinnedAcrossTarget)) return;
     historyOpponentProfileState = {
       ...historyOpponentProfileState,
       status: "error",
@@ -1002,7 +1656,9 @@ function selectHistoryRecord(record, { forceRefresh = false } = {}) {
     if (insightKey) historyOpponentInsightCache.delete(insightKey);
     renderHistoryOpponentProfile(nextRecord);
     renderHistoryState();
+    syncOpenMatchupForHistoryProfile(nextRecord);
   });
+  return request;
 }
 
 function renderHistoryTable(records) {
@@ -1027,6 +1683,7 @@ function renderHistoryTable(records) {
       historyCharacterLabel(record, false),
       formatHistoryRating(record.opponentRatingType, record.opponentRating),
       String(record.replayId ?? "").trim() || "—",
+      historyInputTypeLabel(record.opponentBattleInputType),
     ];
     cells.forEach((value, index) => {
       const cell = document.createElement("td");
@@ -1088,6 +1745,7 @@ function renderRecentHistoryPreview(records) {
       historyCharacterLabel(record, false),
       record.opponentName || "—",
       ratingDelta == null ? "—" : `${ratingDelta >= 0 ? "+" : ""}${ratingDelta}`,
+      historyInputTypeLabel(record.opponentBattleInputType),
     ];
     values.forEach((value, index) => {
       const cell = document.createElement("td");
@@ -1246,42 +1904,347 @@ function renderHistoryFetchStatus() {
               .replace("{seconds}", String(cooldown));
 }
 
-function renderOpponentCharacterStats(records) {
+function officialOpponentCharacterStatsScopeKey(state = historyState) {
+  const locale = localeApi?.getLocale?.() || document.documentElement.lang || "ja-jp";
+  const profileId = String(
+    state?.profileId ?? state?.player?.profileId ?? state?.player?.userCode ?? "",
+  ).trim();
+  const selectedAct = historyActUserSelected
+    ? String(elements.historyAct?.value ?? "latest").trim()
+    : String(verifiedCurrentHistoryActId(state) ?? "latest");
+  const actScope = /^\d+$/.test(selectedAct) ? selectedAct : "latest";
+  const selectedOwnCharacterId = String(elements.historyCharacter?.value ?? "all").trim() || "all";
+  const matchMode = String(elements.historyMatchType?.value ?? "all").trim() || "all";
+  return profileId ? `${locale}:${profileId}:${actScope}:${matchMode}:${selectedOwnCharacterId}` : "";
+}
+
+function officialCharacterNameScopeKey(state = historyState) {
+  const locale = localeApi?.getLocale?.() || document.documentElement.lang || "ja-jp";
+  const profileId = String(
+    state?.profileId ?? state?.player?.profileId ?? state?.player?.userCode ?? "",
+  ).trim();
+  const selectedAct = historyActUserSelected
+    ? String(elements.historyAct?.value ?? "latest").trim()
+    : "latest";
+  const actScope = /^\d+$/.test(selectedAct) ? selectedAct : "latest";
+  return profileId ? `${locale}:${profileId}:${actScope}` : "";
+}
+
+function resetHistoryOfficialActReadiness(profileId = "") {
+  officialCharacterNamesRequestToken += 1;
+  officialCharacterNamesRequestKey = "";
+  officialCharacterNamesRetryAt = 0;
+  officialCharacterNamesState = {
+    status: "idle",
+    profileId: profileId || null,
+    locale: localeApi?.getLocale?.() || document.documentElement.lang || "ja-jp",
+    act: null,
+    labels: {},
+  };
+  historyResolvedLatestActProof = { profileId: "", actId: null, source: null };
+  historyCurrentActLateRefetchKey = "";
+}
+
+function applyResolvedLatestActProof(state = historyState) {
+  const profileId = historyStateProfileId(state);
+  const proof = historyResolvedLatestActProof;
+  if (
+    !profileId ||
+    proof.profileId !== profileId ||
+    !Number.isInteger(proof.actId) ||
+    proof.actId <= 0
+  ) return state;
+  const acts = Array.isArray(state?.acts) ? [...state.acts] : [];
+  if (!acts.some((act) => Number(act?.id ?? act?.actId) === proof.actId)) {
+    acts.push({ id: proof.actId, label: `ACT ${proof.actId}` });
+  }
+  return {
+    ...state,
+    acts,
+    currentActId: proof.actId,
+    currentActVerified: true,
+    currentActSource: proof.source || "official_profile_play",
+    currentActStatus: "ready",
+    currentActReason: null,
+  };
+}
+
+function officialOpponentCharacterStatsStateText(state) {
+  if (state?.status === "loading") {
+    const progress = state?.progress;
+    if (progress?.totalPages > 0) {
+      return t("opponentCharacterStatsProgress", "取得中 {page}/{total}")
+        .replace("{page}", String(progress.page ?? 0))
+        .replace("{total}", String(progress.totalPages ?? 0));
+    }
+    return t("opponentCharacterStatsLoading", "Loading official stats…");
+  }
+  if (state?.status === "partial") {
+    return t("opponentCharacterStatsPartial", "Official stats incomplete");
+  }
+  if (state?.status === "unavailable") {
+    return t("opponentCharacterStatsUnavailable", "Official stats unavailable");
+  }
+  return "";
+}
+
+async function requestOfficialCharacterNames(state = historyState) {
+  const key = officialCharacterNameScopeKey(state);
+  const sameScope = key === officialCharacterNamesRequestKey;
+  const terminal = ["ready", "unavailable"].includes(officialCharacterNamesState.status);
+  if (
+    !key ||
+    !api.getHistoryCharacterNames ||
+    sameScope && (
+      officialCharacterNamesState.status === "loading" ||
+      terminal && Date.now() < officialCharacterNamesRetryAt
+    )
+  ) {
+    return;
+  }
+  officialCharacterNamesRequestKey = key;
+  officialCharacterNamesRetryAt = Date.now() + OFFICIAL_OPPONENT_CHARACTER_STATS_RETRY_COOLDOWN_MS;
+  const requestToken = ++officialCharacterNamesRequestToken;
+  const [locale, profileId, actScope] = key.split(":");
+  const actId = /^\d+$/.test(actScope) ? Number(actScope) : null;
+  officialCharacterNamesState = {
+    status: "loading",
+    profileId,
+    locale,
+    labels: {},
+    act: null,
+  };
+  try {
+    const result = await unwrap(api.getHistoryCharacterNames(profileId, locale, actId));
+    if (
+      requestToken !== officialCharacterNamesRequestToken ||
+      key !== officialCharacterNameScopeKey(historyState)
+    ) return;
+    officialCharacterNamesState = {
+      ...result,
+      labels: result?.labels && typeof result.labels === "object" ? result.labels : {},
+    };
+    const resolvedAct = Number(result?.act);
+    if (
+      result?.status === "ready" &&
+      Number.isInteger(resolvedAct) &&
+      resolvedAct > 0 &&
+      historyStateProfileId(historyState) === profileId
+    ) {
+      historyResolvedLatestActProof = {
+        profileId,
+        actId: resolvedAct,
+        source: result?.source || "official_profile_play",
+      };
+      historyState = applyResolvedLatestActProof(historyState);
+    }
+    if (result?.status === "ready") {
+      localeApi?.registerCharacterNamesByLocale?.(
+        { [locale]: officialCharacterNamesState.labels },
+        { replaceBatch: true },
+      );
+    }
+    if (result?.retryable === false) officialCharacterNamesRetryAt = Number.POSITIVE_INFINITY;
+    renderHistoryState(historyState);
+    if (
+      result?.status === "ready" &&
+      historyOpponentProfileState.record &&
+      historyOpponentProfileState.context?.reason === "ACT_SCOPE_MISSING"
+    ) {
+      const resolvedAct = verifiedCurrentHistoryActId(historyState);
+      const lateRefetchKey = resolvedAct == null
+        ? ""
+        : `${officialCharacterNameScopeKey(historyState)}:${historyRecordKey(historyOpponentProfileState.record)}:${resolvedAct}`;
+      if (lateRefetchKey && lateRefetchKey !== historyCurrentActLateRefetchKey) {
+        historyCurrentActLateRefetchKey = lateRefetchKey;
+        selectHistoryRecord(historyOpponentProfileState.record, { forceRefresh: true });
+      }
+    }
+  } catch {
+    if (
+      requestToken !== officialCharacterNamesRequestToken ||
+      key !== officialCharacterNameScopeKey(historyState)
+    ) return;
+    officialCharacterNamesState = {
+      status: "unavailable",
+      retryable: true,
+      profileId,
+      locale,
+      act: null,
+      labels: {},
+    };
+    renderHistoryState(historyState);
+  }
+}
+
+function normalizedHistoryActs(state = historyState) {
+  const acts = Array.isArray(state?.acts) ? state.acts : [];
+  const currentAct = verifiedCurrentHistoryActId(state);
+  const normalized = acts
+    .map((act) => {
+      const id = Number(act?.id ?? act?.actId);
+      if (!Number.isInteger(id) || id < 0) return null;
+      return {
+        id,
+        label: String(act?.label ?? `ACT ${id}`).trim() || `ACT ${id}`,
+        startDate: String(act?.startDate ?? "").trim(),
+        endDate: String(act?.endDate ?? "").trim(),
+      };
+    })
+    .filter(Boolean);
+  if (Number.isInteger(currentAct) && currentAct > 0 && !normalized.some((act) => act.id === currentAct)) {
+    normalized.push({ id: currentAct, label: `ACT ${currentAct}`, startDate: "", endDate: "" });
+  }
+  return normalized.sort((left, right) => right.id - left.id);
+}
+
+function verifiedCurrentHistoryActId(state = historyState) {
+  const stateAct = Number(state?.currentActId);
+  if (
+    state?.currentActVerified === true &&
+    Number.isInteger(stateAct) &&
+    stateAct > 0
+  ) return stateAct;
+  return null;
+}
+
+function selectedHistoryActId() {
+  if (!historyActUserSelected) return verifiedCurrentHistoryActId(historyState);
+  const value = String(elements.historyAct?.value ?? "latest").trim();
+  return /^\d+$/.test(value) && Number(value) >= 0 ? Number(value) : null;
+}
+
+function selectedHistoryRoundTrendActId() {
+  const selected = selectedHistoryActId();
+  if (selected != null) return selected;
+  return verifiedCurrentHistoryActId(historyState);
+}
+
+function historyOpponentContextActSelection(state = historyState) {
+  const explicit = historyActUserSelected;
+  return {
+    selectedActSelector: explicit
+      ? String(elements.historyAct?.value ?? "latest").trim() || "latest"
+      : "latest",
+    selectedActId: explicit
+      ? selectedHistoryActId()
+      : verifiedCurrentHistoryActId(state),
+    actSelectionSource: explicit ? "explicit" : "latest",
+    currentActId: verifiedCurrentHistoryActId(state),
+  };
+}
+
+function historyLatestContextNeedsRefetch(record, state = historyState) {
+  if (historyActUserSelected || !record) return false;
+  const currentActId = verifiedCurrentHistoryActId(state);
+  if (currentActId == null || historyOpponentProfileState.status === "loading") return false;
+  const contextActId = Number(historyOpponentProfileState.context?.act?.id);
+  return !Number.isInteger(contextActId) || contextActId !== currentActId;
+}
+
+function refetchLatestHistoryOpponentContextIfActChanged(state = historyState) {
+  if (historyActUserSelected) return;
+  const record = historyOpponentProfileState.record;
+  const currentActId = verifiedCurrentHistoryActId(state);
+  if (!historyLatestContextNeedsRefetch(record, state) || currentActId == null) return;
+  const scopeKey = `${historyContextScopeKey(state, record)}:${historyRecordKey(record)}:${currentActId}`;
+  if (!scopeKey || scopeKey === historyCurrentActLateRefetchKey) return;
+  historyCurrentActLateRefetchKey = scopeKey;
+  selectHistoryRecord(record, { forceRefresh: true });
+}
+
+function renderHistoryActControl(state = historyState) {
+  const select = elements.historyAct;
+  if (!select) return;
+  const previous = historyActUserSelected ? String(select.value || "latest") : "";
+  const acts = normalizedHistoryActs(state);
+  const latestActId = verifiedCurrentHistoryActId(state);
+  select.replaceChildren();
+  if (!acts.length) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.disabled = true;
+    option.textContent = t("historyActUnavailable", "ACT —");
+    select.append(option);
+    select.value = "";
+    return;
+  }
+  for (const act of acts) {
+    const option = document.createElement("option");
+    option.value = String(act.id);
+    option.textContent = act.id === latestActId
+      ? `${act.label}（${t("historyActLatest", "最新")}）`
+      : act.label;
+    option.dataset.startDate = act.startDate;
+    option.dataset.endDate = act.endDate;
+    select.append(option);
+  }
+  const desiredValue = historyActUserSelected
+    ? previous
+    : latestActId == null
+      ? ""
+      : String(latestActId);
+  select.value = acts.some((act) => String(act.id) === desiredValue)
+    ? desiredValue
+    : "";
+}
+
+function renderHistoryActState(state = historyState) {
+  const element = elements.historyActState;
+  if (!element) return;
+  const selected = selectedHistoryActId();
+  const records = Array.isArray(state?.records) ? state.records : [];
+  if (selected == null) {
+    element.textContent = normalizedHistoryActs(state).length
+      ? ""
+      : t("historyActUnavailable", "ACT scope unavailable");
+    return;
+  }
+  const scopedRecords = records.filter((record) =>
+    historyRecordActIsKnown(record) && Number(record?.actId) === selected,
+  );
+  const hasUnscopedRecords = records.some((record) => !historyRecordActIsKnown(record));
+  element.textContent = hasUnscopedRecords && !scopedRecords.length
+    ? t("historyActUnavailable", "ACT scope unavailable")
+    : "";
+}
+
+function renderOpponentCharacterStats() {
   const body = elements.historyOpponentStatsBody;
   if (!body) return;
-  const statsModel = window.matchHistoryOpponentCharacterStats;
-  const buildStats = statsModel?.buildOpponentCharacterStats;
-  const stats = typeof buildStats === "function" ? buildStats(records) : [];
-  const sortedStats = typeof statsModel?.sortOpponentCharacterStats === "function"
-    ? statsModel.sortOpponentCharacterStats(stats, historyOpponentSort)
-    : stats;
+  const statsModel = window.matchOfficialOpponentCharacterStats;
+  const rows = officialOpponentCharacterStatsState.status === "ready"
+    ? officialOpponentCharacterStatsState.rows
+    : [];
+  const sortedStats = typeof statsModel?.sortOfficialOpponentCharacterStats === "function"
+    ? statsModel.sortOfficialOpponentCharacterStats(rows, historyOpponentSort)
+    : [...rows];
   body.replaceChildren();
   for (const entry of sortedStats) {
     const row = document.createElement("tr");
     const character = document.createElement("td");
-    character.textContent = entry.label
-      ? String(entry.label).toLocaleUpperCase()
-      : `#${entry.characterId}`;
+    character.textContent = String(entry.label ?? "—").toLocaleUpperCase();
     const matches = document.createElement("td");
     matches.textContent = String(entry.matches);
-    const result = document.createElement("td");
-    const wins = document.createElement("span");
-    wins.className = "history-matchup-wins";
+    const wins = document.createElement("td");
     wins.textContent = String(entry.wins);
-    const separator = document.createTextNode(" - ");
-    const losses = document.createElement("span");
-    losses.className = "history-matchup-losses";
-    losses.textContent = String(entry.losses);
-    result.append(wins, separator, losses);
     const winRate = document.createElement("td");
     const percentage = Math.max(0, Math.min(100, Number(entry.winRate) || 0));
     winRate.className = `history-matchup-win-rate ${percentage >= 50 ? "win-rate-pass" : "win-rate-fail"}`;
     winRate.style.setProperty("--matchup-win-rate", `${percentage}%`);
-    winRate.textContent = `${percentage.toFixed(1)}%`;
-    row.append(character, matches, result, winRate);
+    winRate.textContent = `${percentage.toFixed(2)}%`;
+    row.append(character, matches, wins, winRate);
     body.append(row);
   }
-  elements.historyOpponentStatsEmpty?.classList.toggle("hidden", sortedStats.length > 0);
+  if (elements.historyOpponentStatsState) {
+    elements.historyOpponentStatsState.textContent = officialOpponentCharacterStatsStateText(
+      officialOpponentCharacterStatsState,
+    );
+  }
+  elements.historyOpponentStatsEmpty?.classList.toggle(
+    "hidden",
+    sortedStats.length > 0,
+  );
   const matchesActive = historyOpponentSort.key === "matches";
   const winRateActive = historyOpponentSort.key === "winRate";
   const sortIndicator = historyOpponentSort.direction === "asc" ? "▲" : "▼";
@@ -1303,9 +2266,156 @@ function renderOpponentCharacterStats(records) {
   );
 }
 
+async function requestOfficialOpponentCharacterStats(state = historyState, { forceRefresh = false } = {}) {
+  const key = officialOpponentCharacterStatsScopeKey(state);
+  const sameScope = key === officialOpponentCharacterStatsRequestKey;
+  const terminal = ["ready", "partial", "unavailable"].includes(
+    officialOpponentCharacterStatsState.status,
+  );
+  if (
+    !key ||
+    !forceRefresh && sameScope && (
+      officialOpponentCharacterStatsState.status === "loading" ||
+      terminal && officialOpponentCharacterStatsState.retryable === false ||
+      terminal && Date.now() < officialOpponentCharacterStatsRetryAt
+    )
+  ) {
+    return;
+  }
+  officialOpponentCharacterStatsRequestKey = key;
+  officialOpponentCharacterStatsRetryAt = Date.now() +
+    OFFICIAL_OPPONENT_CHARACTER_STATS_RETRY_COOLDOWN_MS;
+  const requestToken = ++officialOpponentCharacterStatsRequestToken;
+  const [locale, profileId, actScope, matchMode, selectedOwnCharacterId] = key.split(":");
+  const actId = /^\d+$/.test(actScope) ? Number(actScope) : null;
+  officialOpponentCharacterStatsState = {
+    status: "loading",
+    profileId,
+    locale,
+    rows: [],
+    progress: null,
+  };
+  renderOpponentCharacterStats();
+  try {
+    const result = await unwrap(
+      api.getHistoryOpponentCharacterStats(
+        profileId,
+        locale,
+        actId,
+        selectedOwnCharacterId === "all" ? null : Number(selectedOwnCharacterId),
+        requestToken,
+        matchMode,
+        historyActUserSelected ? "explicit" : "latest",
+        { forceRefresh: forceRefresh === true },
+      ),
+    );
+    if (
+      requestToken !== officialOpponentCharacterStatsRequestToken ||
+      key !== officialOpponentCharacterStatsScopeKey(historyState)
+    ) return;
+    officialOpponentCharacterStatsState = {
+      ...result,
+      rows: Array.isArray(result?.rows) ? result.rows : [],
+      progress: null,
+    };
+    if (result?.retryable === false) officialOpponentCharacterStatsRetryAt = Number.POSITIVE_INFINITY;
+  } catch {
+    if (
+      requestToken !== officialOpponentCharacterStatsRequestToken ||
+      key !== officialOpponentCharacterStatsScopeKey(historyState)
+    ) return;
+    officialOpponentCharacterStatsState = {
+      status: "unavailable",
+      retryable: true,
+      profileId,
+      locale,
+      rows: [],
+      progress: null,
+    };
+  }
+  renderOpponentCharacterStats();
+}
+
 function renderHistoryState(nextState = historyState) {
-  historyState = nextState || { records: [], canFetch: false, authenticated: false, cooldownSeconds: 0 };
+  historyState = applyResolvedLatestActProof(
+    nextState || { records: [], canFetch: false, authenticated: false, cooldownSeconds: 0 },
+  );
+  const nextActProfileScope = String(historyState.profileId ?? historyState.player?.profileId ?? historyState.player?.userCode ?? "").trim();
+  if (nextActProfileScope !== historyActProfileScope) {
+    historyActProfileScope = nextActProfileScope;
+    historyActUserSelected = false;
+  }
+  renderHistoryActControl(historyState);
+  renderHistoryActState(historyState);
+  const officialStatsKey = officialOpponentCharacterStatsScopeKey(historyState);
+  if (officialStatsKey !== officialOpponentCharacterStatsRequestKey) {
+    officialOpponentCharacterStatsRequestToken += 1;
+    officialOpponentCharacterStatsState = {
+      status: officialStatsKey ? "idle" : "unavailable",
+      retryable: true,
+      profileId: historyState.profileId ?? null,
+      locale: localeApi?.getLocale?.() || document.documentElement.lang || "ja-jp",
+      rows: [],
+    };
+    officialOpponentCharacterStatsRequestKey = "";
+    officialOpponentCharacterStatsRetryAt = 0;
+  }
+  void requestOfficialOpponentCharacterStats(historyState);
+  void requestOfficialCharacterNames(historyState);
   const allRecords = Array.isArray(historyState.records) ? historyState.records : [];
+  const nextCharacterLabelScope = officialCharacterNameScopeKey(historyState);
+  const nextHistoryProfileId = historyStateProfileId(historyState);
+  const preservePinnedOpponentProfile = Boolean(
+    historyOpponentProfileState.preserveOnTargetChange === true &&
+    historyOpponentProfileState.record &&
+    historyOpponentProfileState.recordKey === selectedHistoryRecordKey &&
+    historyOpponentProfileState.ownerProfileId &&
+    historyOpponentProfileState.ownerProfileId !== nextHistoryProfileId,
+  );
+  if (characterLabelScopeKey !== nextCharacterLabelScope) {
+    localeApi?.resetCharacterNamesByLocale?.();
+    characterLabelScopeKey = nextCharacterLabelScope;
+    historyCurrentActLateRefetchKey = "";
+    if (!preservePinnedOpponentProfile) {
+      historyOpponentProfileRequestToken += 1;
+      selectedHistoryRecordKey = null;
+      historyOpponentProfileState = {
+        status: "idle",
+        recordKey: null,
+        record: null,
+        ownerProfileId: null,
+        preserveOnTargetChange: false,
+        context: null,
+      };
+    }
+  }
+  const labelsByLocale = {};
+  const verifiedLocales = new Set(
+    Array.isArray(historyState.characterNamesVerifiedLocales)
+      ? historyState.characterNamesVerifiedLocales
+      : [],
+  );
+  const addScopedLabel = (locale, id, label) => {
+    const numericId = Number(id);
+    const text = String(label ?? "").trim();
+    if (!Number.isFinite(numericId) || numericId <= 0 || !text) return;
+    const localeLabels = labelsByLocale[locale] ?? (labelsByLocale[locale] = {});
+    const previous = localeLabels[numericId];
+    if (previous == null) localeLabels[numericId] = text;
+    else if (Array.isArray(previous)) {
+      if (!previous.includes(text)) previous.push(text);
+    } else if (previous !== text) {
+      localeLabels[numericId] = [previous, text];
+    }
+  };
+  for (const record of allRecords) {
+    for (const [locale, labels] of Object.entries(record?.characterNamesByLocale ?? {})) {
+      if (!verifiedLocales.has(locale)) continue;
+      addScopedLabel(locale, record?.characterId, labels?.own);
+      addScopedLabel(locale, record?.opponentCharacterId, labels?.opponent);
+    }
+  }
+  localeApi?.registerCharacterNamesByLocale?.(labelsByLocale, { replaceBatch: true });
   if (elements.historyTargetCode && document.activeElement !== elements.historyTargetCode) {
     elements.historyTargetCode.value = historyState.player?.userCode ?? "";
   }
@@ -1356,7 +2466,7 @@ function renderHistoryState(nextState = historyState) {
   elements.historyCount.textContent = `${displayedMatchCount} ${t("matches", "MATCHES")}`;
   elements.historyEmpty.classList.toggle("hidden", records.length > 0);
   renderHistoryRatingCharts(records);
-  renderOpponentCharacterStats(records);
+  renderOpponentCharacterStats();
   const totalPages = Math.ceil(records.length / HISTORY_PAGE_SIZE);
   historyPage = totalPages ? Math.min(historyPage, totalPages - 1) : 0;
   const pageRecords = records.slice(
@@ -1366,22 +2476,31 @@ function renderHistoryState(nextState = historyState) {
   const selectedRecord = selectedHistoryRecordKey
     ? records.find((record) => historyRecordKey(record) === selectedHistoryRecordKey) ?? null
     : null;
-  if (selectedHistoryRecordKey && !selectedRecord) {
+  if (selectedHistoryRecordKey && !selectedRecord && !preservePinnedOpponentProfile) {
     selectedHistoryRecordKey = null;
     historyOpponentProfileRequestToken += 1;
     historyOpponentProfileState = {
       status: "idle",
       recordKey: null,
       record: null,
+      ownerProfileId: null,
+      preserveOnTargetChange: false,
       context: null,
     };
     renderHistoryOpponentProfile(null);
-  } else if (selectedRecord) {
+  } else if (selectedRecord && !preservePinnedOpponentProfile) {
     historyOpponentProfileState = {
       ...historyOpponentProfileState,
       record: selectedRecord,
     };
     renderHistoryOpponentProfile(selectedRecord);
+    refetchLatestHistoryOpponentContextIfActChanged(historyState);
+  } else if (preservePinnedOpponentProfile) {
+    // A match click pins the selected row's profile reference while the
+    // history target is switched to that opponent. The new target's records
+    // cannot contain the old owner's replay key, so do not erase the card or
+    // refetch it against the wrong history owner.
+    renderHistoryOpponentProfile(historyOpponentProfileState.record);
   } else {
     renderHistoryOpponentProfile(null);
   }
@@ -1399,16 +2518,22 @@ function renderHistoryState(nextState = historyState) {
   }
   renderHistoryFetchStatus();
   fitManagementScoreValues();
+  recheckHistoryReadiness(historyState);
 }
 
 function scheduleHistoryRender(nextState = historyState, { resetPage = false } = {}) {
-  const previousProfileId = historyState?.profileId ?? null;
-  historyState = nextState || { records: [], canFetch: false, authenticated: false, cooldownSeconds: 0 };
-  const nextProfileId = historyState?.profileId ?? null;
+  const previousProfileId = historyStateProfileId(historyState);
+  historyState = applyResolvedLatestActProof(
+    preserveCommittedHistoryOnEmptyState(
+      nextState || { records: [], canFetch: false, authenticated: false, cooldownSeconds: 0 },
+    ) || { records: [], canFetch: false, authenticated: false, cooldownSeconds: 0 },
+  );
+  const nextProfileId = historyStateProfileId(historyState);
   if (previousProfileId !== nextProfileId) historyOpponentInsightCache.clear();
   pendingHistoryRenderState = historyState;
   pendingHistoryPageReset = pendingHistoryPageReset || resetPage ||
     previousProfileId !== nextProfileId;
+  recheckHistoryReadiness(historyState);
   if (!historyPanelOpen) {
     const records = Array.isArray(historyState.records) ? historyState.records : [];
     renderRecentHistoryPreview(records);
@@ -1558,9 +2683,10 @@ function fitManagementScoreValues() {
 
 function renderNextUpdate() {
   if (!trackerState?.active || !Number.isFinite(trackerState.nextPollAt)) {
-    elements.nextUpdateInfo.textContent = trackerState?.stopReason
+    elements.nextUpdateLabel.textContent = trackerState?.stopReason
       ? t("autoStopped", "自動停止")
-      : `${t("nextUpdate", "次回更新")} --:--`;
+      : t("nextUpdate", "次回更新");
+    elements.nextUpdateValue.textContent = trackerState?.stopReason ? "" : "--:--";
     return;
   }
   const remainingSeconds = Math.max(
@@ -1569,7 +2695,8 @@ function renderNextUpdate() {
   );
   const minutes = Math.floor(remainingSeconds / 60);
   const seconds = String(remainingSeconds % 60).padStart(2, "0");
-  elements.nextUpdateInfo.textContent = `${t("nextUpdate", "次回更新")} ${minutes}:${seconds}`;
+  elements.nextUpdateLabel.textContent = t("nextUpdate", "次回更新");
+  elements.nextUpdateValue.textContent = `${minutes}:${seconds}`;
 }
 
 function drawManagementChart(
@@ -1683,7 +2810,7 @@ function drawManagementChart(
   const plotBottom = height - bottom;
   context.textAlign = "right";
   context.textBaseline = "middle";
-  context.fillStyle = "rgba(174,184,218,.72)";
+  context.fillStyle = "rgba(202,211,245,.86)";
   context.lineWidth = 1;
   const firstLpLabelIndex = Math.max(0, ticks.length - 4);
   ticks.forEach((tick, tickIndex) => {
@@ -1696,7 +2823,7 @@ function drawManagementChart(
     if (
       !isLp || tickIndex >= firstLpLabelIndex
     ) {
-      context.fillStyle = "rgba(174,184,218,.72)";
+      context.fillStyle = "rgba(202,211,245,.86)";
       context.fillText(displayNumber.integer(tick), left - 7, y);
     }
   });
@@ -1739,9 +2866,12 @@ function drawManagementChart(
     context.textAlign = "right";
     context.textBaseline = "bottom";
     context.fillText(
-      `${t("potential", "POTENTIAL")} ${ratingType} ${displayNumber.integer(potential)}`,
-      width - right,
-      Math.max(top + labelFontSize, potentialY - 3),
+      `POTENTIAL ${ratingType} ${displayNumber.integer(potential)}`,
+      width - right - 2,
+      Math.min(
+        height - bottom - 2,
+        Math.max(top + labelFontSize, potentialY - 3),
+      ),
     );
     context.restore();
   }
@@ -1912,12 +3042,20 @@ function renderManagementChart(state, { immediate = false } = {}) {
   const graphMatchCount = series.matchCount;
   const hasGraphData =
     matchType === "ranked" && graphMatchCount > 0 && history.length >= 2;
+  const potentialValue =
+    displaySettings?.potentialLineVisible !== false &&
+    state?.medianRatingType === ratingType &&
+    state?.medianRatingSampleCount >= 2 &&
+    Number.isFinite(Number(state?.medianRating)) &&
+    Number(state.medianRating) > 0
+      ? Number(state.medianRating)
+      : null;
   elements.managementRatingChart.classList.toggle("hidden", !hasGraphData);
   elements.managementChartEmpty.classList.toggle("hidden", hasGraphData);
   elements.managementChartEmpty.textContent =
     matchType === "ranked"
-      ? t("graphEmptyRanked", "ランクマッチを計測するとグラフが表示されます")
-      : `${ratingType} ${t("graphEmptyOther", "グラフはランクマッチで表示されます")}`;
+      ? t("graphEmptyRanked", "ランクマッチを計測すると、グラフが表示されます")
+      : `${ratingType} ${t("graphEmptyOther", "グラフはランクマッチでのみ表示されます")}`;
   elements.managementChartState.textContent = hasGraphData
     ? `${graphMatchCount} MATCHES`
     : matchType === "ranked"
@@ -1934,10 +3072,7 @@ function renderManagementChart(state, { immediate = false } = {}) {
         history,
         graphMatchCount,
         ratingType,
-        displaySettings?.potentialLineVisible !== false &&
-          state?.medianRatingType === ratingType && state?.medianRatingSampleCount >= 2
-          ? state.medianRating
-          : null,
+        potentialValue,
         series.matchStart,
       );
     };
@@ -1955,7 +3090,7 @@ function renderRatingLabels(state = trackerState) {
   elements.ratingAxisLabel.textContent = `${ratingType} ${t("axisSize", "AXIS SIZE")}`;
   elements.managementRatingChart.setAttribute(
     "aria-label",
-    `${t("trendDescription", "起動後の変動")} ${ratingType}`,
+    `${t("trendDescription", "アプリ起動後の変動")} ${ratingType}`,
   );
   return ratingType;
 }
@@ -2011,7 +3146,9 @@ function renderCurrentCharacter(state = trackerState) {
       selectedPlayer?.characterDisplayName ??
       "",
   ).trim();
-  elements.currentCharacter.textContent = siteCharacter || "—";
+  const characterId = state?.player?.characterId ?? selectedPlayer?.characterId ?? null;
+  const localized = localeApi?.characterName?.(siteCharacter, characterId) || "—";
+  elements.currentCharacter.textContent = localized;
   fitScoreValue(elements.currentCharacter);
 }
 
@@ -2075,7 +3212,7 @@ function renderSocialState(state = socialState) {
   if (elements.socialMonitoringStatus) {
     elements.socialMonitoringStatus.title = t(
       "socialMonitoringSuspendedNote",
-      "アプリ操作またはゲーム起動時に再開します",
+      "アプリを操作するか、ゲームを起動すると再開します",
     );
   }
   for (const button of [elements.socialFriendsTab, elements.socialFollowingTab]) {
@@ -2108,7 +3245,8 @@ function renderSocialState(state = socialState) {
     const rating = player.ratingType && player.rating != null
       ? `${player.ratingType} ${displayNumber.integer(player.rating)}`
       : "—";
-    detail.textContent = [player.platform, player.characterName, player.rankName, rating]
+    const localizedCharacter = localeApi?.characterName?.(player.characterName, player.characterId) || player.characterName;
+    detail.textContent = [player.platform, localizedCharacter, player.rankName, rating]
       .filter(Boolean).join(" · ");
 
     const activity = document.createElement("span");
@@ -2165,6 +3303,7 @@ function applyAuthenticatedPlayer(player) {
       if (result?.ok) {
         historyPage = 0;
         renderHistoryState(result.data);
+        void autoFetchHistoryIfReady(result.data);
       }
     }).catch(() => {});
   }
@@ -2440,10 +3579,10 @@ function renderDisplaySettings(settings) {
   elements.gameExecutableName.textContent =
     settings.gameExecutableName || t("gameNotSelected", "ゲーム未選択");
   elements.overlayLockButton.disabled = settings.mode !== "overlay";
-  elements.overlayLockButton.textContent = settings.overlayInteractionLocked
+  elements.overlayLockLabel.textContent = settings.overlayInteractionLocked
     ? t("overlayMove", "オーバーレイ移動")
     : t("overlayLock", "オーバーレイ固定");
-  elements.toggleStatsButton.textContent = settings.statsWindowVisible
+  elements.toggleStatsLabel.textContent = settings.statsWindowVisible
     ? t("hideStats", "戦績ウィンドウを閉じる")
     : t("showStats", "戦績ウィンドウを表示");
   if (trackerState) {
@@ -2578,38 +3717,220 @@ elements.resetTrackingButton.addEventListener("click", async () => {
 
 elements.openHistoryButton?.addEventListener("click", () => setHistoryPanelOpen(true));
 elements.closeHistoryButton?.addEventListener("click", () => setHistoryPanelOpen(false));
-async function selectHistoryTarget(userCode, { autoFetch = false } = {}) {
-  const normalizedCode = String(userCode ?? "").trim();
-  setHistoryPanelOpen(true);
-  selectHistoryRecord(null);
-  elements.selectHistoryTargetButton.disabled = true;
-  try {
-    const result = await unwrap(api.selectHistoryProfile(normalizedCode));
-    historyPage = 0;
-    scheduleHistoryRender(result.history, { resetPage: true });
-    let currentHistory = result.history;
-    if (autoFetch && currentHistory?.viewingOther && currentHistory.canFetch) {
-      currentHistory = await unwrap(api.fetchHistory());
-      historyPage = 0;
-      scheduleHistoryRender(currentHistory, { resetPage: true });
-    }
-    showNotice(
-      currentHistory?.viewingOther
-        ? autoFetch && currentHistory.count > 0
-          ? t("historyFetched", "Match history imported locally")
-          : t("historyTargetSelected", "Player selected. Import history when ready.")
-        : t("historyViewingSelf", "Viewing your player"),
-      "success",
-    );
-  } catch (error) {
-    showNotice(error.message, "error");
-  } finally {
-    elements.selectHistoryTargetButton.disabled = false;
-  }
+elements.openMatchupButton?.addEventListener("click", () => openMatchupAnalysis());
+elements.refreshMatchupButton?.addEventListener("click", refreshMatchupAnalysis);
+elements.closeMatchupButton?.addEventListener("click", () => setMatchupOpen(false));
+elements.closeHistoryOpponentProfileButton?.addEventListener("click", clearSelectedHistoryRecord);
+function historyStateProfileId(state = historyState) {
+  return String(
+    state?.profileId ?? state?.player?.profileId ?? state?.player?.userCode ?? "",
+  ).trim();
 }
+
+function preserveCommittedHistoryOnEmptyState(nextState, previousState = historyState) {
+  if (!nextState || typeof nextState !== "object") return nextState;
+  const previousProfileId = historyStateProfileId(previousState);
+  const nextProfileId = historyStateProfileId(nextState);
+  const previousRecords = Array.isArray(previousState?.records) ? previousState.records : [];
+  const nextRecords = Array.isArray(nextState.records) ? nextState.records : null;
+  if (
+    !previousProfileId ||
+    previousProfileId !== nextProfileId ||
+    previousRecords.length === 0 ||
+    !nextRecords ||
+    nextRecords.length > 0
+  ) return nextState;
+
+  // Same-scope empty states can be late progress/error/reset notifications
+  // from a superseded request. Keep the committed screen data until the same
+  // scope provides a new non-empty success snapshot or the user selects a new
+  // profile. Fetch status and retryability still come from the new event.
+  return {
+    ...nextState,
+    records: previousRecords,
+    count: Number.isFinite(Number(previousState.count))
+      ? Number(previousState.count)
+      : previousRecords.length,
+    acts: previousState.acts,
+    currentActId: previousState.currentActId,
+    currentActVerified: previousState.currentActVerified,
+    currentActSource: previousState.currentActSource,
+    currentActStatus: previousState.currentActStatus,
+    currentActReason: previousState.currentActReason,
+    characterNamesVerifiedLocales: previousState.characterNamesVerifiedLocales,
+    lastFetchedAt: previousState.lastFetchedAt,
+    nextAllowedAt: previousState.nextAllowedAt,
+  };
+}
+
+function recheckHistoryReadiness(state = historyState) {
+  const profileId = historyStateProfileId(state);
+  const authenticated = state?.authenticated === true;
+  const currentActId = verifiedCurrentHistoryActId(state);
+  const readinessKey = `${profileId}:${authenticated ? "authenticated" : "pending"}:${currentActId ?? "pending"}`;
+  const readinessChanged = readinessKey !== historyAutoFetchReadinessKey;
+  if (readinessChanged) {
+    historyAutoFetchReadinessKey = readinessKey;
+  }
+  if (!profileId || !authenticated || historyTargetSelectionInFlight) return;
+  if (currentActId == null) {
+    // The latest Act proof and the profile state can arrive in either order.
+    // Keep the proof request alive even when the history panel is closed.
+    void requestOfficialCharacterNames(state);
+    return;
+  }
+  // A progress/error/state push for the same ready scope must not start a
+  // second request or overwrite a synthetic/committed snapshot. Auto-fetch
+  // is started at initialization, after target selection, or when readiness
+  // transitions into a new scope.
+  if (readinessChanged) void autoFetchHistoryIfReady(state);
+}
+
+function historyAutoFetchScopeKey(state = historyState) {
+  const profileId = historyStateProfileId(state);
+  const actId = verifiedCurrentHistoryActId(state);
+  return profileId && actId != null ? `${profileId}:${actId}` : "";
+}
+
+function autoFetchHistoryIfReady(state = historyState) {
+  const profileId = historyStateProfileId(state);
+  const scopeKey = historyAutoFetchScopeKey(state);
+  if (
+    !profileId ||
+    !scopeKey ||
+    state?.authenticated !== true ||
+    state?.fetching ||
+    !state?.canFetch
+  ) return null;
+  if (historyAutoFetchInFlight?.scopeKey === scopeKey) {
+    return historyAutoFetchInFlight.promise;
+  }
+  if (historyAutoFetchAttemptedScope === scopeKey) return null;
+  historyAutoFetchAttemptedScope = scopeKey;
+  const request = (async () => {
+    try {
+      const currentHistory = await unwrap(api.fetchHistory());
+      if (
+        currentHistory &&
+        historyStateProfileId(historyState) === historyStateProfileId(currentHistory)
+      ) {
+        historyPage = 0;
+        scheduleHistoryRender(currentHistory, { resetPage: true });
+      }
+      return currentHistory;
+    } catch (error) {
+      // The main process publishes the partial/error state. Do not replace it
+      // with the last successful snapshot or loop an automatic retry.
+      if (error?.message !== "HISTORY_TARGET_CHANGED") showNotice(error.message, "error");
+      return null;
+    } finally {
+      if (historyAutoFetchInFlight?.promise === request) historyAutoFetchInFlight = null;
+    }
+  })();
+  historyAutoFetchInFlight = { profileId, scopeKey, promise: request };
+  return request;
+}
+
+async function selectHistoryTarget(
+  userCode,
+  { autoFetch = true, preserveSelectedRecord = false } = {},
+) {
+  clearTimeout(historyTargetInputTimer);
+  historyTargetInputTimer = null;
+  const normalizedCode = String(userCode ?? "").trim();
+  const requestKey = `${normalizedCode}:${autoFetch ? "fetch" : "select"}`;
+  if (historyTargetSelectionInFlight?.key === requestKey) {
+    return historyTargetSelectionInFlight.promise;
+  }
+  setHistoryPanelOpen(true);
+  resetHistoryOfficialActReadiness();
+  historyAutoFetchReadinessKey = "";
+  // This target change is an explicit user action. Mark it as attempted before
+  // the IPC state event can arrive, so that the late event cannot start a
+  // second automatic fetch after the explicit request fails.
+  historyAutoFetchAttemptedScope = normalizedCode;
+  if (preserveSelectedRecord && historyOpponentProfileState.record) {
+    historyOpponentProfileState = {
+      ...historyOpponentProfileState,
+      preserveOnTargetChange: true,
+    };
+  } else {
+    selectHistoryRecord(null);
+  }
+  elements.selectHistoryTargetButton.disabled = true;
+  const request = (async () => {
+    try {
+      const result = await unwrap(api.selectHistoryProfile(normalizedCode));
+      historyAutoFetchReadinessKey = "";
+      historyPage = 0;
+      scheduleHistoryRender(result.history, { resetPage: true });
+      let currentHistory = result.history;
+      if (
+        autoFetch &&
+        currentHistory?.canFetch &&
+        verifiedCurrentHistoryActId(currentHistory) != null
+      ) {
+        historyAutoFetchAttemptedScope = historyAutoFetchScopeKey(currentHistory);
+        currentHistory = await unwrap(api.fetchHistory());
+        if (currentHistory) {
+          historyPage = 0;
+          scheduleHistoryRender(currentHistory, { resetPage: true });
+        }
+      }
+      showNotice(
+        currentHistory?.viewingOther
+          ? autoFetch && currentHistory.count > 0
+            ? t("historyFetched", "Match history imported locally")
+            : t("historyTargetSelected", "Player selected. Import history when ready.")
+          : t("historyViewingSelf", "Viewing your player"),
+        "success",
+      );
+      return currentHistory;
+    } catch (error) {
+      if (error?.message !== "HISTORY_TARGET_CHANGED") showNotice(error.message, "error");
+      return null;
+    } finally {
+      if (historyTargetSelectionInFlight?.promise === request) {
+        historyTargetSelectionInFlight = null;
+      }
+      elements.selectHistoryTargetButton.disabled = false;
+      recheckHistoryReadiness(historyState);
+    }
+  })();
+  historyTargetSelectionInFlight = { key: requestKey, promise: request };
+  return request;
+}
+
+async function activateHistoryRecord(record) {
+  if (!record) return;
+  // Selecting a match must keep the history owner unchanged. Only the
+  // selected match's opponent context and round results are updated below.
+  selectHistoryRecord(record);
+}
+
 elements.selectHistoryTargetButton?.addEventListener("click", () =>
-  selectHistoryTarget(elements.historyTargetCode?.value?.trim() ?? ""),
+  selectHistoryTarget(elements.historyTargetCode?.value?.trim() ?? "", { autoFetch: true }),
 );
+function scheduleHistoryTargetInputSelection() {
+  clearTimeout(historyTargetInputTimer);
+  const value = elements.historyTargetCode?.value?.trim() ?? "";
+  if (!/^\d{4,12}$/.test(value)) return;
+  historyTargetInputTimer = setTimeout(() => {
+    historyTargetInputTimer = null;
+    void selectHistoryTarget(value, { autoFetch: true });
+  }, 250);
+}
+elements.historyTargetCode?.addEventListener("input", scheduleHistoryTargetInputSelection);
+elements.historyTargetCode?.addEventListener("change", () => {
+  const value = elements.historyTargetCode?.value?.trim() ?? "";
+  if (/^\d{4,12}$/.test(value)) void selectHistoryTarget(value, { autoFetch: true });
+});
+elements.historyTargetCode?.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter") return;
+  event.preventDefault();
+  const value = elements.historyTargetCode?.value?.trim() ?? "";
+  if (/^\d{4,12}$/.test(value)) void selectHistoryTarget(value, { autoFetch: true });
+});
 for (const body of [elements.recentHistoryBody, elements.historyTableBody]) {
   body?.addEventListener("click", (event) => {
     const target = event.target instanceof Element ? event.target : null;
@@ -2620,7 +3941,20 @@ for (const body of [elements.recentHistoryBody, elements.historyTableBody]) {
     }
     const button = target?.closest("[data-history-opponent-code]");
     if (!button) return;
-    void selectHistoryTarget(button.dataset.historyOpponentCode, { autoFetch: true });
+    const row = button.closest("tr");
+    const recordKey = row?.dataset?.historyRecordKey;
+    let record = recordKey
+      ? (historyState.records ?? []).find((candidate) => historyRecordKey(candidate) === recordKey)
+      : null;
+    if (!record && body === elements.recentHistoryBody && row) {
+      const recent = [...(historyState.records ?? [])]
+        .sort((a, b) => Number(b.uploadedAt) - Number(a.uploadedAt))
+        .slice(0, RECENT_HISTORY_PREVIEW_LIMIT);
+      record = recent[row.sectionRowIndex ?? [...body.children].indexOf(row)] ?? null;
+    }
+    // A match click first resolves the selected opponent profile reference,
+    // then switches the history target and imports that opponent's records.
+    if (record) void activateHistoryRecord(record);
   });
 }
 elements.historyTableBody?.addEventListener("click", (event) => {
@@ -2631,7 +3965,7 @@ elements.historyTableBody?.addEventListener("click", (event) => {
   const record = (historyState.records ?? []).find(
     (candidate) => historyRecordKey(candidate) === row.dataset.historyRecordKey,
   );
-  if (record) selectHistoryRecord(record);
+  if (record) void activateHistoryRecord(record);
 });
 elements.historyTableBody?.addEventListener("keydown", (event) => {
   if (event.key !== "Enter" && event.key !== " ") return;
@@ -2643,14 +3977,19 @@ elements.historyTableBody?.addEventListener("keydown", (event) => {
   const record = (historyState.records ?? []).find(
     (candidate) => historyRecordKey(candidate) === row.dataset.historyRecordKey,
   );
-  if (record) selectHistoryRecord(record);
+  if (record) void activateHistoryRecord(record);
 });
 elements.clearHistoryTargetButton?.addEventListener("click", async () => {
   elements.clearHistoryTargetButton.disabled = true;
   selectHistoryRecord(null);
   try {
     historyPage = 0;
-    scheduleHistoryRender(await unwrap(api.clearHistoryProfile()), { resetPage: true });
+    resetHistoryOfficialActReadiness();
+    historyAutoFetchReadinessKey = "";
+    historyAutoFetchAttemptedScope = "";
+    const currentHistory = await unwrap(api.clearHistoryProfile());
+    scheduleHistoryRender(currentHistory, { resetPage: true });
+    void autoFetchHistoryIfReady(currentHistory);
     showNotice(t("historyViewingSelf", "Viewing your player"), "success");
   } catch (error) {
     showNotice(error.message, "error");
@@ -2667,6 +4006,16 @@ for (const input of [
     renderHistoryState();
   });
 }
+elements.historyAct?.addEventListener("change", () => {
+  historyActUserSelected = true;
+  historyPage = 0;
+  if (elements.historyDateFrom) elements.historyDateFrom.value = "";
+  if (elements.historyDateTo) elements.historyDateTo.value = "";
+  renderHistoryState();
+  if (historyOpponentProfileState.record) {
+    selectHistoryRecord(historyOpponentProfileState.record);
+  }
+});
 elements.historyRatingPeriod?.addEventListener("change", () => {
   const mode = elements.historyRatingPeriod.value;
   historyRatingPeriod = {
@@ -2711,19 +4060,24 @@ elements.historyOpponentMatchesSort?.addEventListener("click", () => {
   historyOpponentSort = historyOpponentSort.key === "matches"
     ? { key: "matches", direction: historyOpponentSort.direction === "desc" ? "asc" : "desc" }
     : { key: "matches", direction: "desc" };
-  renderOpponentCharacterStats(filteredHistoryRecords());
+  renderOpponentCharacterStats();
 });
 elements.historyOpponentWinRateSort?.addEventListener("click", () => {
   historyOpponentSort = historyOpponentSort.key === "winRate"
     ? { key: "winRate", direction: historyOpponentSort.direction === "desc" ? "asc" : "desc" }
     : { key: "winRate", direction: "desc" };
-  renderOpponentCharacterStats(filteredHistoryRecords());
+  renderOpponentCharacterStats();
 });
 elements.fetchHistoryButton?.addEventListener("click", async () => {
   elements.fetchHistoryButton.disabled = true;
   try {
+    historyAutoFetchAttemptedScope = historyAutoFetchScopeKey(historyState);
+    officialOpponentCharacterStatsRequestToken += 1;
+    officialOpponentCharacterStatsRequestKey = "";
+    officialOpponentCharacterStatsRetryAt = 0;
     historyPage = 0;
     scheduleHistoryRender(await unwrap(api.fetchHistory()), { resetPage: true });
+    void requestOfficialOpponentCharacterStats(historyState, { forceRefresh: true });
     showNotice(t("historyFetched", "Match history imported locally"), "success");
   } catch (error) {
     showNotice(error.message, "error");
@@ -2760,6 +4114,7 @@ elements.overlayLockButton.addEventListener("click", async () => {
 });
 
 function setOptionsOpen(open) {
+  document.body.classList.toggle("options-screen-open", open);
   elements.managementChartPanel.classList.toggle("options-collapsed", open);
   elements.optionsPanel
     .closest(".display-panel")
@@ -3302,8 +4657,8 @@ elements.launchAtLoginInput.addEventListener("change", async () => {
   );
   showNotice(
     elements.launchAtLoginInput.checked
-      ? t("launchEnabled", "コンピューター起動時のアプリ実行を有効にしました")
-      : t("launchDisabled", "コンピューター起動時のアプリ実行を無効にしました"),
+      ? t("launchEnabled", "Windowsへのサインイン時のアプリ起動を有効にしました")
+      : t("launchDisabled", "Windowsへのサインイン時のアプリ起動を無効にしました"),
     "success",
   );
 });
@@ -3314,7 +4669,7 @@ elements.gameDetectionInput.addEventListener("change", async () => {
     showNotice(
       t(
         "gameDetectionRequiresStartup",
-        "ゲーム起動検知には、コンピューター起動時のアプリ実行をONにしてください",
+        "ゲーム起動検知を使うには、Windowsへのサインイン時のアプリ起動をONにしてください",
       ),
       "error",
     );
@@ -3418,6 +4773,32 @@ api.onHistoryProgress?.((progress) => {
   historyState = { ...historyState, ...progress };
   renderHistoryFetchStatus();
 });
+api.onHistoryOpponentCharacterStatsProgress?.((progress) => {
+  if (
+    progress?.profileId &&
+    historyState?.profileId &&
+    progress.profileId !== historyState.profileId
+  ) return;
+  if (officialOpponentCharacterStatsState.status !== "loading") return;
+  const currentLocale = localeApi?.getLocale?.() || document.documentElement.lang || "ja-jp";
+  if (progress?.locale && progress.locale !== currentLocale) return;
+  if (Number(progress?.requestToken) !== Number(officialOpponentCharacterStatsRequestToken)) return;
+  const currentOwnCharacterId = String(elements.historyCharacter?.value ?? "all").trim() || "all";
+  if (String(progress?.selectedOwnCharacterId ?? "all") !== currentOwnCharacterId) return;
+  const currentActId = selectedHistoryActId() ?? Number(
+    historyState?.currentActId ?? officialCharacterNamesState.act ?? 0,
+  );
+  if (Number(progress?.act) > 0 && currentActId > 0 && Number(progress.act) !== currentActId) return;
+  officialOpponentCharacterStatsState = {
+    ...officialOpponentCharacterStatsState,
+    progress: {
+      page: Number(progress?.page) || 0,
+      totalPages: Number(progress?.totalPages) || 0,
+      fetchedCount: Number(progress?.fetchedCount) || 0,
+    },
+  };
+  renderOpponentCharacterStats();
+});
 api.onHistoryState?.((state) => {
   scheduleHistoryRender(state);
 });
@@ -3436,7 +4817,7 @@ api.onAuthenticatedPlayer((player) => {
   showNotice(t("autoPlayerConfigured", "ログイン中のプレイヤーを自動設定しました"), "success");
 });
 
-Promise.all([
+void Promise.all([
   unwrap(api.getState()),
   unwrap(api.getHistoryState ? api.getHistoryState() : Promise.resolve({ records: [] })),
   unwrap(api.getUpdateState()),
@@ -3449,6 +4830,7 @@ Promise.all([
     renderTracker(state);
     historyPage = 0;
     renderHistoryState(savedHistory);
+    void autoFetchHistoryIfReady(savedHistory);
     renderSocialState(savedSocial);
     renderUpdate(updateState);
   })

@@ -1,6 +1,7 @@
 "use strict";
 
 const fs = require("node:fs");
+const { createHash } = require("node:crypto");
 const http = require("node:http");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
@@ -28,14 +29,21 @@ const {
   normalizeFighter,
   normalizeProfilePlayer,
   normalizeReplay,
+  normalizeStoredRoundResults,
   profileCacheLookup,
   repairRatingBaseline,
   parseBuildId,
-  resetRatingSeries,
+  parseNextData,
   shareInFlightRequest,
   snapshotCurrentCharacter,
   syncCurrentPlayerRatingState,
 } = require("./source-client");
+const {
+  isKnownHistoryActRecord,
+  mergeHistoryActProvenance,
+  normalizeStoredHistoryAct,
+  readHistoryActProvenance,
+} = require("./history-act-provenance");
 const { buildServiceDataUrl, buildServiceHomeUrl } = require("./service-url");
 const {
   MAX_CONSECUTIVE_FAILURES,
@@ -55,7 +63,9 @@ const {
 } = require("./display-settings");
 const {
   compactStatsWindowInitialSize,
+  clampBoundsToWorkArea,
   horizontalMetricMinimumWidth,
+  mainWindowInitialHeight,
   resizeBoundsForDisplayItemCount,
   resizeBoundsForGraphVisibility,
   statsWindowSizeConstraints,
@@ -122,16 +132,63 @@ const { createUpdater } = require("./updater");
 const { createDebouncedAtomicWriter } = require("./debounced-atomic-writer");
 const { ServiceRequestScheduler } = require("./service-request-scheduler");
 const { fetchHistoryPagesConcurrently } = require("./history-page-fetch");
+const { scheduleHistoryBackfill } = require("./history-backfill-scheduler");
+const { filterHistoryBackfillReplays } = require("./history-backfill-filter");
 const {
   normalizeOpponentProfileContext,
   setBoundedCacheEntry,
 } = require("./opponent-profile-context");
 const {
-  INSIGHT_MATCH_LIMIT,
   buildHistoricalOpponentSnapshots,
   mergeSnapshotObject,
   snapshotObject,
 } = require("./opponent-insight");
+const {
+  PLAY_APPROVED_FIELD_CONTRACT,
+  comparePlayProfiles,
+} = require("./opponent-play-metrics");
+  const {
+    ALLOWED_MODES: OFFICIAL_CHARACTER_STATS_MODES,
+    aggregateOfficialCharacterWinRates,
+    buildOfficialCharacterNameMap,
+    buildOfficialCharacterStatsCacheKey,
+    buildOfficialCharacterStatsRequestKey,
+    isRetryableOfficialCharacterStatsReason,
+    summarizeOfficialOpponentCharacterStatsRows,
+    validateOfficialOpponentCharacterWinRates,
+    validateOfficialCharacterWinRates,
+  } = require("./official-opponent-character-stats");
+const {
+  ROUND_TREND_MATCH_TYPES,
+  buildRoundTrend,
+  buildRoundTrendFailure,
+} = require("./round-results-summary");
+const {
+  normalizedRecordActIds,
+  verifyScopedHistoryPage,
+  stampScopedHistoryRecords,
+  buildScopedRoundTrendContext,
+} = require("./round-trend-scope");
+const {
+  acquireScopedOfficialHistories,
+} = require("./opponent-history-cache");
+const {
+  ALLOWED_MATCH_MODES,
+  classifyHttpResponse,
+  classifyPayloadShape,
+  createProductionReceipt,
+  finalizeProductionReceipt,
+  recordProductionReceipt,
+} = require("./production-receipt");
+const {
+  buildHistoryActDiagnostic,
+  buildOfficialActOptions,
+  isCurrentHistoryActScope,
+  normalizeHistoryActId,
+  normalizePositiveActId,
+  normalizeVerifiedHistoryCurrentAct,
+  resolveHistoryActSelection,
+} = require("./history-act-scope");
 const {
   assertUpdateAllowed,
   resolveUpdateRequirement,
@@ -143,6 +200,8 @@ const {
 } = require("./match-history-retention");
 
 const APP_NAME = "MatchSessionOverlay";
+const OFFICIAL_MODE_LABELS = Object.freeze({ 2: "ranked", 3: "casual", 5: "battleHub" });
+const OFFICIAL_MATCH_MODE_IDS = Object.freeze({ ranked: 2, casual: 3, battleHub: 5 });
 const OVERLAY_HOST = "127.0.0.1";
 const devOverlayPort = Number(process.env.MATCH_OVERLAY_DEV_PORT);
 const OVERLAY_PORT =
@@ -324,16 +383,18 @@ const displaySettingsPath = path.join(userDataPath, "display-settings.json");
 const trackerSessionPath = path.join(userDataPath, "tracker-session.json");
 const matchHistoryDirectory = path.join(userDataPath, "match-history");
 const matchHistoryPath = path.join(userDataPath, "match-history.json");
+const qaDiskHistoryHarness = readQaDiskHistoryHarnessConfig();
 const MATCH_HISTORY_LIMIT = OWN_MATCH_HISTORY_LIMIT;
 // The battle log is paginated at ten entries per page. A manual import starts
-// all ten page requests together (100 entries maximum); live polling
+// History imports use bounded batches (100 entries maximum); live polling
 // intentionally remains a single-page request.
 const MATCH_HISTORY_PAGE_SIZE = 10;
 const MATCH_HISTORY_MAX_PAGES = 10;
-// History imports use the shared scheduler with an explicit zero start gap so
-// all ten pages can begin together. Non-history traffic keeps the normal
-// single-filed, rate-limited behavior.
-const MATCH_HISTORY_FETCH_CONCURRENCY = MATCH_HISTORY_MAX_PAGES;
+const OPPONENT_STATS_SAFE_MAX_PAGES = 100;
+// Keep official-service load bounded and configurable. Non-history traffic
+// keeps the normal single-filed, rate-limited behavior.
+const MATCH_HISTORY_FETCH_CONCURRENCY = 3;
+const MATCH_HISTORY_START_GAP_MS = 250;
 const MEDIAN_RATING_SAMPLE_LIMIT = 20;
 // Keep manual imports deliberately infrequent so the feature cannot be used
 // to poll the service repeatedly.
@@ -356,20 +417,17 @@ const OPPONENT_PROFILE_CONTEXT_COOLDOWN_MS = 5 * 60 * 1000;
 // scheduler backlog or process memory without limit.
 const OPPONENT_PROFILE_CONTEXT_MAX_IN_FLIGHT = 16;
 const OPPONENT_PROFILE_CONTEXT_MAX_CACHE_ENTRIES = 128;
-const OPPONENT_INSIGHT_MAX_PAGES = Math.ceil(
-  INSIGHT_MATCH_LIMIT / MATCH_HISTORY_PAGE_SIZE,
-);
-const OPPONENT_INSIGHT_FETCH_CONCURRENCY = OPPONENT_INSIGHT_MAX_PAGES;
-const opponentInsightFetchOptions = {
-  maxPages: OPPONENT_INSIGHT_MAX_PAGES,
-  concurrency: OPPONENT_INSIGHT_FETCH_CONCURRENCY,
-};
 const OPPONENT_OFFICIAL_HISTORY_MAX_CACHE_ENTRIES = 64;
+const OFFICIAL_CHARACTER_STATS_COOLDOWN_MS = 5 * 60 * 1000;
 // The official PLAY page obtains character peak MR from this API rather than
 // from profile/<id>.json. Its response is joined to the profile payload only
 // after the current Act has been identified.
 const OPPONENT_PEAK_PROFILE_API_PATH =
   "/6/buckler/api/profile/play/act/highest/master_rating_info";
+const OFFICIAL_CHARACTER_STATS_API_PATH =
+  "/6/buckler/api/profile/play/act/characterwinrate";
+const OFFICIAL_CHARACTER_STATS_RIVAL_API_PATH =
+  "/6/buckler/api/profile/play/act/characterwinratebyrivalcharacter";
 
 fs.mkdirSync(userDataPath, { recursive: true });
 fs.mkdirSync(sessionDataPath, { recursive: true });
@@ -392,6 +450,7 @@ let managementUiReady = false;
 let loginWindow;
 let statsWindow;
 let friendNotificationWindow;
+let friendNotificationTopmostConfigured = false;
 let friendNotificationPreviewWindow;
 let tray;
 let overlayServer;
@@ -412,6 +471,17 @@ const serviceRequestScheduler = new ServiceRequestScheduler({
 });
 let serviceRetryBlockedUntil = 0;
 let privateDataGeneration = 0;
+let verifiedHistoryCurrentAct = {
+  profileId: null,
+  locale: null,
+  generation: null,
+  scopeToken: 0,
+  status: "unavailable",
+  actId: null,
+  source: null,
+  reason: "ACT_SCOPE_MISSING",
+};
+let verifiedHistoryCurrentActScope = 0;
 let privateDataClearing = false;
 let persistenceReadyForQuit = false;
 const serviceAbortControllers = new Set();
@@ -457,7 +527,17 @@ const opponentProfileContextCache = new Map();
 const opponentProfileContextInFlight = new Map();
 const opponentOfficialHistoryCache = new Map();
 const opponentOfficialHistoryInFlight = new Map();
+const officialCharacterStatsCache = new Map();
+const officialCharacterStatsInFlight = new Map();
+const officialCharacterNamesCache = new Map();
+const officialCharacterNamesInFlight = new Map();
+const historyLabelBackfillInFlight = new Map();
+const historyLabelBackfillCompleted = new Set();
 let matchHistoryFetchInFlight = null;
+let matchHistoryFetchProfileId = null;
+let matchHistoryFetchLocale = null;
+let matchHistoryFetchScopeToken = 0;
+let matchHistoryFetchScopeAtStart = null;
 let matchHistoryFetchProgress = null;
 let matchHistoryFetchSummary = null;
 let historyViewPlayer = null;
@@ -529,6 +609,33 @@ function resetSocialSourcePages() {
 }
 
 let socialState = emptySocialState();
+
+function initializeQaDiskHistoryHarness() {
+  if (!qaDiskHistoryHarness) return false;
+  const { profileId, actId } = qaDiskHistoryHarness;
+  historyViewPlayer = {
+    profileId,
+    userCode: profileId,
+    name: "QA disk history profile",
+    characterId: 22,
+    mr: 1788,
+    lp: null,
+    ratingSource: "qa-fixture",
+  };
+  historyViewPollingActive = false;
+  historyViewStopReason = "qa-disk-history";
+  verifiedHistoryCurrentAct = {
+    profileId,
+    locale: serviceLocale(),
+    generation: privateDataGeneration,
+    scopeToken: verifiedHistoryCurrentActScope,
+    status: "ready",
+    actId,
+    source: "official_profile_play",
+    reason: null,
+  };
+  return true;
+}
 let displaySettings = {
   mode: "window",
   windowOrientation: "horizontal",
@@ -557,6 +664,68 @@ let displaySettings = {
 
 function serviceLocale() {
   return LOCALE_KEYS.has(displaySettings.locale) ? displaySettings.locale : "ja-jp";
+}
+
+function invalidateVerifiedHistoryCurrentAct() {
+  verifiedHistoryCurrentActScope += 1;
+  verifiedHistoryCurrentAct = {
+    profileId: null,
+    locale: null,
+    generation: null,
+    scopeToken: verifiedHistoryCurrentActScope,
+    status: "unavailable",
+    actId: null,
+    source: null,
+    reason: "ACT_SCOPE_MISSING",
+  };
+}
+
+function currentVerifiedHistoryActState(profileId) {
+  const normalizedProfileId = normalizeHistoryProfileId(profileId);
+  const sameScope = isCurrentHistoryActScope({
+    state: verifiedHistoryCurrentAct,
+    profileId: normalizedProfileId,
+    locale: serviceLocale(),
+    generation: privateDataGeneration,
+    scopeToken: verifiedHistoryCurrentActScope,
+    activeScopeToken: verifiedHistoryCurrentActScope,
+  });
+  return {
+    currentActId: sameScope ? verifiedHistoryCurrentAct.actId : null,
+    currentActSource: sameScope ? verifiedHistoryCurrentAct.source : null,
+    currentActVerified: Boolean(sameScope && verifiedHistoryCurrentAct.actId != null),
+    currentActStatus: sameScope ? verifiedHistoryCurrentAct.status : "unavailable",
+    currentActReason: sameScope ? verifiedHistoryCurrentAct.reason : "ACT_SCOPE_MISSING",
+  };
+}
+
+function publishVerifiedHistoryCurrentAct({
+  profileId,
+  locale,
+  generation,
+  requestedActId = null,
+  scopeToken,
+  result,
+} = {}) {
+  if (
+    requestedActId != null ||
+    scopeToken !== verifiedHistoryCurrentActScope ||
+    generation !== privateDataGeneration ||
+    locale !== serviceLocale()
+  ) return;
+  const normalizedProfileId = normalizeHistoryProfileId(profileId);
+  const normalized = normalizeVerifiedHistoryCurrentAct(result);
+  verifiedHistoryCurrentAct = {
+    profileId: normalizedProfileId,
+    locale,
+    generation,
+    scopeToken,
+    status: normalized.status,
+    actId: normalized.actId,
+    source: normalized.source,
+    reason: normalized.reason,
+  };
+  if (mainWindow && !mainWindow.isDestroyed()) sendHistoryState();
 }
 
 function serviceHome() {
@@ -758,16 +927,24 @@ function normalizeStoredHistoryRecord(value) {
   const normalizedOpponentInsightSnapshots = snapshotObject(
     value.opponentInsightSnapshots,
   );
+  const normalizedRoundResults = normalizeStoredRoundResults(value.roundResults);
+  const normalizedCharacterNamesByLocale = normalizeCharacterNamesByLocale(
+    value.characterNamesByLocale,
+  );
+  const actProvenance = normalizeStoredHistoryAct(value);
   return {
     replayId,
     profileId,
     uploadedAt,
     playedAt: finiteOrNull(value.playedAt) ?? uploadedAt,
     matchType,
+    ...actProvenance,
     battleTypeName: String(value.battleTypeName ?? "").slice(0, 80),
-    result: ["win", "loss", "draw"].includes(value.result)
+    result: ["win", "loss", "draw", "unknown"].includes(value.result)
       ? value.result
-      : "draw",
+      : value.result == null
+        ? "draw"
+        : "unknown",
     ownName: String(value.ownName ?? "").slice(0, 80),
     ownCharacterName: String(value.ownCharacterName ?? "").slice(0, 80),
     characterId: finiteOrNull(value.characterId),
@@ -798,15 +975,104 @@ function normalizeStoredHistoryRecord(value) {
       value.opponentLp ??
         (value.opponentRatingType === "LP" ? value.opponentRating : null),
     ),
+    opponentBattleInputType: ["C", "M"].includes(value.opponentBattleInputType)
+      ? value.opponentBattleInputType
+      : null,
+    ...(normalizedCharacterNamesByLocale
+      ? { characterNamesByLocale: normalizedCharacterNamesByLocale }
+      : {}),
+    ...(normalizedRoundResults ? { roundResults: normalizedRoundResults } : {}),
     ...(normalizedOpponentInsightSnapshots
       ? { opponentInsightSnapshots: normalizedOpponentInsightSnapshots }
       : {}),
   };
 }
 
+function normalizeCharacterNamesByLocale(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const normalized = {};
+  for (const [locale, labels] of Object.entries(value)) {
+    if (!LOCALE_KEYS.has(String(locale)) || !labels || typeof labels !== "object") {
+      continue;
+    }
+    const own = String(labels.own ?? "").trim().slice(0, 80);
+    const opponent = String(labels.opponent ?? "").trim().slice(0, 80);
+    if (own || opponent) {
+      normalized[String(locale)] = {
+        ...(own ? { own } : {}),
+        ...(opponent ? { opponent } : {}),
+      };
+    }
+  }
+  return Object.keys(normalized).length ? normalized : null;
+}
+
+function mergeCharacterNamesByLocale(previous, incoming) {
+  const left = normalizeCharacterNamesByLocale(previous) ?? {};
+  const right = normalizeCharacterNamesByLocale(incoming) ?? {};
+  const merged = { ...left };
+  for (const [locale, labels] of Object.entries(right)) {
+    merged[locale] = { ...(merged[locale] ?? {}), ...labels };
+  }
+  return normalizeCharacterNamesByLocale(merged);
+}
+
 function normalizeHistoryProfileId(value) {
   const normalized = String(value ?? "").replace(/\s/g, "");
   return /^\d{4,12}$/.test(normalized) ? normalized : null;
+}
+
+// The disk-history integration harness is deliberately unreachable from a
+// normal or packaged launch. It requires the local-QA marker, an unpackaged
+// process, an isolated dev data root, and a marker file created by the
+// test runner. The history file itself is then loaded by the same store path
+// used by production; no fixture is bundled into the application.
+function readQaDiskHistoryHarnessConfig() {
+  if (
+    app.isPackaged ||
+    process.env.MATCH_OVERLAY_QA_LOCAL !== "1" ||
+    process.env.MATCH_OVERLAY_QA_DISK_HISTORY !== "1" ||
+    process.env.MATCH_OVERLAY_QA_DISK_HISTORY_GUARD !== "local-v1"
+  ) return null;
+  const devRootValue = String(process.env.MATCH_OVERLAY_DEV_DATA_ROOT ?? "").trim();
+  const profileId = normalizeHistoryProfileId(
+    process.env.MATCH_OVERLAY_QA_DISK_HISTORY_PROFILE,
+  );
+  const actId = Number(process.env.MATCH_OVERLAY_QA_DISK_HISTORY_ACT);
+  if (
+    !devRootValue ||
+    !path.isAbsolute(devRootValue) ||
+    !profileId ||
+    !Number.isInteger(actId) ||
+    actId <= 0
+  ) return null;
+  const devRoot = path.resolve(devRootValue);
+  const markerPath = path.join(devRoot, ".mso-qa-disk-history-v1");
+  const historyPath = path.join(
+    devRoot,
+    "user-data",
+    "match-history",
+    `${profileId}.json`,
+  );
+  try {
+    const marker = fs.readFileSync(markerPath, "utf8").trim();
+    const historyStat = fs.lstatSync(historyPath);
+    if (
+      marker !== "mso-qa-disk-history-v1" ||
+      !historyStat.isFile() ||
+      historyStat.isSymbolicLink() ||
+      historyStat.size <= 0 ||
+      historyStat.size > 32 * 1024 * 1024
+    ) return null;
+    const resolvedRoot = fs.realpathSync(devRoot).toLocaleLowerCase();
+    const resolvedFile = fs.realpathSync(historyPath).toLocaleLowerCase();
+    const expectedPrefix = `${resolvedRoot}${path.sep}user-data${path.sep}match-history${path.sep}`
+      .toLocaleLowerCase();
+    if (!resolvedFile.startsWith(expectedPrefix)) return null;
+  } catch {
+    return null;
+  }
+  return Object.freeze({ profileId, actId, devRoot });
 }
 
 function historyRetentionLimit(profileId) {
@@ -949,6 +1215,19 @@ function activeHistoryProfileId() {
   );
 }
 
+function historyFetchScopeIsCurrent(profileId, scopeToken) {
+  return (
+    scopeToken === matchHistoryFetchScopeToken &&
+    activeHistoryProfileId() === normalizeHistoryProfileId(profileId)
+  );
+}
+
+function assertHistoryFetchScope(profileId, scopeToken) {
+  if (!historyFetchScopeIsCurrent(profileId, scopeToken)) {
+    throw new Error("HISTORY_TARGET_CHANGED");
+  }
+}
+
 function historyProfileCoversLatestRecord(player, records) {
   const latest = (Array.isArray(records) ? records : [])
     .filter(
@@ -1005,9 +1284,15 @@ function mergeMatchHistory(
     .map((replay) => {
       const replayId = String(replay?.replayId ?? "").trim();
       const previous = replayId ? existing.get(replayId) : null;
+      const actProvenance = mergeHistoryActProvenance(previous, replay);
       return normalizeStoredHistoryRecord({
         ...previous,
         ...replay,
+        ...actProvenance,
+        characterNamesByLocale: mergeCharacterNamesByLocale(
+          previous?.characterNamesByLocale,
+          replay?.characterNamesByLocale,
+        ),
         // Prefer a fresh battle-log value, while retaining profile-enriched
         // parallel ratings when an older API response omits one of them.
         ownMr: replay?.ownMr ?? replay?.mr ?? previous?.ownMr,
@@ -1020,7 +1305,17 @@ function mergeMatchHistory(
   for (const replay of normalizedIncoming) {
     const replayId = replay.replayId;
     const previous = existing.get(replayId) ?? null;
-    const merged = { ...previous, ...replay, profileId: normalizedProfileId };
+    const actProvenance = mergeHistoryActProvenance(previous, replay);
+    const merged = {
+      ...previous,
+      ...replay,
+      ...actProvenance,
+      characterNamesByLocale: mergeCharacterNamesByLocale(
+        previous?.characterNamesByLocale,
+        replay?.characterNamesByLocale,
+      ),
+      profileId: normalizedProfileId,
+    };
     const normalized = normalizeStoredHistoryRecord(merged);
     if (normalized && JSON.stringify(previous) !== JSON.stringify(normalized)) {
       existing.set(normalized.replayId, normalized);
@@ -1121,16 +1416,41 @@ function publicHistoryState(
     matchHistoryFetchSummary?.profileId === normalizedProfileId
       ? matchHistoryFetchSummary
       : null;
+  const persistedActIds = [...new Set(
+    store.records
+      .map((record) => Number(record?.actId))
+      .filter((value) => Number.isInteger(value) && value >= 0),
+  )].sort((left, right) => right - left);
+  const verifiedCurrentAct = currentVerifiedHistoryActState(normalizedProfileId);
+  const officialActOptions = buildOfficialActOptions(verifiedCurrentAct.currentActId);
+  const authenticated = Boolean(authenticatedProfileId);
+  const actsById = new Map(
+    [...officialActOptions, ...persistedActIds.map((id) => ({ id, label: `ACT ${id}` }))]
+      .map((act) => [act.id, act]),
+  );
   return {
     records: store.records,
     count: store.records.length,
     profileId: normalizedProfileId,
+    // These are the official selector options, not assignments of Acts to
+    // stored records. A record remains unscoped until its replay payload
+    // contains explicit Act evidence.
+    acts: [...actsById.values()].sort((left, right) => right.id - left.id),
+    ...verifiedCurrentAct,
+    characterNamesVerifiedLocales: [...historyLabelBackfillCompleted]
+      .filter((key) => key.startsWith(`${normalizedProfileId}:`))
+      .map((key) => key.slice(normalizedProfileId.length + 1)),
     player: historyViewPlayer ?? authenticatedPlayer ?? trackerState.player,
     viewingOther: Boolean(historyViewPlayer),
-    authenticated: Boolean(normalizedProfileId),
+    // A restored tracker player is useful for painting the last known screen,
+    // but it is not proof that the current browser session is authenticated.
+    // Publishing it as authenticated lets the renderer start an import before
+    // the auth check completes and can consume the one automatic attempt.
+    authenticated,
     lastFetchedAt: store.lastFetchedAt || null,
     nextAllowedAt: nextAllowedAt || null,
     canFetch:
+      authenticated &&
       Boolean(normalizedProfileId) &&
       !fetchProgress &&
       Date.now() >= nextAllowedAt,
@@ -1147,6 +1467,42 @@ function publicHistoryState(
       ? historyViewEffectivePollIntervalSeconds
       : null,
     pollStopReason: historyViewPlayer ? historyViewStopReason : null,
+  };
+}
+
+function qaDiskHistoryCharacterNames({ profileId, locale, actId } = {}) {
+  if (
+    !qaDiskHistoryHarness ||
+    normalizeHistoryProfileId(profileId) !== qaDiskHistoryHarness.profileId ||
+    String(locale ?? "") !== serviceLocale() ||
+    (actId != null && Number(actId) !== qaDiskHistoryHarness.actId)
+  ) return null;
+  const labels = {};
+  const records = publicHistoryState(qaDiskHistoryHarness.profileId).records;
+  for (const record of records) {
+    const ownId = Number(record?.characterId);
+    const opponentId = Number(record?.opponentCharacterId);
+    const ownLabel = String(record?.ownCharacterName ?? "").trim();
+    const opponentLabel = String(record?.opponentCharacterName ?? "").trim();
+    if (Number.isInteger(ownId) && ownId > 0 && ownLabel && !labels[ownId]) {
+      labels[ownId] = ownLabel;
+    }
+    if (
+      Number.isInteger(opponentId) &&
+      opponentId > 0 &&
+      opponentLabel &&
+      !labels[opponentId]
+    ) labels[opponentId] = opponentLabel;
+  }
+  return {
+    status: "ready",
+    source: "qa-disk-history",
+    profileId: qaDiskHistoryHarness.profileId,
+    locale: serviceLocale(),
+    act: qaDiskHistoryHarness.actId,
+    retrievedAt: Date.now(),
+    retryable: false,
+    labels,
   };
 }
 
@@ -1604,11 +1960,9 @@ function publicTrackerState() {
   const viewState = historyViewTrackerState();
   const sourceState = viewState ?? trackerState;
   repairRatingBaseline(sourceState);
-  const {
-    seenReplayIds: _privateIds,
-    characterStates: _privateCharacterStates,
-    ...publicState
-  } = sourceState;
+  const publicState = { ...sourceState };
+  delete publicState.seenReplayIds;
+  delete publicState.characterStates;
   const median = publicMedianRating(sourceState);
   const presentationPlayer = sourceState.player ?? historyViewPlayer ?? authenticatedPlayer;
   const ranking = publicRankingState(sourceState);
@@ -2197,6 +2551,7 @@ function updateDisplaySettings(
     initialLanguageSelectionRequired = false;
   }
   if (previousLocale !== displaySettings.locale) {
+    invalidateVerifiedHistoryCurrentAct();
     matchHistoryFetchSummary = null;
     // The Next.js build id and data route are locale-scoped. Do not reuse a
     // build id fetched from the previous language after a locale switch.
@@ -2809,7 +3164,6 @@ function createFriendNotificationWindow() {
   friendNotificationWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   friendNotificationWindow.setSkipTaskbar(true);
   friendNotificationWindow.setFocusable(false);
-  friendNotificationWindow.setAlwaysOnTop(true, "screen-saver");
   friendNotificationWindow.setIgnoreMouseEvents(true);
   friendNotificationWindow.setVisibleOnAllWorkspaces(true, {
     visibleOnFullScreen: true,
@@ -2820,8 +3174,21 @@ function createFriendNotificationWindow() {
   );
   friendNotificationWindow.on("closed", () => {
     friendNotificationWindow = null;
+    friendNotificationTopmostConfigured = false;
   });
   return friendNotificationWindow;
+}
+
+function configureFriendNotificationTopmost(window) {
+  if (
+    friendNotificationTopmostConfigured ||
+    !window ||
+    window.isDestroyed()
+  ) {
+    return;
+  }
+  window.setAlwaysOnTop(true, "screen-saver");
+  friendNotificationTopmostConfigured = true;
 }
 
 function prewarmFriendNotificationWindow() {
@@ -2986,7 +3353,7 @@ function presentFriendNotification() {
     positionFriendNotification(latestView.count > 1 ? 100 : 72);
     sendFriendNotificationPayload("visible");
     notificationWindow.showInactive();
-    notificationWindow.setFocusable(false);
+    configureFriendNotificationTopmost(notificationWindow);
     void playFriendNotificationSound();
   };
   if (notificationWindow.webContents.isLoading()) {
@@ -3080,10 +3447,9 @@ function createMainWindow() {
   mainWindowReadyToShow = false;
   managementUiReady = false;
   const workAreaHeight = screen.getPrimaryDisplay().workAreaSize.height;
-  // Keep the five-row recent-match preview visible on first launch.  Respect
-  // shorter work areas, while using the extra vertical space available on
-  // ordinary desktop displays instead of clipping the bottom of the panel.
-  const initialHeight = Math.max(720, Math.min(900, workAreaHeight - 40));
+  // Keep the five-row recent-match preview visible on first launch when the
+  // work area allows it, while keeping the outer window inside that area.
+  const initialHeight = mainWindowInitialHeight(workAreaHeight);
   const minimumHeight = Math.min(860, initialHeight);
   mainWindow = new BrowserWindow({
     width: 1040,
@@ -3103,6 +3469,10 @@ function createMainWindow() {
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   loadRendererFile(mainWindow, path.join(__dirname, "renderer", "index.html"));
   mainWindow.webContents.once("did-finish-load", () => {
+    if (qaDiskHistoryHarness) {
+      sendHistoryState();
+      return;
+    }
     if (initialLanguageSelectionRequired) return;
     checkAuthentication()
       .then(({ player }) => {
@@ -3205,9 +3575,19 @@ function openStatsWindow() {
 
   const preset = currentStatsWindowPreset();
   const savedBounds = savedStatsWindowBounds();
+  const workArea = screen.getPrimaryDisplay().workArea;
   const initialBounds = isUsableStatsBounds(savedBounds, preset)
     ? savedBounds
-    : { width: preset.width, height: preset.height };
+    : clampBoundsToWorkArea(
+        {
+          x: workArea.x + Math.round((workArea.width - preset.width) / 2),
+          y: workArea.y + Math.round((workArea.height - preset.height) / 2),
+          width: preset.width,
+          height: preset.height,
+        },
+        workArea,
+        8,
+      );
   statsWindow = new BrowserWindow({
     ...initialBounds,
     minWidth: preset.minWidth,
@@ -3248,16 +3628,6 @@ function openStatsWindow() {
   });
   // BrowserWindowの表示はready-to-show後だが、操作結果は先に表示状態へ反映する。
   return publicDisplaySettings({ statsWindowVisible: true });
-}
-
-function suppressStatsPresentation() {
-  overlaySuppressed = true;
-  statsWindowDrag = null;
-  if (statsWindow && !statsWindow.isDestroyed()) {
-    statsWindow.close();
-  }
-  sendTrackerState();
-  sendDisplaySettings();
 }
 
 function toggleStatsWindow() {
@@ -3343,11 +3713,11 @@ async function clearPrivateDataWithConfirmation() {
   try {
     ({ response } = await dialog.showMessageBox(mainWindow, {
       type: "warning",
-      title: "ローカルデータを消去",
+      title: "ローカルデータを削除",
       message:
-        "公式サイトのログインセッション、保存した対戦履歴・セッション戦績、Cookie、キャッシュをこのPCから削除します。",
+        "公式サイトのログイン状態、保存した対戦履歴・セッション戦績、Cookie、キャッシュをこのPCから削除します。",
       detail: "この操作は元に戻せません。",
-      buttons: ["消去", "キャンセル"],
+      buttons: ["削除", "キャンセル"],
       defaultId: 1,
       cancelId: 1,
       noLink: true,
@@ -3396,6 +3766,10 @@ async function clearPrivateDataWithConfirmation() {
   opponentProfileContextInFlight.clear();
   opponentOfficialHistoryCache.clear();
   opponentOfficialHistoryInFlight.clear();
+  officialCharacterStatsCache.clear();
+  officialCharacterStatsInFlight.clear();
+  officialCharacterNamesCache.clear();
+  officialCharacterNamesInFlight.clear();
   rankingCache.clear();
   rankingInFlight.clear();
   clearAllRankingRetryTimers();
@@ -3421,6 +3795,7 @@ async function clearPrivateDataWithConfirmation() {
   authenticatedProfileId = null;
   authenticatedPlayer = null;
   authenticatedRatingType = "MR";
+  invalidateVerifiedHistoryCurrentAct();
   sendSocialState();
   try {
     fs.rmSync(matchHistoryDirectory, { recursive: true, force: true });
@@ -3511,7 +3886,7 @@ function fetchServiceWithRateLimit(
       scope,
       generation,
       allowConcurrent: scope === "history",
-      startGapMs: scope === "history" ? 0 : undefined,
+      startGapMs: scope === "history" ? MATCH_HISTORY_START_GAP_MS : undefined,
     },
   );
 }
@@ -3569,6 +3944,8 @@ async function fetchServiceJson(
   requestScope = null,
   requestPriority = "interactive",
   localeOverride = null,
+  productionReceipt = null,
+  productionStage = "service-json",
 ) {
   const requestedLocale = LOCALE_KEYS.has(String(localeOverride))
     ? String(localeOverride)
@@ -3599,6 +3976,9 @@ async function fetchServiceJson(
     },
     { scope: requestScope, priority: requestPriority },
   );
+  recordProductionReceipt(productionReceipt, `${productionStage}.response`, {
+    ...classifyHttpResponse(response, { expectedContentType: "json" }),
+  });
 
   if (response.status === 429) {
     throw serviceRateLimitError(response.headers.get("retry-after"));
@@ -3615,6 +3995,8 @@ async function fetchServiceJson(
       requestScope,
       requestPriority,
       requestedLocale,
+      productionReceipt,
+      productionStage,
     );
   }
   if (
@@ -3632,7 +4014,20 @@ async function fetchServiceJson(
   if (!contentType.includes("json")) {
     throw new Error("SERVICE_AUTH_REQUIRED");
   }
-  return response.json();
+  try {
+    const payload = await response.json();
+    recordProductionReceipt(productionReceipt, `${productionStage}.json`, {
+      status: "ok",
+      responseShape: classifyPayloadShape(payload),
+    });
+    return payload;
+  } catch (error) {
+    recordProductionReceipt(productionReceipt, `${productionStage}.json`, {
+      status: "unavailable",
+      reason: "JSON_PARSE_FAILED",
+    });
+    throw error;
+  }
 }
 
 function openSocialProfile(profileId) {
@@ -3870,6 +4265,7 @@ function sendSocialState() {
 }
 
 function invalidateAuthenticationState() {
+  invalidateVerifiedHistoryCurrentAct();
   clearAllRankingRetryTimers();
   resetFriendNotificationBaseline(authenticatedProfileId);
   authenticatedProfileId = null;
@@ -4343,8 +4739,18 @@ async function checkAuthentication() {
       trackerState.updatedAt = Date.now();
       sendTrackerState();
     }
+    // Resolve the latest Act as part of the authenticated-profile readiness
+    // transition. The renderer may have restored a profile before this check
+    // completes, so the Act proof must not depend on the history panel being
+    // open or on a later manual refresh.
+    sendHistoryState();
     const postAuthenticationTasks = [
       refreshCurrentRanking({ player, characterId: player?.characterId }),
+      fetchOfficialCharacterNameRegistry({
+        profileId: player?.profileId ?? player?.userCode,
+        requestedLocale: serviceLocale(),
+        generation,
+      }),
     ];
     if (displaySettings.friendOnlineNotificationsEnabled) {
       postAuthenticationTasks.push(
@@ -4490,18 +4896,72 @@ function emptyOpponentOfficialInsight() {
   };
 }
 
+function sanitizeHistoryActSelector(value) {
+  const raw = String(value ?? "latest").trim();
+  if (raw === "latest") return raw;
+  return /^\d+$/.test(raw) && Number(raw) >= 0 ? raw : "invalid";
+}
+
+function historyScopeDiagnostics({
+  currentActState = {},
+  selectorRaw = "latest",
+  resolvedActId = null,
+  ipcActId = null,
+  requestActId = null,
+  ownerHistory = null,
+  opponentHistory = null,
+  finalScopeReason = null,
+  productionReceipt = null,
+} = {}) {
+  const summarize = (history) => {
+    const pages = history && typeof history.pages === "object" ? history.pages : {};
+    const pageValues = Object.values(pages);
+    return {
+      complete: history?.complete === true,
+      totalPages: Number.isInteger(Number(history?.totalPages)) && Number(history.totalPages) > 0
+        ? Number(history.totalPages)
+        : null,
+      fetchedPages: pageValues.length,
+      replayListPages: pageValues.filter((page) => page?.hasReplayList === true).length,
+      recordCount: Array.isArray(history?.records) ? history.records.length : 0,
+      reason: history?.complete === true ? null : "HISTORY_SCOPE_INCOMPLETE",
+    };
+  };
+  return {
+    currentAct: buildHistoryActDiagnostic(currentActState),
+    selector: {
+      raw: sanitizeHistoryActSelector(selectorRaw),
+      resolvedAct: normalizeHistoryActId(resolvedActId),
+    },
+    ipcAct: normalizeHistoryActId(ipcActId),
+    requestAct: normalizeHistoryActId(requestActId),
+    owner: summarize(ownerHistory),
+    opponent: summarize(opponentHistory),
+    finalScopeReason: finalScopeReason ?? null,
+    productionReceipt,
+  };
+}
+
 function emptyOpponentProfileContext({
   profileId = null,
   characterId = null,
   characterDisplayName = "",
+  actId = null,
+  actLabel = null,
   status = "empty",
   retrievedAt = null,
+  reason = null,
+  roundTrend = null,
+  diagnostics = null,
 } = {}) {
   return {
     status,
+    ...(reason ? { reason } : {}),
     profileId: profileId == null ? null : String(profileId),
     retrievedAt: Number.isFinite(Number(retrievedAt)) ? Number(retrievedAt) : null,
-    act: null,
+    act: Number.isInteger(Number(actId)) && Number(actId) >= 0
+      ? { id: String(Number(actId)), label: String(actLabel ?? `ACT ${Number(actId)}`) }
+      : null,
     targetCharacter: {
       characterId: Number(characterId) > 0 ? Number(characterId) : null,
       characterDisplayName: String(characterDisplayName ?? "").slice(0, 80),
@@ -4510,6 +4970,23 @@ function emptyOpponentProfileContext({
     },
     otherCharacter: null,
     opponentInsight: emptyOpponentOfficialInsight(),
+    roundTrend: roundTrend ?? buildRoundTrendFailure({}, {
+      status: status === "error" ? "error" : status === "empty" ? "unavailable" : "partial",
+      reason: reason ?? (status === "error"
+        ? "RETRIEVAL_FAILED"
+        : status === "empty"
+          ? "PROFILE_REFERENCE_EMPTY"
+          : "ACT_SCOPE_MISSING"),
+      }),
+    // Keep the PLAY comparison state explicit even when the profile card
+    // itself is empty/error.  This prevents the renderer from falling back to
+    // a visual fixture for a real unavailable request.
+    playComparison: comparePlayProfiles(null, null, {
+      selfError: status === "error",
+      opponentError: status === "error",
+      verifiedFieldContract: PLAY_APPROVED_FIELD_CONTRACT,
+    }),
+    diagnostics,
   };
 }
 
@@ -4539,11 +5016,21 @@ function opponentInsightFromSnapshots(snapshots) {
   return insight;
 }
 
-function opponentOfficialHistoryCacheKey(profileId, requestedLocale) {
+function opponentOfficialHistoryCacheKey(profileId, requestedLocale, actId = null) {
   const normalizedProfileId = normalizeHistoryProfileId(profileId);
+  const normalizedActId = Number.isInteger(Number(actId)) && Number(actId) >= 0
+    ? Number(actId)
+    : "latest";
   return normalizedProfileId && requestedLocale
-    ? `${requestedLocale}:${normalizedProfileId}`
+    ? `${requestedLocale}:${normalizedProfileId}:${normalizedActId}`
     : "";
+}
+
+function historyScopeDigest(value) {
+  return createHash("sha256")
+    .update(String(value ?? ""), "utf8")
+    .digest("hex")
+    .slice(0, 16);
 }
 
 async function fetchOpponentPeakProfile({
@@ -4611,18 +5098,946 @@ async function fetchOpponentPeakProfile({
   return value;
 }
 
+async function fetchAuthenticatedPlayProfile({
+  profileId,
+  generation,
+  requestedLocale,
+  productionReceipt = null,
+  productionRole = "play",
+} = {}) {
+  const normalizedProfileId = normalizeHistoryProfileId(profileId);
+  if (!normalizedProfileId || !requestedLocale) return null;
+  recordProductionReceipt(productionReceipt, `${productionRole}.request-start`, {
+    status: "started",
+    profileIdPresent: Boolean(normalizedProfileId),
+  });
+  const home = buildServiceHomeUrl(SERVICE_ORIGIN, requestedLocale);
+  const url = new URL(
+    `profile/${encodeURIComponent(normalizedProfileId)}/play`,
+    `${home.replace(/\/$/, "")}/`,
+  ).toString();
+  const response = await fetchServiceWithRateLimit(
+    url,
+    {
+      credentials: "include",
+      redirect: "follow",
+      headers: { Accept: "text/html" },
+    },
+    { scope: "history", priority: "interactive" },
+  );
+  recordProductionReceipt(productionReceipt, `${productionRole}.response`, {
+    ...classifyHttpResponse(response, { expectedContentType: "html" }),
+  });
+  assertPrivateDataGeneration(generation);
+  if (response.status === 429) {
+    throw serviceRateLimitError(response.headers.get("retry-after"));
+  }
+  if (
+    response.status === 401 ||
+    response.status === 403 ||
+    response.url.includes("/auth/loginep")
+  ) {
+    throw new Error("SERVICE_AUTH_REQUIRED");
+  }
+  if (!response.ok) throw new Error(`SERVICE_HTTP_${response.status}`);
+  const contentType = response.headers.get("content-type") || "";
+  if (!contentType.includes("html")) throw new Error("SERVICE_AUTH_REQUIRED");
+  const html = await response.text();
+  assertPrivateDataGeneration(generation);
+  let payload;
+  try {
+    payload = parseNextData(html);
+  } catch (error) {
+    recordProductionReceipt(productionReceipt, `${productionRole}.next-data`, {
+      status: "unavailable",
+      reason: "NEXT_DATA_PARSE_FAILED",
+    });
+    throw error;
+  }
+  const play = payload?.props?.pageProps?.play;
+  recordProductionReceipt(productionReceipt, `${productionRole}.payload`, {
+    status: play && typeof play === "object" && !Array.isArray(play) ? "ok" : "unavailable",
+    responseShape: play && typeof play === "object" && !Array.isArray(play)
+      ? classifyPayloadShape(play) === "empty-object" ? "empty-play" : "play"
+      : "missing",
+    requiredPayload: play && typeof play === "object" && !Array.isArray(play) ? "play" : "missing",
+  });
+  return {
+    payload,
+    retrievedAt: Date.now(),
+  };
+}
+
+async function fetchPlayComparison({
+  selfProfileId,
+  opponentProfileId,
+  generation,
+  requestedLocale,
+} = {}) {
+  const productionReceipt = createProductionReceipt({
+    operation: "play-comparison",
+    locale: requestedLocale,
+    profileId: selfProfileId,
+  });
+  const [selfResult, opponentResult] = await Promise.allSettled([
+    fetchAuthenticatedPlayProfile({
+      profileId: selfProfileId,
+      generation,
+      requestedLocale,
+      productionReceipt,
+      productionRole: "play.self",
+    }),
+    fetchAuthenticatedPlayProfile({
+      profileId: opponentProfileId,
+      generation,
+      requestedLocale,
+      productionReceipt,
+      productionRole: "play.opponent",
+    }),
+  ]);
+  const comparison = comparePlayProfiles(
+    selfResult.status === "fulfilled" ? selfResult.value?.payload : null,
+    opponentResult.status === "fulfilled" ? opponentResult.value?.payload : null,
+    {
+      selfError: selfResult.status === "rejected",
+      opponentError: opponentResult.status === "rejected",
+      verifiedFieldContract: PLAY_APPROVED_FIELD_CONTRACT,
+    },
+  );
+  const receiptStatus = comparison.status === "ready"
+    ? "ready"
+    : comparison.status === "unavailable" || comparison.status === "error"
+      ? "unavailable"
+      : "partial";
+  finalizeProductionReceipt(productionReceipt, {
+    status: receiptStatus,
+    reason: comparison.status === "ready" ? "PLAY_SCOPE_VERIFIED" : "PLAY_SCOPE_INCOMPLETE",
+  });
+  return {
+    ...comparison,
+    diagnostics: { productionReceipt },
+    retrievedAt: {
+      self: selfResult.status === "fulfilled" ? selfResult.value?.retrievedAt ?? null : null,
+      opponent: opponentResult.status === "fulfilled" ? opponentResult.value?.retrievedAt ?? null : null,
+    },
+  };
+}
+
+function officialCharacterStatsFailureReason(error) {
+  const code = error instanceof Error ? error.message : String(error ?? "");
+  if (code === "SERVICE_AUTH_REQUIRED") return "AUTH_REQUIRED";
+  if (code === "SERVICE_RATE_LIMITED") return "RATE_LIMITED";
+  if (code === "PRIVATE_DATA_CLEARED") return "PRIVATE_DATA_CLEARED";
+  if (code === "HISTORY_LOCALE_CHANGED") return "LOCALE_CHANGED";
+  if (code.startsWith("SERVICE_HTTP_")) return code;
+  return "REQUEST_FAILED";
+}
+
+function officialCharacterStatsRequestHeaders(requestedLocale, profileId) {
+  return {
+    Accept: "application/json",
+    "Content-Type": "application/json",
+    Origin: SERVICE_ORIGIN,
+    Referer: `${buildServiceHomeUrl(SERVICE_ORIGIN, requestedLocale)}/profile/${encodeURIComponent(profileId)}/play`,
+  };
+}
+
+async function fetchOfficialCharacterNameRegistry({
+  profileId,
+  requestedLocale,
+  generation,
+  actId = null,
+  productionReceipt = null,
+} = {}) {
+  const normalizedProfileId = normalizeHistoryProfileId(profileId);
+  const locale = String(requestedLocale ?? "").trim();
+  const requestedActId = typeof actId === "number" && Number.isInteger(actId) && actId >= 0
+    ? actId
+    : null;
+  const currentActScopeToken = verifiedHistoryCurrentActScope;
+  const publishCurrentAct = (result) => {
+    publishVerifiedHistoryCurrentAct({
+      profileId: normalizedProfileId,
+      locale,
+      generation,
+      requestedActId,
+      scopeToken: currentActScopeToken,
+      result,
+    });
+    return result;
+  };
+  const baseCacheKey = buildOfficialCharacterStatsRequestKey(normalizedProfileId, locale);
+  const cacheKey = baseCacheKey
+    ? `${baseCacheKey}:${requestedActId ?? "latest"}`
+    : "";
+  if (!cacheKey || !LOCALE_KEYS.has(locale)) {
+    return {
+      status: "unavailable",
+      reason: "REQUEST_SCOPE_INVALID",
+      retryable: false,
+      profileId: normalizedProfileId || null,
+      locale,
+      labels: {},
+    };
+  }
+  const cached = officialCharacterNamesCache.get(cacheKey);
+  if (
+    cached?.status === "ready" &&
+    Date.now() - Number(cached.retrievedAt) < OFFICIAL_CHARACTER_STATS_COOLDOWN_MS
+  ) {
+    assertPrivateDataGeneration(generation);
+    return publishCurrentAct(cached);
+  }
+  const result = await shareInFlightRequest(officialCharacterNamesInFlight, cacheKey, async () => {
+    const retrievedAt = Date.now();
+    try {
+      const initial = await fetchAuthenticatedPlayProfile({
+        profileId: normalizedProfileId,
+        generation,
+        requestedLocale: locale,
+        productionReceipt,
+        productionRole: "stats.names",
+      });
+      assertPrivateDataGeneration(generation);
+      if (locale !== serviceLocale()) throw new Error("HISTORY_LOCALE_CHANGED");
+      const initialPlay = initial?.payload?.props?.pageProps?.play;
+      const currentAct = typeof initialPlay?.current_season_id === "number" &&
+        Number.isInteger(initialPlay.current_season_id) &&
+        initialPlay.current_season_id > 0
+        ? initialPlay.current_season_id
+        : null;
+      recordProductionReceipt(productionReceipt, "stats.names.current-act", {
+        status: currentAct != null ? "ok" : "unavailable",
+        requestedAct: requestedActId,
+        responseAct: currentAct,
+        requiredPayload: currentAct != null ? "current_season_id" : "missing",
+      });
+      // The PLAY document is served for the account's current Act even when
+      // the stats controls request a historical Act. Character labels are a
+      // locale registry, not the selected Act's statistics, so do not reject
+      // an explicit historical Act here. The mode API response remains the
+      // authority for requested/response Act equality below.
+      recordProductionReceipt(productionReceipt, "stats.names.scope", {
+        status: "ok",
+        requestedAct: requestedActId,
+        responseAct: currentAct,
+        requiredPayload: "locale-character-registry",
+      });
+      const validated = validateOfficialCharacterWinRates(initialPlay, {
+        locale,
+        act: currentAct,
+        mode: 1,
+      });
+      if (!validated.ok) {
+        return {
+          status: "unavailable",
+          source: "official_profile_play_character_names",
+          reason: validated.reason,
+          retryable: false,
+          profileId: normalizedProfileId,
+          locale,
+          act: currentAct,
+          retrievedAt,
+          labels: {},
+          diagnostics: validated.diagnostics,
+        };
+      }
+      const labels = buildOfficialCharacterNameMap(validated.rows);
+      if (!labels) {
+        return {
+          status: "unavailable",
+          source: "official_profile_play_character_names",
+          reason: "CHARACTER_NAME_MAP_INVALID",
+          retryable: false,
+          profileId: normalizedProfileId,
+          locale,
+          act: currentAct,
+          retrievedAt,
+          labels: {},
+        };
+      }
+      const result = {
+        status: "ready",
+        source: "official_profile_play_character_names",
+        profileId: normalizedProfileId,
+        locale,
+        act: currentAct,
+        generation,
+        retrievedAt,
+        labels,
+        selfRows: validated.rows,
+        rowCount: Object.keys(labels).length,
+        retryable: false,
+      };
+      recordProductionReceipt(productionReceipt, "stats.names.normalized", {
+        status: "ok",
+        responseAct: currentAct,
+        rowCount: validated.rows.length,
+        requiredFieldCount: Object.keys(labels).length,
+      });
+      Object.defineProperty(result, "_play", {
+        value: initialPlay,
+        enumerable: false,
+        configurable: false,
+        writable: false,
+      });
+      officialCharacterNamesCache.set(cacheKey, result);
+      return result;
+    } catch (error) {
+      const reason = officialCharacterStatsFailureReason(error);
+      return {
+        status: "unavailable",
+        source: "official_profile_play_character_names",
+        reason,
+        retryable: isRetryableOfficialCharacterStatsReason(reason),
+        profileId: normalizedProfileId,
+        locale,
+        act: null,
+        retrievedAt,
+        labels: {},
+      };
+    }
+  });
+  return publishCurrentAct(result);
+}
+
+async function fetchOfficialCharacterStatsMode({
+  profileId,
+  requestedLocale,
+  act,
+  mode,
+  generation,
+  expectedCharacterIds,
+  selectedOwnCharacterId = "all",
+  productionReceipt = null,
+} = {}) {
+  const normalizedProfileId = normalizeHistoryProfileId(profileId);
+  const targetSeasonId = Number(act);
+  const targetModeId = Number(mode);
+  const diagnostics = {
+    mode: targetModeId,
+    httpStatus: null,
+    rowCount: 0,
+    positiveIds: 0,
+    uniqueIds: 0,
+    requiredKeyCount: 0,
+    selectedOwnCharacterId: String(selectedOwnCharacterId ?? "all") === "all"
+      ? "all"
+      : Number(selectedOwnCharacterId),
+    act,
+    generation,
+  };
+  if (
+    !normalizedProfileId ||
+    !LOCALE_KEYS.has(String(requestedLocale)) ||
+    !Number.isInteger(targetSeasonId) ||
+    targetSeasonId < 0 ||
+    !OFFICIAL_CHARACTER_STATS_MODES.includes(targetModeId)
+  ) {
+    recordProductionReceipt(productionReceipt, `stats.mode.${targetModeId}.scope`, {
+      status: "unavailable",
+      mode: targetModeId,
+      modeName: OFFICIAL_MODE_LABELS[targetModeId],
+      requestedAct: targetSeasonId,
+      reason: "REQUEST_SCOPE_INVALID",
+    });
+    return {
+      mode: targetModeId,
+      modeName: OFFICIAL_MODE_LABELS[targetModeId],
+      valid: false,
+      reason: "REQUEST_SCOPE_INVALID",
+      retryable: false,
+      diagnostics,
+    };
+  }
+
+  try {
+    recordProductionReceipt(productionReceipt, `stats.mode.${targetModeId}.request-start`, {
+      status: "started",
+      mode: targetModeId,
+      modeName: OFFICIAL_MODE_LABELS[targetModeId],
+      requestedAct: targetSeasonId,
+      profileIdPresent: Boolean(normalizedProfileId),
+    });
+    const response = await fetchServiceWithRateLimit(
+      new URL(OFFICIAL_CHARACTER_STATS_API_PATH, SERVICE_ORIGIN).toString(),
+      {
+        method: "POST",
+        credentials: "include",
+        redirect: "follow",
+        headers: officialCharacterStatsRequestHeaders(requestedLocale, normalizedProfileId),
+        body: JSON.stringify({
+          targetShortId: Number(normalizedProfileId),
+          targetSeasonId,
+          targetModeId,
+          lang: requestedLocale,
+        }),
+      },
+      { scope: "history", priority: "interactive" },
+    );
+    assertPrivateDataGeneration(generation);
+    diagnostics.httpStatus = response.status;
+    recordProductionReceipt(productionReceipt, `stats.mode.${targetModeId}.response`, {
+      ...classifyHttpResponse(response, { expectedContentType: "json" }),
+      mode: targetModeId,
+      modeName: OFFICIAL_MODE_LABELS[targetModeId],
+      requestedAct: targetSeasonId,
+    });
+    if (response.status === 429) {
+      throw serviceRateLimitError(response.headers.get("retry-after"));
+    }
+    if (
+      response.status === 401 ||
+      response.status === 403 ||
+      response.url.includes("/auth/loginep")
+    ) {
+      throw new Error("SERVICE_AUTH_REQUIRED");
+    }
+    if (!response.ok) throw new Error(`SERVICE_HTTP_${response.status}`);
+    const contentType = response.headers.get("content-type") || "";
+    if (!contentType.includes("json")) throw new Error("SERVICE_AUTH_REQUIRED");
+    let payload;
+    try {
+      payload = await response.json();
+      const responsePayload = payload && typeof payload === "object" &&
+        payload.response && typeof payload.response === "object" &&
+        !Array.isArray(payload.response)
+        ? payload.response
+        : payload;
+      recordProductionReceipt(productionReceipt, `stats.mode.${targetModeId}.json`, {
+        status: "ok",
+        mode: targetModeId,
+        responseShape: classifyPayloadShape(payload),
+        selfFieldState: Array.isArray(responsePayload?.character_win_rates)
+          ? (responsePayload.character_win_rates.length ? "array" : "empty-array")
+          : Object.prototype.hasOwnProperty.call(responsePayload ?? {}, "character_win_rates") ? "other" : "missing",
+        rivalFieldState: Array.isArray(responsePayload?.character_win_rates_by_rival_character)
+          ? (responsePayload.character_win_rates_by_rival_character.length ? "array" : "empty-array")
+          : Object.prototype.hasOwnProperty.call(responsePayload ?? {}, "character_win_rates_by_rival_character") ? "other" : "missing",
+        scopeFieldState: ["target_season_id", "targetSeasonId", "season_id", "seasonId", "act_id", "actId", "target_mode_id", "targetModeId", "mode_id", "modeId"]
+          .filter((key) => Object.prototype.hasOwnProperty.call(responsePayload ?? {}, key)).join(",") || "missing",
+        outerRowCount: Array.isArray(responsePayload?.character_win_rates_by_rival_character)
+          ? responsePayload.character_win_rates_by_rival_character.length : 0,
+        nestedRowCount: Array.isArray(responsePayload?.character_win_rates_by_rival_character)
+          ? responsePayload.character_win_rates_by_rival_character.reduce((count, row) => count + (Array.isArray(row?.rival_character_win_rates) ? row.rival_character_win_rates.length : 0), 0) : 0,
+      });
+    } catch (error) {
+      recordProductionReceipt(productionReceipt, `stats.mode.${targetModeId}.json`, {
+        status: "unavailable",
+        mode: targetModeId,
+        reason: "JSON_PARSE_FAILED",
+      });
+      throw error;
+    }
+    assertPrivateDataGeneration(generation);
+    if (requestedLocale !== serviceLocale()) throw new Error("HISTORY_LOCALE_CHANGED");
+    const validated = validateOfficialCharacterWinRates(payload, {
+      expectedCharacterIds,
+      locale: requestedLocale,
+      act: targetSeasonId,
+      mode: targetModeId,
+      modeName: OFFICIAL_MODE_LABELS[targetModeId],
+    });
+    Object.assign(diagnostics, validated.diagnostics);
+    recordProductionReceipt(productionReceipt, `stats.mode.${targetModeId}.self-normalized`, {
+      status: validated.ok ? "ok" : "unavailable",
+      mode: targetModeId,
+      requestedAct: targetSeasonId,
+      responseAct: validated.diagnostics?.observedAct,
+      rowCount: validated.ok ? validated.rows.length : 0,
+      requiredPayload: validated.ok ? "self-rows" : "missing-or-invalid",
+      reason: validated.ok ? undefined : validated.reason,
+    });
+    if (!validated.ok) {
+      return {
+        mode: targetModeId,
+        valid: false,
+        reason: validated.reason,
+        retryable: false,
+        diagnostics,
+      };
+    }
+    diagnostics.selfRowCount = validated.rows.length;
+    const rivalResponse = await fetchServiceWithRateLimit(
+      new URL(OFFICIAL_CHARACTER_STATS_RIVAL_API_PATH, SERVICE_ORIGIN).toString(),
+      {
+        method: "POST",
+        credentials: "include",
+        redirect: "follow",
+        headers: officialCharacterStatsRequestHeaders(requestedLocale, normalizedProfileId),
+        body: JSON.stringify({
+          targetShortId: Number(normalizedProfileId),
+          targetSeasonId,
+          targetModeId,
+          lang: requestedLocale,
+        }),
+      },
+      { scope: "history", priority: "interactive" },
+    );
+    assertPrivateDataGeneration(generation);
+    recordProductionReceipt(productionReceipt, `stats.mode.${targetModeId}.rival-response`, {
+      ...classifyHttpResponse(rivalResponse, { expectedContentType: "json" }),
+      mode: targetModeId,
+      modeName: OFFICIAL_MODE_LABELS[targetModeId],
+      requestedAct: targetSeasonId,
+    });
+    if (rivalResponse.status === 429) {
+      throw serviceRateLimitError(rivalResponse.headers.get("retry-after"));
+    }
+    if (
+      rivalResponse.status === 401 ||
+      rivalResponse.status === 403 ||
+      rivalResponse.url.includes("/auth/loginep")
+    ) {
+      throw new Error("SERVICE_AUTH_REQUIRED");
+    }
+    if (!rivalResponse.ok) throw new Error(`SERVICE_HTTP_${rivalResponse.status}`);
+    const rivalContentType = rivalResponse.headers.get("content-type") || "";
+    if (!rivalContentType.includes("json")) throw new Error("SERVICE_AUTH_REQUIRED");
+    let rivalPayload;
+    try {
+      rivalPayload = await rivalResponse.json();
+      const rivalResponsePayload = rivalPayload && typeof rivalPayload === "object" &&
+        rivalPayload.response && typeof rivalPayload.response === "object" &&
+        !Array.isArray(rivalPayload.response)
+        ? rivalPayload.response
+        : rivalPayload;
+      recordProductionReceipt(productionReceipt, `stats.mode.${targetModeId}.rival-json`, {
+        status: "ok",
+        mode: targetModeId,
+        responseShape: classifyPayloadShape(rivalPayload),
+        rivalFieldState: Array.isArray(rivalResponsePayload?.character_win_rates_by_rival_character)
+          ? (rivalResponsePayload.character_win_rates_by_rival_character.length ? "array" : "empty-array")
+          : Object.prototype.hasOwnProperty.call(rivalResponsePayload ?? {}, "character_win_rates_by_rival_character") ? "other" : "missing",
+        outerRowCount: Array.isArray(rivalResponsePayload?.character_win_rates_by_rival_character)
+          ? rivalResponsePayload.character_win_rates_by_rival_character.length : 0,
+        nestedRowCount: Array.isArray(rivalResponsePayload?.character_win_rates_by_rival_character)
+          ? rivalResponsePayload.character_win_rates_by_rival_character.reduce((count, row) => count + (Array.isArray(row?.rival_character_win_rates) ? row.rival_character_win_rates.length : 0), 0) : 0,
+      });
+    } catch (error) {
+      recordProductionReceipt(productionReceipt, `stats.mode.${targetModeId}.rival-json`, {
+        status: "unavailable",
+        mode: targetModeId,
+        reason: "JSON_PARSE_FAILED",
+      });
+      throw error;
+    }
+    const opponentValidated = validateOfficialOpponentCharacterWinRates(rivalPayload, {
+      expectedCharacterIds,
+      expectedSelfRows: validated.rows,
+      selectedOwnCharacterId,
+      locale: requestedLocale,
+      act: targetSeasonId,
+      mode: targetModeId,
+      generation,
+      scopeKind: "post",
+    });
+    diagnostics.opponent = opponentValidated.diagnostics;
+    recordProductionReceipt(productionReceipt, `stats.mode.${targetModeId}.opponent-normalized`, {
+      status: opponentValidated.ok ? "ok" : "unavailable",
+      mode: targetModeId,
+      requestedAct: targetSeasonId,
+      responseAct: opponentValidated.diagnostics?.observedAct,
+      rowCount: opponentValidated.ok ? opponentValidated.rows.length : 0,
+      allRowPresent: opponentValidated.ok && opponentValidated.rows.some((row) => String(row?.id) === "253" || String(row?.label).toUpperCase() === "ALL"),
+      requiredPayload: opponentValidated.ok ? "opponent-rows" : "missing-or-invalid",
+      reason: opponentValidated.ok ? undefined : opponentValidated.reason,
+    });
+    if (!opponentValidated.ok) {
+      return {
+        mode: targetModeId,
+        valid: false,
+        reason: opponentValidated.reason,
+        retryable: false,
+        diagnostics,
+      };
+    }
+    return {
+      mode: targetModeId,
+      valid: true,
+      rows: opponentValidated.rows,
+      diagnostics,
+    };
+  } catch (error) {
+    return {
+      mode: targetModeId,
+      valid: false,
+      reason: officialCharacterStatsFailureReason(error),
+      retryable: isRetryableOfficialCharacterStatsReason(officialCharacterStatsFailureReason(error)),
+      diagnostics,
+    };
+  }
+}
+
+async function fetchOfficialOpponentCharacterStats({
+  profileId,
+  actId = null,
+  selectedOwnCharacterId = null,
+  matchMode = "all",
+  actSelectionSource = "latest",
+  forceRefresh = false,
+} = {}) {
+  ensureUpdateAllowed();
+  const normalizedProfileId = normalizeHistoryProfileId(profileId);
+  const requestedLocale = serviceLocale();
+  const explicitActId = actSelectionSource === "explicit" && Number.isInteger(Number(actId)) && Number(actId) >= 0
+    ? Number(actId)
+    : null;
+  const verifiedCurrentAct = currentVerifiedHistoryActState(normalizedProfileId);
+  const requestedActId = explicitActId ?? (
+    verifiedCurrentAct.currentActVerified === true
+      ? verifiedCurrentAct.currentActId
+      : null
+  );
+  const selectedOwnNumber = Number(selectedOwnCharacterId);
+  const ownScope = selectedOwnCharacterId != null &&
+    String(selectedOwnCharacterId) !== "all" &&
+    Number.isInteger(selectedOwnNumber) && selectedOwnNumber > 0
+    ? String(selectedOwnNumber)
+    : null;
+  const normalizedMatchMode = matchMode === "all" || Object.hasOwn(OFFICIAL_MATCH_MODE_IDS, matchMode)
+    ? matchMode
+    : "all";
+  const allCharactersScope = normalizedMatchMode === "all" && ownScope == null;
+  const productionReceipt = createProductionReceipt({
+    operation: "official-opponent-character-stats",
+    locale: requestedLocale,
+    requestedAct: requestedActId,
+    requestedModes: ALLOWED_MATCH_MODES,
+    profileId: normalizedProfileId,
+  });
+  let networkAttempted = false;
+  const actSource = explicitActId == null ? "latest" : "explicit";
+  recordProductionReceipt(productionReceipt, "stats.scope", {
+    status: requestedActId != null ? "ok" : "unavailable",
+    requestedAct: requestedActId,
+    requiredPayload: requestedActId != null ? "act" : "verified-current-act-missing",
+    actSource,
+    resolvedAct: requestedActId,
+    networkAttempted: false,
+    ownCharacterId: ownScope == null ? null : Number(ownScope),
+    selectionSource: allCharactersScope ? "all-characters" : ownScope == null ? "missing" : "selected",
+  });
+  if (ownScope == null && !allCharactersScope) {
+    finalizeProductionReceipt(productionReceipt, { status: "unavailable", reason: "OWN_CHARACTER_SCOPE_MISSING" });
+    return {
+      status: "unavailable",
+      source: "official_profile_play",
+      profileId: normalizedProfileId,
+      locale: requestedLocale,
+      act: requestedActId,
+      selectedOwnCharacterId: null,
+      rows: [],
+      reason: "OWN_CHARACTER_SCOPE_MISSING",
+      retryable: false,
+      diagnostics: { productionReceipt },
+    };
+  }
+  const baseRequestKey = buildOfficialCharacterStatsRequestKey(normalizedProfileId, requestedLocale);
+  const requestKey = baseRequestKey
+    ? `${baseRequestKey}:${requestedActId ?? "latest"}:${normalizedMatchMode}:${ownScope}`
+    : "";
+  if (!requestKey) {
+    finalizeProductionReceipt(productionReceipt, { status: "unavailable", reason: "PROFILE_OR_LOCALE_INVALID" });
+    return { status: "unavailable", reason: "PROFILE_OR_LOCALE_INVALID", rows: [], diagnostics: { productionReceipt } };
+  }
+  // A forced refresh must never consume an already-running normal snapshot.
+  // Keep forced calls on their own key, but let them wait for the normal
+  // flight so the scope still has at most one sequential refresh.
+  const forceRequestKey = `${requestKey}:force`;
+  const flightKey = forceRefresh === true ? forceRequestKey : requestKey;
+  const result = await shareInFlightRequest(officialCharacterStatsInFlight, flightKey, async () => {
+    if (forceRefresh === true) {
+      const normalFlight = officialCharacterStatsInFlight.get(requestKey);
+      if (normalFlight) await normalFlight.catch(() => {});
+    }
+    const generation = privateDataGeneration;
+    const retrievedAt = Date.now();
+    try {
+      const nameRegistry = await fetchOfficialCharacterNameRegistry({
+        profileId: normalizedProfileId,
+        requestedLocale,
+        generation,
+        // The current PLAY snapshot supplies the localized roster and, when
+        // the requested Act is current, the two-axis opponent statistics.
+        // Older Acts are queried through the explicit mode endpoint below.
+        actId: null,
+        productionReceipt,
+      });
+      assertPrivateDataGeneration(generation);
+      if (requestedLocale !== serviceLocale()) throw new Error("HISTORY_LOCALE_CHANGED");
+      if (nameRegistry.status !== "ready") {
+        return {
+          status: nameRegistry.retryable ? "partial" : "unavailable",
+          source: "official_profile_play",
+          retryable: nameRegistry.retryable === true,
+          profileId: normalizedProfileId,
+          locale: requestedLocale,
+          act: nameRegistry.act ?? null,
+          retrievedAt,
+          rows: [],
+          reason: nameRegistry.reason,
+          diagnostics: nameRegistry.diagnostics ?? null,
+        };
+      }
+      const act = requestedActId ?? Number(nameRegistry.act);
+      if (!Number.isInteger(act) || act < 0) {
+        return { status: "unavailable", source: "official_profile_play", retryable: false, profileId: normalizedProfileId, locale: requestedLocale, act: null, retrievedAt, rows: [], reason: "ACT_UNAVAILABLE" };
+      }
+      // Opponent-character stats are sourced from the app's three explicit
+      // mode POSTs even for the current Act. The PLAY page's aggregate mode
+      // includes the official mode=1 "all" scope and must not be reused for
+      // the app's ALL calculation.
+      const useCurrentPlay = false;
+      const scopeKey = useCurrentPlay ? "play-all" : "act-modes";
+      // Keep every dimension of the resolved stats scope independent. In
+      // particular, ALL must never reuse a ranked/casual/Battle Hub result.
+      const cacheKey = [
+        buildOfficialCharacterStatsCacheKey(normalizedProfileId, requestedLocale, act),
+        ownScope == null ? "all" : String(ownScope),
+        scopeKey,
+        normalizedMatchMode,
+      ].join(":");
+      const cached = forceRefresh === true
+        ? null
+        : officialCharacterStatsCache.get(cacheKey);
+      const qaReceiptProbe = Boolean(process.env.MATCH_OVERLAY_QA_RECEIPT_DIR);
+      const currentHistoryRevision = historyRevision(normalizedProfileId);
+      if (forceRefresh === true) officialCharacterStatsCache.delete(cacheKey);
+      const cacheFresh = cached?.status === "ready" &&
+        cached.generation === generation &&
+        cached.historyRevision === currentHistoryRevision &&
+        Date.now() - Number(cached.retrievedAt) < OFFICIAL_CHARACTER_STATS_COOLDOWN_MS;
+      if (!qaReceiptProbe && cacheFresh) {
+        assertPrivateDataGeneration(generation);
+        recordProductionReceipt(productionReceipt, "stats.cache", { status: "ok", reason: "CACHE_HIT", cacheHitScope: `${act}:${normalizedMatchMode}` });
+        return cached;
+      }
+      const request = (async () => {
+        networkAttempted = true;
+        const expectedCharacterIds = new Set(Object.keys(nameRegistry.labels).map(Number));
+        if (useCurrentPlay) {
+          const validated = validateOfficialOpponentCharacterWinRates(nameRegistry._play, {
+            expectedCharacterIds,
+            expectedSelfRows: nameRegistry.selfRows,
+            selectedOwnCharacterId: ownScope,
+            locale: requestedLocale,
+            act,
+            generation,
+            scopeKind: "play",
+          });
+          recordProductionReceipt(productionReceipt, "stats.play.normalized", {
+            status: validated.ok ? "ok" : "unavailable",
+            requestedAct: act,
+            responseAct: validated.diagnostics?.observedAct,
+            rowCount: validated.ok ? validated.rows.length : 0,
+            allRowPresent: validated.ok && validated.rows.some((row) => String(row?.id) === "253" || String(row?.label).toUpperCase() === "ALL"),
+            requiredPayload: validated.ok ? "opponent-rows" : "missing-or-invalid",
+            reason: validated.ok ? undefined : validated.reason,
+          });
+          if (!validated.ok) {
+            return {
+              status: "partial",
+              source: "official_profile_play",
+              retryable: false,
+              profileId: normalizedProfileId,
+              locale: requestedLocale,
+              act,
+              retrievedAt,
+              rows: [],
+              diagnostics: validated.diagnostics,
+              reason: validated.reason,
+            };
+          }
+          const result = {
+            status: "ready",
+            source: "official_profile_play",
+            retryable: false,
+            profileId: normalizedProfileId,
+            locale: requestedLocale,
+            act,
+            retrievedAt,
+            selectedOwnCharacterId: ownScope,
+            rows: validated.rows,
+            diagnostics: validated.diagnostics,
+            generation,
+            historyRevision: currentHistoryRevision,
+          };
+          if (!qaReceiptProbe) officialCharacterStatsCache.set(cacheKey, result);
+          return result;
+        }
+
+        const requestedModes = normalizedMatchMode === "all"
+          ? OFFICIAL_CHARACTER_STATS_MODES
+          : [OFFICIAL_MATCH_MODE_IDS[normalizedMatchMode]];
+        const modeResults = await Promise.all(
+          requestedModes.map((mode) => fetchOfficialCharacterStatsMode({
+            profileId: normalizedProfileId,
+            requestedLocale,
+            act,
+            mode,
+            generation,
+            expectedCharacterIds,
+            selectedOwnCharacterId: ownScope,
+            productionReceipt,
+          })),
+        );
+        assertPrivateDataGeneration(generation);
+        if (normalizedMatchMode !== "all") {
+          const single = modeResults[0];
+          if (!single?.valid || !Array.isArray(single.rows)) {
+            return {
+              status: "partial",
+              source: "official_profile_play",
+              profileId: normalizedProfileId,
+              locale: requestedLocale,
+              act,
+              retrievedAt,
+              selectedOwnCharacterId: ownScope,
+              mode: normalizedMatchMode,
+              modes: [{ mode: single?.mode ?? requestedModes[0], status: "invalid", reason: single?.reason ?? "MODE_RESULT_INVALID" }],
+              rows: [],
+              reason: single?.reason ?? "MODE_RESULT_INVALID",
+              retryable: single?.retryable === true,
+            };
+          }
+          const result = {
+            status: "ready",
+            source: "official_profile_play",
+            profileId: normalizedProfileId,
+            locale: requestedLocale,
+            act,
+            retrievedAt,
+            selectedOwnCharacterId: ownScope,
+            mode: normalizedMatchMode,
+            modes: [{ mode: single.mode, status: "valid", diagnostics: single.diagnostics ?? null }],
+            rows: single.rows,
+            retryable: false,
+            generation,
+            historyRevision: currentHistoryRevision,
+          };
+          if (!qaReceiptProbe) officialCharacterStatsCache.set(cacheKey, result);
+          return result;
+        }
+        const aggregate = aggregateOfficialCharacterWinRates(modeResults, {
+          profileId: normalizedProfileId,
+          locale: requestedLocale,
+          act,
+          retrievedAt,
+          generation,
+        });
+        const firstInvalidMode = aggregate.modes?.find((mode) => mode.status !== "valid");
+        if (aggregate.status !== "ready") {
+          return {
+            ...aggregate,
+            source: "official_profile_play",
+            profileId: normalizedProfileId,
+            locale: requestedLocale,
+            act,
+            retrievedAt,
+            selectedOwnCharacterId: ownScope,
+            reason: firstInvalidMode?.reason ?? "MODE_RESULT_INVALID",
+            retryable: aggregate.retryable === true,
+            rows: [],
+          };
+        }
+        const result = {
+          ...aggregate,
+          source: "official_profile_play",
+          retryable: false,
+          profileId: normalizedProfileId,
+          locale: requestedLocale,
+          act,
+          retrievedAt,
+          selectedOwnCharacterId: ownScope,
+          diagnostics: { modeResults: modeResults.map((entry) => entry.diagnostics ?? null) },
+          generation,
+          historyRevision: currentHistoryRevision,
+        };
+        if (!qaReceiptProbe) officialCharacterStatsCache.set(cacheKey, result);
+        return result;
+      })();
+      return request;
+    } catch (error) {
+      const reason = officialCharacterStatsFailureReason(error);
+      return { status: error?.message === "PRIVATE_DATA_CLEARED" ? "unavailable" : "partial", source: "official_profile_play", retryable: isRetryableOfficialCharacterStatsReason(reason), profileId: normalizedProfileId, locale: requestedLocale, act: null, retrievedAt, rows: [], reason };
+    }
+  });
+  const finalStatus = result?.status === "ready"
+    ? "ready"
+    : result?.status === "partial"
+      ? "partial"
+      : "unavailable";
+  const finalReason = result?.reason ?? (finalStatus === "ready" ? "STATS_SCOPE_VERIFIED" : "STATS_SCOPE_INCOMPLETE");
+  const receiptTotals = summarizeOfficialOpponentCharacterStatsRows(result?.rows);
+  recordProductionReceipt(productionReceipt, "stats.final", {
+    status: finalStatus,
+    reason: finalReason,
+    requestedAct: requestedActId,
+    resolvedAct: result?.act,
+    actSource,
+    networkAttempted,
+    ownCharacterId: Number(result?.selectedOwnCharacterId) || null,
+    selectionSource: result?.selectedOwnCharacterId
+      ? "selected"
+      : allCharactersScope ? "all-characters" : "missing",
+    outerMatchCount: (() => {
+      const aggregate = Array.isArray(result?.rows)
+        ? result.rows.find((row) => String(row?.id) === "253" || String(row?.characterId) === "253" || String(row?.label).toUpperCase() === "ALL")
+        : null;
+      return Number(aggregate?.matches) || 0;
+    })(),
+    rowCount: Array.isArray(result?.rows) ? result.rows.length : 0,
+    allRowPresent: Array.isArray(result?.rows) && result.rows.some((row) => String(row?.id) === "253" || String(row?.label).toUpperCase() === "ALL"),
+    selectedMode: normalizedMatchMode,
+    sourceModes: normalizedMatchMode === "all" ? "ranked,casual,battleHub" : normalizedMatchMode,
+    allBattleCount: receiptTotals.matches,
+    allWinCount: receiptTotals.wins,
+    allWinRate: receiptTotals.winRate,
+    allTotalSource: receiptTotals.source,
+    displayRowCount: Array.isArray(result?.rows) ? result.rows.length : 0,
+    trueZero: finalStatus === "ready" && Array.isArray(result?.rows) && result.rows.length > 0 &&
+      result.rows.every((row) => (Number(row?.matches) || 0) === 0 && (Number(row?.wins) || 0) === 0),
+    partialMissingModes: Array.isArray(result?.modes)
+      ? result.modes.filter((mode) => mode.status !== "valid").map((mode) => mode.mode).join(",")
+      : "",
+  });
+  finalizeProductionReceipt(productionReceipt, { status: finalStatus, reason: finalReason });
+  return {
+    ...result,
+    diagnostics: {
+      ...(result?.diagnostics && typeof result.diagnostics === "object" ? result.diagnostics : {}),
+      productionReceipt,
+    },
+  };
+}
+
 async function fetchOpponentOfficialHistory({
   profileId,
   generation,
   requestedLocale,
   selectedRecord = null,
+  actId = null,
+  actIndependent = false,
+  beforeTimestamp = null,
+  requestScopeProof = null,
+  productionReceipt = null,
+  productionRole = "history",
 } = {}) {
   const normalizedProfileId = normalizeHistoryProfileId(profileId);
   const cacheKey = opponentOfficialHistoryCacheKey(
     normalizedProfileId,
     requestedLocale,
+    actId,
   );
   if (!cacheKey) return { data: null, records: [], retrievedAt: null };
+  const requestedAct = normalizeHistoryActId(actId);
+  if (requestedAct == null && actIndependent !== true) throw new Error("ACT_SCOPE_MISSING");
+  recordProductionReceipt(productionReceipt, `${productionRole}.request-start`, {
+    status: "started",
+    requestedAct,
+    profileIdPresent: Boolean(normalizedProfileId),
+  });
   const now = Date.now();
   const cached = opponentOfficialHistoryCache.get(cacheKey);
   const history = cached?.history ?? {
@@ -4630,8 +6045,10 @@ async function fetchOpponentOfficialHistory({
     records: [],
     pages: {},
     rawCounts: {},
+    totalPages: null,
     retrievedAt: null,
     complete: false,
+    requestedActId: requestedAct,
   };
   const retrievedAt = history.retrievedAt ?? now;
   const save = () => setBoundedCacheEntry(
@@ -4651,35 +6068,48 @@ async function fetchOpponentOfficialHistory({
         "history",
         "interactive",
         requestedLocale,
+        productionReceipt,
+        `${productionRole}.profile`,
       ),
     );
     assertPrivateDataGeneration(generation);
     if (requestedLocale !== serviceLocale()) throw new Error("HISTORY_LOCALE_CHANGED");
     history.data = profileData;
     history.retrievedAt = retrievedAt;
+    recordProductionReceipt(productionReceipt, `${productionRole}.profile.normalize`, {
+      status: profileData && typeof profileData === "object" && !Array.isArray(profileData) ? "ok" : "unavailable",
+      requiredPayload: profileData && typeof profileData === "object" && !Array.isArray(profileData) ? "profile-data" : "missing",
+    });
   }
   const selectedReplayId = String(selectedRecord?.replayId ?? "").trim();
-  const selectedCharacterId = Number(selectedRecord?.opponentCharacterId) || null;
-  const hasEnoughBeforeCutoff = () => {
-    const cutoff = history.records.find((record) => record.replayId === selectedReplayId);
-    if (!cutoff || !selectedCharacterId) return false;
-    const cutoffTime = Number(cutoff.playedAt ?? cutoff.uploadedAt);
-    if (!Number.isFinite(cutoffTime) || cutoffTime <= 0) return false;
-    return history.records.filter((record) =>
-      record.replayId !== selectedReplayId &&
-      record.matchType === "ranked" &&
-      Number(record.characterId) === selectedCharacterId &&
-      Number(record.playedAt ?? record.uploadedAt) < cutoffTime,
-    ).length >= INSIGHT_MATCH_LIMIT;
+  let expectedTotalPages = Number.isInteger(Number(history.totalPages)) && Number(history.totalPages) > 0
+    ? Number(history.totalPages)
+    : null;
+  const validateHistoryPage = (pageResult, page) => {
+    const validation = verifyScopedHistoryPage({
+      pageResult,
+      page,
+      expectedTotalPages,
+      requestedActId: requestedAct,
+      actIndependent,
+      requestScopeVerified: requestScopeProof === "verified-current-act",
+    });
+    if (!validation.ok) throw new Error(validation.reason);
+    expectedTotalPages = validation.totalPages;
+    return validation;
   };
-  let lastPageWasShort = false;
-  const safeMaxPages = Math.max(
-    opponentInsightFetchOptions.maxPages,
-    MATCH_HISTORY_MAX_PAGES,
-  );
+  const safeMaxPages = OPPONENT_STATS_SAFE_MAX_PAGES;
+  const cutoff = Number(beforeTimestamp);
+  const hasCutoff = Number.isFinite(cutoff) && cutoff > 0;
+  const targetReached = () => hasCutoff && buildRoundTrend(history.records, {
+    beforeTimestamp: cutoff,
+    matchTypes: ROUND_TREND_MATCH_TYPES,
+    limit: 20,
+  }).matchCount >= 20;
+  let reachedTarget = targetReached();
   for (let page = 1; page <= safeMaxPages; page += 1) {
     if (history.pages[page]) {
-      lastPageWasShort = Number(history.pages[page].rawCount) < MATCH_HISTORY_PAGE_SIZE;
+      validateHistoryPage(history.pages[page], page);
     } else {
       const pageResult = await shareInFlightRequest(
         opponentOfficialHistoryInFlight,
@@ -4690,28 +6120,174 @@ async function fetchOpponentOfficialHistory({
           "history",
           "history",
           requestedLocale,
+          actIndependent === true ? null : actId,
+          productionReceipt,
+          `${productionRole}.battlelog.page.${page}`,
         ),
       );
       assertPrivateDataGeneration(generation);
       if (requestedLocale !== serviceLocale()) throw new Error("HISTORY_LOCALE_CHANGED");
+      validateHistoryPage(pageResult, page);
       history.pages[page] = {
         rawCount: Number(pageResult?.rawCount) || 0,
+        normalizedCount: Number(pageResult?.normalizedCount) || 0,
+        hasReplayList: pageResult?.hasReplayList === true,
+        totalPages: expectedTotalPages,
+        responsePage: pageResult?.responsePage ?? null,
+        requestedActId: pageResult?.requestedActId ?? requestedAct,
+        responseActId: pageResult?.responseActId ?? null,
+        recordActId: pageResult?.recordActId ?? null,
+        recordActIds: Array.isArray(pageResult?.recordActIds) ? pageResult.recordActIds : [],
+        actScopeVerified: pageResult?.actScopeVerified === true,
+        requestScopeProof: requestScopeProof === "verified-current-act" ? requestScopeProof : null,
+        actIndependent: actIndependent === true,
+        actScopeReason: pageResult?.actScopeReason ?? null,
         records: Array.isArray(pageResult?.replays) ? pageResult.replays : [],
       };
+      recordProductionReceipt(productionReceipt, `${productionRole}.battlelog.page`, {
+        status: actIndependent === true || pageResult?.actScopeVerified === true ? "ok" : "unavailable",
+        page,
+        totalPages: expectedTotalPages,
+        rawCount: pageResult?.rawCount,
+        normalizedCount: pageResult?.normalizedCount,
+        requestedAct: requestedAct,
+        responseAct: pageResult?.responseActId,
+        actScopeVerified: pageResult?.actScopeVerified === true,
+        requiredPayload: pageResult?.hasReplayList === true ? "replay_list" : "missing",
+        reason: actIndependent === true ? undefined : pageResult?.actScopeReason,
+      });
       const byReplayId = new Map(history.records.map((record) => [record.replayId, record]));
       for (const record of history.pages[page].records) {
-        if (record?.replayId) byReplayId.set(record.replayId, record);
+        if (!record?.replayId) continue;
+        const previous = byReplayId.get(record.replayId);
+        if (previous && JSON.stringify(previous) !== JSON.stringify(record)) {
+          throw new Error("HISTORY_REPLAY_DUPLICATE_CONFLICT");
+        }
+        byReplayId.set(record.replayId, record);
       }
       history.records = [...byReplayId.values()];
       history.rawCounts[page] = history.pages[page].rawCount;
-      lastPageWasShort = history.pages[page].rawCount < MATCH_HISTORY_PAGE_SIZE;
+      history.totalPages = expectedTotalPages;
       save();
     }
-    if (hasEnoughBeforeCutoff() || lastPageWasShort) break;
+    reachedTarget = targetReached();
+    if (reachedTarget) break;
+    if (expectedTotalPages != null && page >= expectedTotalPages) break;
   }
-  history.complete = hasEnoughBeforeCutoff() || lastPageWasShort;
+  history.totalPages = expectedTotalPages;
+  const allPagesFetched = expectedTotalPages != null &&
+    Object.keys(history.pages).length >= expectedTotalPages;
+  if (!allPagesFetched && !reachedTarget) throw new Error("HISTORY_PAGE_SET_INCOMPLETE");
+  if (actIndependent !== true && (!selectedReplayId || !history.records.some((record) =>
+    record.replayId === selectedReplayId && Number(record.actId) === requestedAct,
+  ))) {
+    throw new Error("HISTORY_SELECTED_REPLAY_SCOPE_MISSING");
+  }
+  history.requestedActId = requestedAct;
+  history.actScopeVerified = actIndependent === true ? false : true;
+  history.roundScopeIndependent = actIndependent === true;
+  history.complete = allPagesFetched || reachedTarget;
+  history.stopReason = reachedTarget ? "target20" : allPagesFetched ? "total_pages" : null;
   save();
+  const selected = actIndependent === true
+    ? null
+    : history.records.find((record) => record.replayId === selectedReplayId && Number(record?.actId) === requestedAct) ?? null;
+  const selfRounds = selected?.roundResults?.self?.values;
+  const opponentRounds = selected?.roundResults?.opponent?.values;
+  recordProductionReceipt(productionReceipt, `${productionRole}.round-target`, {
+    status: actIndependent === true || selected ? "ok" : "unavailable",
+    targetMatches: selected ? 1 : 0,
+    targetRounds: selected ? Math.max(Array.isArray(selfRounds) ? selfRounds.length : 0, Array.isArray(opponentRounds) ? opponentRounds.length : 0) : 0,
+    requiredPayload: actIndependent === true ? "cutoff-round-trend" : selected ? "selected-replay-round-results" : "missing",
+    reason: actIndependent === true || selected ? undefined : "HISTORY_SELECTED_REPLAY_SCOPE_MISSING",
+  });
   return history;
+}
+
+async function backfillHistoryCharacterLabelsForLocale(
+  profileId,
+  locale,
+  generation,
+  scopeToken = null,
+) {
+  const normalizedProfileId = normalizeHistoryProfileId(profileId);
+  const requestedLocale = LOCALE_KEYS.has(String(locale)) ? String(locale) : null;
+  if (!normalizedProfileId || !requestedLocale) return false;
+  if (scopeToken != null && scopeToken !== matchHistoryFetchScopeToken) return false;
+  const cacheKey = `${normalizedProfileId}:${requestedLocale}`;
+  if (
+    matchHistoryFetchInFlight &&
+    matchHistoryFetchProfileId === normalizedProfileId &&
+    matchHistoryFetchLocale === requestedLocale
+  ) {
+    await matchHistoryFetchInFlight.catch(() => {});
+    return false;
+  }
+  const store = loadMatchHistoryStore(normalizedProfileId);
+  const initialStoredRecords = store.records.map((record) => ({
+    replayId: record?.replayId,
+  }));
+  if (historyLabelBackfillCompleted.has(cacheKey)) return false;
+  const hasCharacterIds = store.records.some((record) => {
+    const ownId = Number(record?.characterId);
+    const opponentId = Number(record?.opponentCharacterId);
+    return (
+      (Number.isFinite(ownId) && ownId > 0) ||
+      (Number.isFinite(opponentId) && opponentId > 0)
+    );
+  });
+  if (!hasCharacterIds) {
+    historyLabelBackfillCompleted.add(cacheKey);
+    return false;
+  }
+  // Existing locale labels may have come from an older artifact or a
+  // different locale field. Remove them before the authoritative refetch so
+  // a failed request cannot leave a stale English/Japanese value marked valid.
+  let cleared = false;
+  for (const record of store.records) {
+    if (record?.characterNamesByLocale?.[requestedLocale]) {
+      const next = { ...record.characterNamesByLocale };
+      delete next[requestedLocale];
+      record.characterNamesByLocale = next;
+      if (!Object.keys(next).length) delete record.characterNamesByLocale;
+      cleared = true;
+    }
+  }
+  if (cleared) persistMatchHistoryStore(normalizedProfileId, store);
+  const existing = historyLabelBackfillInFlight.get(cacheKey);
+  if (existing) return existing;
+  const request = (async () => {
+    const replays = await fetchMatchHistoryPages(
+      normalizedProfileId,
+      null,
+      requestedLocale,
+      `history:${normalizedProfileId}:${requestedLocale}:${generation}:${scopeToken ?? matchHistoryFetchScopeToken}`,
+    );
+    assertPrivateDataGeneration(generation);
+    if (requestedLocale !== serviceLocale()) {
+      throw new Error("HISTORY_LOCALE_CHANGED");
+    }
+    if (scopeToken != null && scopeToken !== matchHistoryFetchScopeToken) {
+      return false;
+    }
+    // Backfill is optional enrichment only. New rows must enter through the
+    // verified import path, so a concurrent backfill may update labels only
+    // for replay ids already present before this request started.
+    const labelReplays = filterHistoryBackfillReplays(initialStoredRecords, replays);
+    if (!labelReplays.length) return false;
+    const changed = mergeMatchHistory(labelReplays, normalizedProfileId, {
+      persist: true,
+      notify: false,
+    });
+    historyLabelBackfillCompleted.add(cacheKey);
+    return changed;
+  })().finally(() => {
+    if (historyLabelBackfillInFlight.get(cacheKey) === request) {
+      historyLabelBackfillInFlight.delete(cacheKey);
+    }
+  });
+  historyLabelBackfillInFlight.set(cacheKey, request);
+  return request;
 }
 
 async function fetchHistoryOpponentContext({
@@ -4722,9 +6298,58 @@ async function fetchHistoryOpponentContext({
   historyOwnerProfileId,
   replayId,
   selectedRecord = null,
+  selectedActId: requestedActId = null,
+  selectedActSelector = null,
+  currentActId: rendererCurrentActId = null,
+  actSelectionSource = "latest",
   forceRefresh = false,
 } = {}) {
   ensureUpdateAllowed();
+  const ipcSelectedActId = normalizeHistoryActId(requestedActId);
+  const ipcSelectedActSelector = sanitizeHistoryActSelector(selectedActSelector);
+  const ipcCurrentActId = normalizeHistoryActId(rendererCurrentActId);
+  const ipcSelectedRecordActId = isKnownHistoryActRecord(selectedRecord)
+    ? normalizeHistoryActId(selectedRecord?.actId)
+    : null;
+  // The renderer includes the verified current Act as a convenience for the
+  // latest view. It is not an explicit historical selection, however. Treat
+  // every numeric selectedActId as untrusted in that mode and resolve latest
+  // from the current official PLAY scope below. Otherwise a stale record Act
+  // can be compared against the convenience value and fail as
+  // ACT_SCOPE_MISMATCH before the official scope is resolved.
+  if (actSelectionSource !== "explicit") {
+    requestedActId = null;
+  }
+  const productionReceipt = createProductionReceipt({
+    operation: "opponent-context",
+    locale: serviceLocale(),
+    requestedAct: requestedActId,
+    profileId: _profileId,
+  });
+  const qaReceiptProbe = Boolean(process.env.MATCH_OVERLAY_QA_RECEIPT_DIR);
+  const actSource = actSelectionSource === "explicit" ? "explicit" : "latest";
+  recordProductionReceipt(productionReceipt, "context.scope", {
+    status: normalizeHistoryActId(requestedActId) != null ? "ok" : "unavailable",
+    requestedAct: normalizeHistoryActId(requestedActId),
+    requiredPayload: normalizeHistoryActId(requestedActId) != null ? "selected-act" : "missing",
+    actSource,
+    resolvedAct: requestedActId,
+    networkAttempted: false,
+  });
+  recordProductionReceipt(productionReceipt, "context.ipc-scope", {
+    ipcSelectedAct: ipcSelectedActId,
+    ipcSelectedActSelector,
+    ipcCurrentAct: ipcCurrentActId,
+    ipcActSelectionSource: actSelectionSource,
+    ipcSelectedRecordAct: ipcSelectedRecordActId,
+    ipcSelectedRecordActPresent: selectedRecord?.actId != null,
+  });
+  recordProductionReceipt(productionReceipt, "context.opponent-scope", {
+    status: "ok",
+    profileScopeDigest: historyScopeDigest(_opponentUserCode ?? selectedRecord?.opponentUserCode),
+    cacheScopeDigest: historyScopeDigest(`${serviceLocale()}:${_opponentUserCode ?? selectedRecord?.opponentUserCode}:${replayId ?? selectedRecord?.replayId}`),
+    scopeSource: "selected-history-row",
+  });
   const activeOwnerProfileId = activeHistoryProfileId();
   const requestedOwnerProfileId = normalizeHistoryProfileId(
     historyOwnerProfileId,
@@ -4737,17 +6362,78 @@ async function fetchHistoryOpponentContext({
     return emptyOpponentProfileContext({ status: "empty" });
   }
   const ownerProfileId = activeOwnerProfileId ?? requestedOwnerProfileId;
+  let currentActState = currentVerifiedHistoryActState(ownerProfileId);
+  const selectorRaw = sanitizeHistoryActSelector(selectedActSelector);
+  let normalizedRequestedActId = normalizeHistoryActId(requestedActId);
+  if (
+    String(selectedActSelector ?? "latest").trim() === "latest" &&
+    currentActState.currentActVerified !== true
+  ) {
+    const actProbe = await fetchOfficialCharacterNameRegistry({
+      profileId: ownerProfileId,
+      requestedLocale: serviceLocale(),
+      generation: privateDataGeneration,
+      actId: null,
+      productionReceipt,
+    });
+    // A current/latest probe must never turn the official selector's Act 0
+    // historical option into a current Act. Act 0 remains valid only when
+    // the user explicitly selected it.
+    const probedAct = normalizePositiveActId(actProbe?.act);
+    if (actProbe?.status === "ready" && probedAct != null) {
+      currentActState = {
+        ...currentActState,
+        currentActId: probedAct,
+        currentActVerified: probedAct > 0,
+        currentActStatus: "ready",
+        currentActSource: "official_profile_play",
+        currentActReason: null,
+      };
+      normalizedRequestedActId = probedAct;
+      requestedActId = probedAct;
+    }
+  }
+  const selectorResolution = resolveHistoryActSelection({
+    selector: selectedActSelector,
+    currentActId: currentActState.currentActId,
+    currentActVerified: currentActState.currentActVerified,
+  });
+  if (
+    selectorResolution.ok === true &&
+    selectorResolution.selector === "latest" &&
+    normalizedRequestedActId == null
+  ) {
+    // The renderer's latest request may omit the numeric convenience value
+    // while the main process resolves the current official Act. Carry that
+    // verified result into the scoped history acquisition before comparing
+    // the selected replay or constructing the cache key.
+    requestedActId = selectorResolution.actId;
+    normalizedRequestedActId = selectorResolution.actId;
+  }
   const requestedReplayId = String(replayId ?? selectedRecord?.replayId ?? "").trim();
   const ownerStore = ownerProfileId ? loadMatchHistoryStore(ownerProfileId) : null;
   const resolvedRecord = ownerStore?.records?.find(
     (record) => record.replayId === requestedReplayId,
   ) ?? null;
   if (!resolvedRecord) {
+    finalizeProductionReceipt(productionReceipt, { status: "unavailable", reason: "HISTORY_SELECTED_REPLAY_SCOPE_MISSING" });
     return emptyOpponentProfileContext({
       profileId: ownerProfileId,
+      actId: requestedActId,
       status: "empty",
+      diagnostics: historyScopeDiagnostics({
+        currentActState,
+        selectorRaw,
+        resolvedActId: requestedActId,
+        ipcActId: requestedActId,
+        finalScopeReason: "HISTORY_SELECTED_REPLAY_SCOPE_MISSING",
+        productionReceipt,
+      }),
     });
   }
+  // Act selector mismatches belong to Act-scoped stats diagnostics only.
+  // They must not suppress the Act-independent PLAY comparison or round
+  // trend for the opponent selected in this history row.
   const normalizedProfileId = normalizeHistoryProfileId(
     resolvedRecord.opponentUserCode,
   );
@@ -4756,31 +6442,66 @@ async function fetchHistoryOpponentContext({
     : null;
   const resolvedCharacterDisplayName = resolvedRecord.opponentCharacterName;
   if (!normalizedProfileId || normalizedCharacterId == null) {
+    finalizeProductionReceipt(productionReceipt, { status: "unavailable", reason: "PROFILE_REFERENCE_EMPTY" });
     return emptyOpponentProfileContext({
       profileId: normalizedProfileId,
       characterId: normalizedCharacterId,
       characterDisplayName: resolvedCharacterDisplayName,
+      actId: requestedActId,
+      reason: "PROFILE_REFERENCE_EMPTY",
+      diagnostics: historyScopeDiagnostics({
+        currentActState,
+        selectorRaw,
+        resolvedActId: requestedActId,
+        ipcActId: requestedActId,
+        finalScopeReason: "PROFILE_REFERENCE_EMPTY",
+        productionReceipt,
+      }),
     });
   }
 
+  const recordForActScope = actSelectionSource === "explicit"
+    ? resolvedRecord
+    : { ...resolvedRecord, actId: null };
+  const initialTrendContext = buildScopedRoundTrendContext({
+    // Local history rows may carry a legacy/stale Act marker. For latest, the
+    // verified selector is authoritative; only an explicit historical choice
+    // is allowed to validate against the stored record Act.
+    selectedRecord: recordForActScope,
+    selectedActId: null,
+    actIndependent: true,
+  });
+  // Act scope is required only for the optional round-trend acquisition.
+  // Profile/PLAY comparison is based on the profile's historical data and
+  // must remain available when round scope is missing or mismatched.
+  const selectedActId = normalizeHistoryActId(requestedActId);
+  const scopedSelectedRecord = initialTrendContext.ok
+    ? initialTrendContext.selectedRecord
+    : { ...resolvedRecord, actId: selectedActId };
+  const initialRoundTrend = initialTrendContext.ok
+    ? null
+    : initialTrendContext.roundTrend;
+  const trendScope = {
+    beforeTimestamp: Number(scopedSelectedRecord?.playedAt ?? scopedSelectedRecord?.uploadedAt) || null,
+    limit: 20,
+    matchTypes: ROUND_TREND_MATCH_TYPES,
+    actId: null,
+  };
   const generation = privateDataGeneration;
   const requestedLocale = serviceLocale();
-  // The current Act is a separate cache scope. A future historical-Act view
-  // can add another explicit Act key without changing this request path.
-  const cacheKey = `${requestedLocale}:${ownerProfileId}:${requestedReplayId}:${normalizedProfileId}:${normalizedCharacterId}`;
+  const selectedCutoff = Number(resolvedRecord?.playedAt ?? resolvedRecord?.uploadedAt);
+  const cacheKey = `${requestedLocale}:${ownerProfileId}:${selectedActId ?? "unknown"}:${Number.isFinite(selectedCutoff) && selectedCutoff > 0 ? selectedCutoff : "unknown"}:${requestedReplayId}:${normalizedProfileId}:${normalizedCharacterId}`;
   if (forceRefresh === true) {
-    // A new local match can make the selected opponent's official history
-    // stale. The renderer only sends this flag after detecting a genuinely
-    // new replay for the displayed opponent, so one refresh can bypass the
-    // normal five-minute cache without turning the card into a live poll.
+    // A new local match can also make the rendered profile context stale. The
+    // renderer only sends this flag after detecting a genuinely new replay
+    // for the displayed opponent, so one refresh can bypass the normal
+    // five-minute profile cache without turning the card into a live poll.
     opponentProfileContextCache.delete(cacheKey);
-    opponentOfficialHistoryCache.delete(
-      opponentOfficialHistoryCacheKey(normalizedProfileId, requestedLocale),
-    );
   }
   const now = Date.now();
   const cached = opponentProfileContextCache.get(cacheKey);
   if (
+    !qaReceiptProbe &&
     cached &&
     Number.isFinite(Number(cached.fetchedAt)) &&
     now - Number(cached.fetchedAt) < OPPONENT_PROFILE_CONTEXT_COOLDOWN_MS
@@ -4816,14 +6537,51 @@ async function fetchHistoryOpponentContext({
         // definitive insufficiency. Transient network/auth failures are not
         // persisted, so only rows without any snapshot need battle-log I/O.
         const hasPersistedSnapshot = Object.keys(storedSnapshots ?? {}).length > 0;
-        const officialHistory = hasPersistedSnapshot
-          ? null
-          : await fetchOpponentOfficialHistory({
-              profileId: normalizedProfileId,
-              generation,
+        // Round trend is always acquired from an explicitly Act-scoped
+        // battle-log set. A persisted insight snapshot is not a substitute:
+        // it does not prove the selected match's historical Act.
+        let officialHistory = null;
+        let ownerHistory = null;
+        let historyAcquireError = null;
+        if (initialTrendContext.ok) {
+          try {
+            ({ officialHistory, ownerHistory } = await acquireScopedOfficialHistories({
+              cache: opponentOfficialHistoryCache,
+              ownerProfileId,
+              opponentProfileId: normalizedProfileId,
               requestedLocale,
-              selectedRecord: resolvedRecord,
+              selectedActId: null,
+              requiredReplayId: requestedReplayId,
+              selectedRecord: scopedSelectedRecord,
+              beforeTimestamp: trendScope.beforeTimestamp,
+              actIndependent: true,
+              requestScopeProof: actSelectionSource === "latest" &&
+                currentActState.currentActVerified === true &&
+              currentActState.currentActId === selectedActId
+                ? "verified-current-act"
+                : null,
+              forceRefresh,
+              cacheKeyForProfile: opponentOfficialHistoryCacheKey,
+              acquireOfficialHistory: (params) => fetchOpponentOfficialHistory(params),
+              generation,
+              assertGeneration: assertPrivateDataGeneration,
+              productionReceipt,
+            }));
+          } catch (error) {
+            historyAcquireError = error;
+            recordProductionReceipt(productionReceipt, "context.round-acquire", {
+              status: "unavailable",
+              requestedAct: selectedActId,
+              reason: error?.message === "ACT_SCOPE_MISSING"
+                ? "ACT_SCOPE_MISSING"
+                : error?.message === "HISTORY_ACT_METADATA_MISSING_OR_MISMATCH"
+                  ? "HISTORY_ACT_METADATA_MISSING_OR_MISMATCH"
+                  : "HISTORY_SCOPE_INCOMPLETE",
             });
+          }
+        } else {
+          historyAcquireError = new Error(initialTrendContext.reason ?? "ROUND_SCOPE_UNAVAILABLE");
+        }
         const data = officialHistory?.data ?? await fetchServiceJson(
           `profile/${encodeURIComponent(normalizedProfileId)}.json`,
           {},
@@ -4833,6 +6591,7 @@ async function fetchHistoryOpponentContext({
           requestedLocale,
         );
         const opponentRecords = officialHistory?.records ?? [];
+        const ownerRecords = ownerHistory?.records ?? [];
         if (!data) throw new Error("PROFILE_REFERENCE_EMPTY");
         assertPrivateDataGeneration(generation);
         if (requestedLocale !== serviceLocale()) throw new Error("HISTORY_LOCALE_CHANGED");
@@ -4842,12 +6601,18 @@ async function fetchHistoryOpponentContext({
           characterDisplayName: resolvedCharacterDisplayName,
           retrievedAt,
         });
+        const scopedAct = selectedActId == null
+          ? null
+          : {
+              id: String(selectedActId),
+              label: `ACT ${selectedActId}`,
+            };
         let peakProfileData = null;
-        if (baseContext.act?.id != null) {
+        if (selectedActId != null) {
           try {
             peakProfileData = await fetchOpponentPeakProfile({
               profileId: normalizedProfileId,
-              actId: baseContext.act.id,
+              actId: selectedActId,
               generation,
               requestedLocale,
             });
@@ -4866,14 +6631,30 @@ async function fetchHistoryOpponentContext({
               characterDisplayName: resolvedCharacterDisplayName,
               retrievedAt,
               peakProfileData,
-              peakActId: baseContext.act.id,
+              peakActId: selectedActId,
             })
           : baseContext;
+        let playComparison;
+        try {
+          playComparison = await fetchPlayComparison({
+            selfProfileId: ownerProfileId,
+            opponentProfileId: normalizedProfileId,
+            generation,
+            requestedLocale,
+          });
+        } catch {
+          // The PLAY page is an optional companion source. A profile card
+          // failure must not erase the existing six-field context; the
+          // comparison renderer will show an unavailable state instead.
+          playComparison = comparePlayProfiles(null, null, {
+            verifiedFieldContract: PLAY_APPROVED_FIELD_CONTRACT,
+          });
+        }
         let snapshots = storedSnapshots;
-        if (!hasPersistedSnapshot) {
+        if (!hasPersistedSnapshot && officialHistory?.complete === true) {
           snapshots = buildHistoricalOpponentSnapshots({
             records: opponentRecords,
-            selectedRecord: resolvedRecord,
+            selectedRecord: scopedSelectedRecord,
             historyOwnerProfileId: ownerProfileId,
             opponentUserCode: normalizedProfileId,
             characterId: normalizedCharacterId,
@@ -4888,9 +6669,127 @@ async function fetchHistoryOpponentContext({
           );
         }
         const opponentInsight = opponentInsightFromSnapshots(snapshots);
+        const ownerHistoryChanged = ownerHistory?.complete === true
+          ? mergeMatchHistory(ownerRecords, ownerProfileId, { notify: false })
+          : false;
+        const trendContext = initialTrendContext.ok && !historyAcquireError
+          ? buildScopedRoundTrendContext({
+              selectedRecord: scopedSelectedRecord,
+              selectedActId: null,
+              actIndependent: true,
+              ownerRecords,
+              opponentRecords,
+              ownerComplete: ownerHistory?.complete === true,
+              opponentComplete: officialHistory?.complete === true,
+            })
+          : null;
+        const roundTrend = trendContext?.ok
+          ? trendContext.roundTrend
+          : buildRoundTrendFailure(
+              initialRoundTrend?.scope ?? trendScope,
+              {
+                status: "unavailable",
+                reason: historyAcquireError?.message === "HISTORY_ACT_METADATA_MISSING_OR_MISMATCH"
+                  ? "ACT_SCOPE_MISSING"
+                  : historyAcquireError?.message ?? "ACT_SCOPE_MISSING",
+              },
+            );
+        const roundStatus = roundTrend?.status === "ready"
+          ? "ready"
+          : roundTrend?.status === "insufficient_sample"
+            ? "insufficient_sample"
+            : roundTrend?.status === "unavailable" || roundTrend?.status === "error"
+              ? "unavailable"
+              : "partial";
+        recordProductionReceipt(productionReceipt, "context.round-summary", {
+          status: roundStatus,
+          targetMatches: Number(roundTrend?.matchedMatches) || 0,
+          targetRounds: (Number(roundTrend?.self?.wonRounds) || 0) + (Number(roundTrend?.opponent?.wonRounds) || 0),
+          candidateCount: Number(roundTrend?.candidateCount) || 0,
+          selectedMatches: Number(roundTrend?.matchCount) || 0,
+          cutoffExcluded: Number(roundTrend?.futureExcludedCount) || 0,
+          futureExcluded: Number(roundTrend?.futureExcludedCount) || 0,
+          roomExcluded: Number(roundTrend?.roomExcludedCount) || 0,
+          duplicateExact: Number(roundTrend?.duplicateExactCount) || 0,
+          duplicateConflict: Number(roundTrend?.duplicateConflictCount) || 0,
+          roundMissing: Number(roundTrend?.missingRoundMatches) || 0,
+          parseMissing: Number(roundTrend?.parseMissingCount) || 0,
+          limitExcluded: Number(roundTrend?.limitExcludedCount) || 0,
+          selfCandidateCount: Number(roundTrend?.diagnostics?.self?.candidateCount) || 0,
+          selfSelectedMatches: Number(roundTrend?.diagnostics?.self?.selectedMatches) || 0,
+          selfCutoffExcluded: Number(roundTrend?.diagnostics?.self?.futureExcludedCount) || 0,
+          selfRoomExcluded: Number(roundTrend?.diagnostics?.self?.roomExcludedCount) || 0,
+          selfDuplicateExact: Number(roundTrend?.diagnostics?.self?.duplicateExactCount) || 0,
+          selfDuplicateConflict: Number(roundTrend?.diagnostics?.self?.duplicateConflictCount) || 0,
+          selfRoundMissing: Number(roundTrend?.diagnostics?.self?.missingRoundMatches) || 0,
+          selfParseMissing: Number(roundTrend?.diagnostics?.self?.parseMissingCount) || 0,
+          selfLimitExcluded: Number(roundTrend?.diagnostics?.self?.limitExcludedCount) || 0,
+          opponentCandidateCount: Number(roundTrend?.diagnostics?.opponent?.candidateCount) || 0,
+          opponentSelectedMatches: Number(roundTrend?.diagnostics?.opponent?.selectedMatches) || 0,
+          opponentCutoffExcluded: Number(roundTrend?.diagnostics?.opponent?.futureExcludedCount) || 0,
+          opponentRoomExcluded: Number(roundTrend?.diagnostics?.opponent?.roomExcludedCount) || 0,
+          opponentDuplicateExact: Number(roundTrend?.diagnostics?.opponent?.duplicateExactCount) || 0,
+          opponentDuplicateConflict: Number(roundTrend?.diagnostics?.opponent?.duplicateConflictCount) || 0,
+          opponentRoundMissing: Number(roundTrend?.diagnostics?.opponent?.missingRoundMatches) || 0,
+          opponentParseMissing: Number(roundTrend?.diagnostics?.opponent?.parseMissingCount) || 0,
+          opponentLimitExcluded: Number(roundTrend?.diagnostics?.opponent?.limitExcludedCount) || 0,
+          cutoffTimestamp: Number(roundTrend?.scope?.cutoff) || 0,
+          selfStopReason: ownerHistory?.stopReason ?? null,
+          opponentStopReason: officialHistory?.stopReason ?? null,
+          selfCandidateMinTimestamp: Number(roundTrend?.diagnostics?.self?.candidateTimestampMin) || 0,
+          selfCandidateMaxTimestamp: Number(roundTrend?.diagnostics?.self?.candidateTimestampMax) || 0,
+          selfBeforeCutoff: Number(roundTrend?.diagnostics?.self?.beforeCutoffCount) || 0,
+          selfAfterCutoff: Number(roundTrend?.diagnostics?.self?.futureExcludedCount) || 0,
+          opponentCandidateMinTimestamp: Number(roundTrend?.diagnostics?.opponent?.candidateTimestampMin) || 0,
+          opponentCandidateMaxTimestamp: Number(roundTrend?.diagnostics?.opponent?.candidateTimestampMax) || 0,
+          opponentBeforeCutoff: Number(roundTrend?.diagnostics?.opponent?.beforeCutoffCount) || 0,
+          opponentAfterCutoff: Number(roundTrend?.diagnostics?.opponent?.futureExcludedCount) || 0,
+          requiredPayload: roundStatus === "ready"
+            ? "owner-opponent-round-trend"
+            : roundStatus === "insufficient_sample"
+              ? "owner-opponent-round-trend-insufficient-sample"
+              : "round-trend-incomplete",
+          reason: roundStatus === "ready" ? undefined : roundTrend?.reason,
+        });
+        finalizeProductionReceipt(productionReceipt, {
+          status: roundStatus,
+          reason: roundStatus === "ready"
+            ? "OWNER_OPPONENT_ROUNDS_VERIFIED"
+            : roundStatus === "insufficient_sample"
+              ? "OWNER_OR_OPPONENT_ROUNDS_INSUFFICIENT_SAMPLE"
+              : "OWNER_OPPONENT_ROUNDS_INCOMPLETE",
+        });
         const enrichedContext = {
           ...context,
+          // The profile PLAY payload is a current-profile companion and may
+          // expose a different or legacy Act marker. The selected history
+          // scope was verified above and is authoritative for this card.
+          act: scopedAct,
+          locale: requestedLocale,
+          characterNamesByLocale: {
+            [requestedLocale]: {
+              ...(Number(context?.targetCharacter?.characterId) > 0 && String(context?.targetCharacter?.characterDisplayName ?? "").trim()
+                ? { [Number(context.targetCharacter.characterId)]: String(context.targetCharacter.characterDisplayName).trim() }
+                : {}),
+              ...(Number(context?.otherCharacter?.characterId) > 0 && String(context?.otherCharacter?.characterDisplayName ?? "").trim()
+                ? { [Number(context.otherCharacter.characterId)]: String(context.otherCharacter.characterDisplayName).trim() }
+                : {}),
+            },
+          },
           opponentInsight,
+          playComparison,
+          roundTrend,
+          diagnostics: historyScopeDiagnostics({
+            currentActState,
+            selectorRaw,
+            resolvedActId: requestedActId,
+            ipcActId: requestedActId,
+            requestActId: selectedActId,
+            ownerHistory,
+            opponentHistory: officialHistory,
+            finalScopeReason: roundStatus === "ready" ? null : roundTrend?.reason,
+            productionReceipt,
+          }),
         };
         setBoundedCacheEntry(
           opponentProfileContextCache,
@@ -4898,16 +6797,51 @@ async function fetchHistoryOpponentContext({
           { fetchedAt: retrievedAt, context: enrichedContext },
           OPPONENT_PROFILE_CONTEXT_MAX_CACHE_ENTRIES,
         );
+        if (ownerHistoryChanged) sendHistoryState();
         return enrichedContext;
       } catch (error) {
         if (error?.message === "PRIVATE_DATA_CLEARED") throw error;
         // A profile-reference failure must never replace the already-rendered
         // match history. The renderer receives a card-local error state.
+        const failureReason = [
+          "ACT_SCOPE_MISSING",
+          "HISTORY_ACT_METADATA_MISSING_OR_MISMATCH",
+          "HISTORY_SELECTED_REPLAY_SCOPE_MISSING",
+        ].includes(error?.message)
+          ? "ACT_SCOPE_MISSING"
+          : ["HISTORY_PAGE_SET_INCOMPLETE", "HISTORY_REPLAY_DUPLICATE_CONFLICT"].includes(error?.message)
+            ? "PARTIAL"
+            : "RETRIEVAL_FAILED";
         const context = emptyOpponentProfileContext({
           profileId: normalizedProfileId,
           characterId: normalizedCharacterId,
           characterDisplayName: resolvedCharacterDisplayName,
-          status: "error",
+          actId: selectedActId,
+          status: failureReason === "RETRIEVAL_FAILED" ? "error" : "partial",
+          reason: failureReason,
+          roundTrend: buildRoundTrendFailure(trendScope, {
+            status: failureReason === "RETRIEVAL_FAILED" ? "error" : "partial",
+            reason: failureReason,
+          }),
+          diagnostics: historyScopeDiagnostics({
+            currentActState,
+            selectorRaw,
+            resolvedActId: requestedActId,
+            ipcActId: requestedActId,
+            requestActId: selectedActId,
+            ownerHistory: opponentOfficialHistoryCache.get(
+              opponentOfficialHistoryCacheKey(ownerProfileId, requestedLocale, selectedActId),
+            )?.history ?? null,
+            opponentHistory: opponentOfficialHistoryCache.get(
+              opponentOfficialHistoryCacheKey(normalizedProfileId, requestedLocale, selectedActId),
+            )?.history ?? null,
+            finalScopeReason: failureReason,
+            productionReceipt,
+          }),
+        });
+        finalizeProductionReceipt(productionReceipt, {
+          status: failureReason === "RETRIEVAL_FAILED" ? "unavailable" : "partial",
+          reason: failureReason,
         });
         // Network/auth failures are transient. Do not persist/cache this
         // card-local error as a historical insufficiency; the next row click
@@ -4969,6 +6903,24 @@ async function refreshTrackedPlayerForLocale() {
           mainWindow.webContents.send("auth:player", authenticatedPlayer);
         }
       }
+      const backfillProfileIds = new Set(
+        [nextTrackerPlayer, nextHistoryPlayer, nextAuthenticatedPlayer]
+          .map((player) => normalizeHistoryProfileId(player?.profileId))
+          .filter(Boolean),
+      );
+      for (const profileId of backfillProfileIds) {
+        try {
+          await backfillHistoryCharacterLabelsForLocale(
+            profileId,
+            requestedLocale,
+            privateDataGeneration,
+          );
+        } catch {
+          // Locale refresh remains successful when optional label backfill is
+          // unavailable; existing records stay intact and render an
+          // unavailable marker until the selected-locale backfill completes.
+        }
+      }
       sendHistoryState();
       sendTrackerState();
     } catch {
@@ -4989,26 +6941,71 @@ async function fetchRankedReplaysPage(
   priority = "live",
   requestScope = null,
   localeOverride = null,
+  requestedActId = null,
+  productionReceipt = null,
+  productionStage = "history.battlelog",
 ) {
   const requestedLocale = LOCALE_KEYS.has(String(localeOverride))
     ? String(localeOverride)
     : serviceLocale();
   const data = await fetchServiceJson(
     `profile/${encodeURIComponent(profileId)}/battlelog.json`,
-    { page },
+    {
+      page,
+      ...(Number.isInteger(Number(requestedActId)) && Number(requestedActId) >= 0
+        ? { season_id: Number(requestedActId) }
+        : {}),
+    },
     true,
     requestScope,
     priority,
     requestedLocale,
+    productionReceipt,
+    productionStage,
   );
   const rawReplays = Array.isArray(data?.pageProps?.replay_list)
     ? data.pageProps.replay_list
     : [];
+  const hasReplayList = Array.isArray(data?.pageProps?.replay_list);
+  const pageProps = data?.pageProps ?? {};
+  const totalPages = Number(pageProps.total_page);
+  const responsePageValue = pageProps.page ?? pageProps.current_page;
+  const responsePage = Number(responsePageValue);
+  const responseActId = readHistoryActProvenance(pageProps, [
+    "season_id",
+    "seasonId",
+    "act_id",
+    "actId",
+  ]).actId;
+  const requestedAct = normalizeHistoryActId(requestedActId);
+  const normalizedReplays = rawReplays
+    .map((replay) => normalizeReplay(replay, profileId, requestedLocale))
+    .filter(Boolean);
+  const recordActIds = normalizedRecordActIds(normalizedReplays);
+  const actScopeVerified = requestedAct != null &&
+    (responseActId === requestedAct || recordActIds.length === 1 && recordActIds[0] === requestedAct) &&
+    (responseActId == null || responseActId === requestedAct) &&
+    recordActIds.every((value) => value === requestedAct);
+  const stamped = actScopeVerified
+    ? stampScopedHistoryRecords(normalizedReplays, requestedAct).records
+    : normalizedReplays;
   return {
     rawCount: rawReplays.length,
-    replays: rawReplays
-    .map((replay) => normalizeReplay(replay, profileId))
-    .filter(Boolean),
+    normalizedCount: normalizedReplays.length,
+    hasReplayList,
+    totalPages: Number.isInteger(totalPages) && totalPages > 0 ? totalPages : null,
+    responsePage: Number.isInteger(responsePage) && responsePage > 0 ? responsePage : null,
+    requestedActId: requestedAct,
+    responseActId,
+    recordActId: recordActIds.length === 1 ? recordActIds[0] : null,
+    recordActIds,
+    actScopeVerified,
+    actScopeReason: requestedAct == null
+      ? "ACT_SCOPE_MISSING"
+      : actScopeVerified
+        ? null
+        : "HISTORY_ACT_METADATA_MISSING_OR_MISMATCH",
+    replays: stamped,
   };
 }
 
@@ -5020,6 +7017,7 @@ async function fetchMatchHistoryPages(
   profileId,
   onPage = null,
   localeOverride = null,
+  shareKey = null,
 ) {
   return fetchHistoryPagesConcurrently(
     (page) => fetchRankedReplaysPage(
@@ -5034,17 +7032,28 @@ async function fetchMatchHistoryPages(
       pageSize: MATCH_HISTORY_PAGE_SIZE,
       concurrency: MATCH_HISTORY_FETCH_CONCURRENCY,
       onPage,
+      shareKey,
     },
   );
 }
 
 async function fetchLocalMatchHistory() {
   ensureUpdateAllowed();
-  if (matchHistoryFetchInFlight) return matchHistoryFetchInFlight;
+  const requestedProfileId = activeHistoryProfileId();
+  if (matchHistoryFetchInFlight) {
+    if (
+      matchHistoryFetchProfileId === requestedProfileId &&
+      matchHistoryFetchScopeAtStart === matchHistoryFetchScopeToken
+    ) return matchHistoryFetchInFlight;
+    const previousRequest = matchHistoryFetchInFlight;
+    await previousRequest.catch(() => {});
+    return fetchLocalMatchHistory();
+  }
   const generation = privateDataGeneration;
   const requestedLocale = serviceLocale();
   const now = Date.now();
-  const profileId = activeHistoryProfileId();
+  const profileId = requestedProfileId;
+  const fetchScopeToken = matchHistoryFetchScopeToken;
   const store = loadMatchHistoryStore(profileId);
   const retryAfterMs = store.lastFetchedAt
     ? store.lastFetchedAt + MATCH_HISTORY_FETCH_COOLDOWN_MS - now
@@ -5066,14 +7075,14 @@ async function fetchLocalMatchHistory() {
     let completedReplays = [];
     let importMerged = false;
     try {
-      let player =
-        historyViewPlayer ?? trackerState.player ?? (await checkAuthentication()).player;
+      let player = historyViewPlayer ?? authenticatedPlayer ?? (await checkAuthentication()).player;
       assertPrivateDataGeneration(generation);
       if (!player?.profileId) throw new Error("SERVICE_SELF_NOT_FOUND");
+      assertHistoryFetchScope(player.profileId, fetchScopeToken);
       summaryProfileId = player.profileId;
-      // Manual imports start all ten battle-log page requests together. Live
-      // tracking continues to use one page per poll, so enabling history does
-      // not multiply polling traffic.
+      // Manual imports use the bounded history page pool. Live tracking
+      // continues to use one page per poll, so enabling history does not
+      // multiply polling traffic.
       const existing = loadMatchHistoryStore(player.profileId);
       const previousReplayIds = new Set(
         existing.records.map((record) => record.replayId),
@@ -5091,6 +7100,7 @@ async function fetchLocalMatchHistory() {
         player.profileId,
         async ({ rawCount, completedPages: completedPageCount, replays }) => {
           assertPrivateDataGeneration(generation);
+          assertHistoryFetchScope(player.profileId, fetchScopeToken);
           if (serviceLocale() !== requestedLocale) {
             throw new Error("HISTORY_LOCALE_CHANGED");
           }
@@ -5119,11 +7129,13 @@ async function fetchLocalMatchHistory() {
           sendHistoryFetchProgress();
         },
         requestedLocale,
+        `history:${normalizeHistoryProfileId(player.profileId)}:${requestedLocale}:${generation}:${fetchScopeToken}`,
       );
       const importReplays = Array.isArray(orderedReplays) && orderedReplays.length
         ? orderedReplays
         : completedReplays;
       assertPrivateDataGeneration(generation);
+      assertHistoryFetchScope(player.profileId, fetchScopeToken);
       if (serviceLocale() !== requestedLocale) {
         throw new Error("HISTORY_LOCALE_CHANGED");
       }
@@ -5134,6 +7146,7 @@ async function fetchLocalMatchHistory() {
           priority: "live",
         });
         assertPrivateDataGeneration(generation);
+        assertHistoryFetchScope(player.profileId, fetchScopeToken);
         if (!historyProfileCoversLatestRecord(nextPlayer, [...existing.records, ...importReplays])) {
           throw new Error("PROFILE_REFRESH_NOT_CONFIRMED");
         }
@@ -5141,6 +7154,7 @@ async function fetchLocalMatchHistory() {
       }
       // Treat the profile refresh as part of committing a new-history batch.
       // Until it succeeds, neither the rows nor a complete status are public.
+      assertHistoryFetchScope(player.profileId, fetchScopeToken);
       mergeMatchHistory(importReplays, player.profileId, { persist: false, notify: false });
       importMerged = true;
       assertPrivateDataGeneration(generation);
@@ -5189,6 +7203,7 @@ async function fetchLocalMatchHistory() {
       // clearing is the one boundary where no partial write is allowed.
       if (
         !privateDataClearing &&
+        historyFetchScopeIsCurrent(summaryProfileId, fetchScopeToken) &&
         completedPages > 0 &&
         error?.message !== "PRIVATE_DATA_CLEARED" &&
         summaryProfileId
@@ -5207,7 +7222,7 @@ async function fetchLocalMatchHistory() {
       }
       if (
         !fetchTerminalStateSent &&
-        !["PRIVATE_DATA_CLEARED", "HISTORY_LOCALE_CHANGED"].includes(error?.message) &&
+        !["PRIVATE_DATA_CLEARED", "HISTORY_LOCALE_CHANGED", "HISTORY_TARGET_CHANGED"].includes(error?.message) &&
         summaryProfileId
       ) {
         matchHistoryFetchSummary = {
@@ -5225,13 +7240,25 @@ async function fetchLocalMatchHistory() {
     }
   })();
   matchHistoryFetchInFlight = request;
+  matchHistoryFetchProfileId = profileId;
+  matchHistoryFetchLocale = requestedLocale;
+  matchHistoryFetchScopeAtStart = fetchScopeToken;
   try {
     return await request;
   } finally {
     if (matchHistoryFetchInFlight === request) {
       matchHistoryFetchInFlight = null;
+      matchHistoryFetchProfileId = null;
+      matchHistoryFetchLocale = null;
+      matchHistoryFetchScopeAtStart = null;
       matchHistoryFetchProgress = null;
-      if (publishHistoryState) sendHistoryState();
+      // A superseded fetch may finish after the selected target has already
+      // changed. Its finally block must not publish the new target's empty
+      // store over a committed result or clear the progress of the replacement
+      // request. The replacement request publishes its own terminal state.
+      if (publishHistoryState && historyFetchScopeIsCurrent(profileId, fetchScopeToken)) {
+        sendHistoryState();
+      }
     }
   }
 }
@@ -5239,8 +7266,13 @@ async function fetchLocalMatchHistory() {
 async function selectHistoryProfile(userCode) {
   ensureUpdateAllowed();
   const generation = privateDataGeneration;
+  invalidateVerifiedHistoryCurrentAct();
   const normalizedCode = normalizeHistoryProfileId(userCode);
   if (!normalizedCode) throw new Error("INVALID_USER_CODE");
+  matchHistoryFetchScopeToken += 1;
+  const selectionScopeToken = matchHistoryFetchScopeToken;
+  matchHistoryFetchProgress = null;
+  matchHistoryFetchSummary = null;
   const ownPlayer =
     authenticatedPlayer ?? trackerState.player ?? (await checkAuthentication()).player;
   assertPrivateDataGeneration(generation);
@@ -5273,16 +7305,43 @@ async function selectHistoryProfile(userCode) {
   stopHistoryViewPolling();
   matchHistoryFetchSummary = null;
   historyViewPlayer = nextHistoryViewPlayer;
-  if (historyViewPlayer) {
-    const selectedProfileId = normalizeHistoryProfileId(historyViewPlayer.profileId);
+  const selectedProfileId = normalizeHistoryProfileId(
+    historyViewPlayer?.profileId ?? ownPlayer.profileId,
+  );
+  let localeBackfillProfileId = null;
+  let localeBackfillLocale = null;
+  if (selectedProfileId) {
     const selectedStore = loadMatchHistoryStore(selectedProfileId);
     if (trimMatchHistoryStore(selectedProfileId, selectedStore)) {
       bumpHistoryRevision(selectedProfileId);
       persistMatchHistoryStore(selectedProfileId, selectedStore);
     }
-    startHistoryViewPolling();
+    // Locale label backfill can require the full bounded history page pool.
+    // Do not make the target-selection response wait for that optional
+    // enrichment; publish the local history first and refresh it when the
+    // same target/locale is still active.
+    localeBackfillProfileId = selectedProfileId;
+    localeBackfillLocale = serviceLocale();
+    if (historyViewPlayer) startHistoryViewPolling();
   }
   sendHistoryState();
+  if (localeBackfillProfileId && localeBackfillLocale) {
+    void scheduleHistoryBackfill({
+      backfill: () => backfillHistoryCharacterLabelsForLocale(
+        localeBackfillProfileId,
+        localeBackfillLocale,
+        generation,
+        selectionScopeToken,
+      ),
+      isCurrent: () => (
+        generation === privateDataGeneration &&
+        activeHistoryProfileId() === localeBackfillProfileId &&
+        serviceLocale() === localeBackfillLocale &&
+        matchHistoryFetchScopeToken === selectionScopeToken
+      ),
+      publish: sendHistoryState,
+    });
+  }
   sendTrackerState();
   return {
     player: historyViewPlayer ?? ownPlayer,
@@ -5292,8 +7351,11 @@ async function selectHistoryProfile(userCode) {
 
 async function clearHistoryProfileSelection() {
   ensureUpdateAllowed();
-  stopHistoryViewPolling();
+  invalidateVerifiedHistoryCurrentAct();
+  matchHistoryFetchScopeToken += 1;
+  matchHistoryFetchProgress = null;
   matchHistoryFetchSummary = null;
+  stopHistoryViewPolling();
   historyViewPlayer = null;
   sendHistoryState();
   sendTrackerState();
@@ -5450,7 +7512,7 @@ async function runScheduledPoll(sessionId) {
     if (shouldAutoStopForInactivity(trackerState.lastNewMatchAt)) {
       autoStopTracking(
         "idle",
-        "新しい対戦が60分間なかったため自動停止しました",
+        "60分間対戦がなかったため、自動停止しました",
       );
       return;
     }
@@ -5480,7 +7542,7 @@ async function runScheduledPoll(sessionId) {
     if (trackerState.consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
       autoStopTracking(
         "network",
-        "通信エラーが続いたため自動停止しました",
+        "通信エラーが続いたため、自動停止しました",
       );
       return;
     }
@@ -5712,6 +7774,38 @@ function registerIpcHandlers() {
     ),
   );
   ipcMain.handle(
+    "history:opponent-character-stats",
+    resultHandler((payload = {}) => {
+      if (qaDiskHistoryHarness) {
+        return {
+          status: "unavailable",
+          source: "qa-disk-history",
+          profileId: qaDiskHistoryHarness.profileId,
+          locale: serviceLocale(),
+          act: qaDiskHistoryHarness.actId,
+          rows: [],
+          reason: "QA_DISK_HISTORY_STATS_NOT_LOADED",
+          retryable: false,
+          selectedOwnCharacterId: payload.selectedOwnCharacterId ?? null,
+        };
+      }
+      return fetchOfficialOpponentCharacterStats(payload);
+    }),
+  );
+  ipcMain.handle(
+    "history:character-names",
+    resultHandler((payload = {}) => {
+      const qaResult = qaDiskHistoryCharacterNames(payload);
+      if (qaResult) return qaResult;
+      return fetchOfficialCharacterNameRegistry({
+        profileId: payload.profileId,
+        requestedLocale: payload.locale,
+        actId: payload.actId,
+        generation: privateDataGeneration,
+      });
+    }),
+  );
+  ipcMain.handle(
     "history:fetch",
     resultHandler(() => fetchLocalMatchHistory()),
   );
@@ -5916,7 +8010,7 @@ function startOverlayServer() {
   overlayServer.listen(OVERLAY_PORT, OVERLAY_HOST);
 }
 
-app.whenReady().then(() => {
+void app.whenReady().then(() => {
   if (!hasSingleInstanceLock) return;
   if (initialLanguageSelectionRequired) {
     displaySettings.locale = suggestedInitialLocale(app.getLocale());
@@ -5967,6 +8061,7 @@ app.whenReady().then(() => {
   startOverlayServer();
   createTray();
   createSplashWindow();
+  initializeQaDiskHistoryHarness();
   createMainWindow();
   configureLaunchAtLogin();
   configureGameDetection();
@@ -5981,6 +8076,11 @@ app.whenReady().then(() => {
       updater.check().catch(() => {});
     }, 750);
   }
+}).catch(() => {
+  if (qaDiskHistoryHarness) {
+    process.stderr.write("QA_DISK_HISTORY_STARTUP_FAILED\n");
+  }
+  app.quit();
 });
 
 app.on("second-instance", () => {
@@ -6034,7 +8134,7 @@ app.on("before-quit", (event) => {
   }
   if (!persistenceReadyForQuit) {
     event.preventDefault();
-    persistedDataWriter
+    return persistedDataWriter
       .flushAll()
       .catch(() => {
         // A final save failure must not trap the user in the application.

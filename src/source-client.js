@@ -3,7 +3,12 @@
 const SERVICE_ORIGIN = "https://www.streetfighter.com";
 const SERVICE_HOME = `${SERVICE_ORIGIN}/6/buckler/ja-jp`;
 const MATCH_TYPES = ["ranked", "battleHub", "casual"];
+const LOCALE_KEYS = new Set([
+  "ja-jp", "en", "de", "es-es", "es-us", "fr", "it", "ko-kr",
+  "zh-hans", "zh-hant", "pt-br", "pl", "ru", "ar",
+]);
 const { collectProfileContextCandidates } = require("./opponent-profile-context");
+const { readHistoryActProvenance } = require("./history-act-provenance");
 
 function classifyBattleType(type, name = "") {
   const normalizedName = String(name).toLowerCase();
@@ -16,6 +21,85 @@ function classifyBattleType(type, name = "") {
   if (numericType === 2) return "casual";
   if (numericType === 3) return "battleHub";
   return null;
+}
+
+// Keep the battle-log round pattern opaque until the official meaning is
+// verified from a successful response. Only bounded integer values are
+// retained; malformed values are discarded and missing arrays stay null.
+const MAX_ROUND_RESULT_CODE = 255;
+const MAX_KNOWN_ROUND_RESULT_CODE = 8;
+
+function sanitizeRoundResultArray(value) {
+  if (!Array.isArray(value)) return null;
+  return value
+    .filter(
+      (entry) =>
+        typeof entry === "number" &&
+        Number.isInteger(entry) &&
+        entry >= 0 &&
+        entry <= MAX_ROUND_RESULT_CODE,
+    );
+}
+
+function summarizeRoundResults(value) {
+  if (!Array.isArray(value)) return null;
+  const nested = value.some((entry) => Array.isArray(entry));
+  const battles = nested
+    ? value.map((entry) => sanitizeRoundResultArray(entry)).filter((entry) => entry != null)
+    : null;
+  const values = nested ? battles.flat() : sanitizeRoundResultArray(value);
+  if (values == null) return null;
+  const counts = {};
+  for (const entry of values) {
+    const key = String(entry);
+    counts[key] = (counts[key] ?? 0) + 1;
+  }
+  return {
+    values,
+    count: values.length,
+    counts,
+    ...(nested ? { battles: battles.map((rounds) => ({
+      values: rounds,
+      count: rounds.length,
+      counts: rounds.reduce((result, entry) => {
+        const key = String(entry);
+        result[key] = (result[key] ?? 0) + 1;
+        return result;
+      }, {}),
+    })) } : {}),
+  };
+}
+
+function normalizeStoredRoundResults(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const normalizeSide = (side) => {
+    if (Array.isArray(side)) return summarizeRoundResults(side);
+    if (!side || typeof side !== "object") return null;
+    if (Array.isArray(side.battles)) return summarizeRoundResults(side.battles.map((battle) => battle?.values ?? battle));
+    return summarizeRoundResults(side.values);
+  };
+  const self = normalizeSide(value.self);
+  const opponent = normalizeSide(value.opponent);
+  return self || opponent ? { self, opponent } : null;
+}
+
+function assessRoundResults(value) {
+  if (!Array.isArray(value)) return { valid: false, wins: null };
+  const values = value.some((entry) => Array.isArray(entry))
+    ? value.flatMap((entry) => (Array.isArray(entry) ? entry : []))
+    : value;
+  if (values.length === 0) return { valid: false, wins: null };
+  const valid = values.every(
+    (entry) =>
+      typeof entry === "number" &&
+      Number.isInteger(entry) &&
+      entry >= 0 &&
+      entry <= MAX_KNOWN_ROUND_RESULT_CODE,
+  );
+  return {
+    valid,
+    wins: valid ? values.filter((entry) => entry > 0).length : null,
+  };
 }
 
 function findNewRankedReplays(replays, previousReplayIds) {
@@ -593,7 +677,7 @@ function buildHistoryRatingState(records, player) {
   };
 }
 
-function normalizeReplay(raw, targetProfileId) {
+function normalizeReplay(raw, targetProfileId, locale = null) {
   const target = String(targetProfileId);
   const p1 = raw?.player1_info ?? {};
   const p2 = raw?.player2_info ?? {};
@@ -612,24 +696,25 @@ function normalizeReplay(raw, targetProfileId) {
     return null;
   }
 
-  const ownRounds = Array.isArray(own.round_results) ? own.round_results : [];
-  const opponentRounds = Array.isArray(opponent.round_results)
-    ? opponent.round_results
-    : [];
+  const ownRoundResults = summarizeRoundResults(own.round_results);
+  const opponentRoundResults = summarizeRoundResults(opponent.round_results);
   // The official battle log stores the winning pattern for each round rather
-  // than a separate match-level winner: 1=N, 2=C, 3=T, 4=D, 5=OD, 6=SA,
+  // than a separate match-level winner: 1=V, 2=C, 3=T, 4=D, 5=OD, 6=SA,
   // 7=CA and 8=P. The site renders these as icon_result{code}; 0 is the
-  // losing/no-result marker. For the match result we only need to count the
-  // positive pattern codes. Checking only `=== 1` would misclassify matches
-  // such as [5, 8] as draws.
-  const countWonRounds = (rounds) =>
-    rounds.filter((value) => Number.isFinite(Number(value)) && Number(value) > 0).length;
-  const ownWins = countWonRounds(ownRounds);
-  const opponentWins = countWonRounds(opponentRounds);
-
-  let result = "draw";
-  if (ownWins > opponentWins) result = "win";
-  if (ownWins < opponentWins) result = "loss";
+  // losing/no-result marker. Unknown or malformed entries stay diagnostic
+  // only and fail closed for the derived match result.
+  const ownRoundState = assessRoundResults(own.round_results);
+  const opponentRoundState = assessRoundResults(opponent.round_results);
+  let result = "unknown";
+  if (ownRoundState.valid && opponentRoundState.valid) {
+    // Code 0 is the no-result/loss marker, not a completed round.  A pair of
+    // sides with no winning code therefore has no derivable match result.
+    if (ownRoundState.wins > 0 || opponentRoundState.wins > 0) {
+      result = "draw";
+      if (ownRoundState.wins > opponentRoundState.wins) result = "win";
+      if (ownRoundState.wins < opponentRoundState.wins) result = "loss";
+    }
+  }
 
   const mr = Number(own.master_rating ?? 0) || null;
   const lp = Number(own.league_point ?? 0) || null;
@@ -638,19 +723,64 @@ function normalizeReplay(raw, targetProfileId) {
     const candidate = String(value ?? "").trim();
     return candidate;
   };
-  const characterName = (entry) =>
-    displayName(
-      entry?.playing_character_name ??
-        entry?.character_name ??
-        entry?.playing_character_display_name ??
-        entry?.character?.name ??
-        entry?.playing_character_tool_name ??
-        "",
-    );
+  const characterName = (entry) => {
+    const localized = [
+      // Locale-specific display fields must win over the stable/tool name.
+      // The latter is commonly an English identifier (for example GOUKI)
+      // even when the requested PLAY page locale is Chinese or Korean.
+      entry?.playing_character_display_name,
+      entry?.character_display_name,
+      entry?.character_alpha,
+      entry?.characterAlpha,
+      entry?.playing_character_alpha,
+      entry?.playingCharacterAlpha,
+      entry?.character?.display_name,
+      entry?.character?.displayName,
+      entry?.character?.alpha,
+    ].map(displayName)
+      .find(Boolean);
+    if (localized) return localized;
+    // The stable/tool fields are not locale-safe. Keep them only for the
+    // English route, where the official payload's canonical name is the
+    // requested display language. Non-English routes fail closed instead of
+    // leaking GOUKI/ALEX/etc. into a translated screen.
+    if (String(locale ?? "").trim() !== "en") return "";
+    return [
+      entry?.character_name,
+      entry?.playing_character_name,
+      entry?.character?.name,
+      entry?.playing_character_tool_name,
+    ]
+      .map(displayName)
+      .find(Boolean) ?? "";
+  };
   const playerName = (entry) =>
     displayName(
       entry?.player?.fighter_id ?? entry?.player?.name ?? entry?.fighter_id,
     );
+  const ownCharacterName = characterName(own);
+  const opponentCharacterName = characterName(opponent);
+  const characterId = (entry) =>
+    [
+      entry?.playing_character_id,
+      entry?.playingCharacterId,
+      entry?.character_id,
+      entry?.characterId,
+    ]
+      .map((value) => Number(value))
+      .find((value) => Number.isFinite(value) && value > 0) ?? null;
+  const ownCharacterId = characterId(own);
+  const opponentCharacterId = characterId(opponent);
+  const normalizeBattleInputType = (value) => {
+    const text = String(value ?? "").trim().toLowerCase();
+    if (value === 0 || text === "0" || text === "c" || text.includes("クラシック") || text.includes("classic")) return "C";
+    if (value === 1 || text === "1" || text === "m" || text.includes("モダン") || text.includes("modern")) return "M";
+    return null;
+  };
+  const opponentBattleInputType = normalizeBattleInputType(
+    opponent?.battle_input_type_name ?? opponent?.battle_input_type,
+  );
+  const actProvenance = readHistoryActProvenance(raw);
   const normalizeTimestamp = (value) => {
     const numeric = Number(value);
     if (!Number.isFinite(numeric) || numeric <= 0) return null;
@@ -659,11 +789,23 @@ function normalizeReplay(raw, targetProfileId) {
   const opponentMr = Number(opponent.master_rating ?? 0) || null;
   const opponentLp = Number(opponent.league_point ?? 0) || null;
   const ownRatingType = mr != null ? "MR" : lp != null ? "LP" : null;
+  const localeKey = String(locale ?? "").trim();
+  const characterNamesByLocale = LOCALE_KEYS.has(localeKey) &&
+    (ownCharacterName || opponentCharacterName)
+    ? {
+        [localeKey]: {
+          ...(ownCharacterName ? { own: ownCharacterName } : {}),
+          ...(opponentCharacterName ? { opponent: opponentCharacterName } : {}),
+        },
+      }
+    : null;
 
   return {
     replayId: String(raw?.replay_id ?? ""),
     battleType: Number(raw?.replay_battle_type ?? 0),
     battleTypeName: String(raw?.replay_battle_type_name ?? ""),
+    actId: actProvenance.actId,
+    actIdKnown: actProvenance.actIdKnown,
     matchType: classifyBattleType(
       raw?.replay_battle_type,
       raw?.replay_battle_type_name,
@@ -679,21 +821,28 @@ function normalizeReplay(raw, targetProfileId) {
     ratingType: ownRatingType,
     ownUserCode: p1Id === target ? p1Id : p2Id,
     ownName: playerName(own),
-    ownCharacterName: characterName(own),
+    ownCharacterName,
     ownRating: mr ?? lp,
     ownRatingType: ownRatingType,
-    characterId:
-      Number(own?.playing_character_id ?? own?.character_id ?? 0) || null,
+    characterId: ownCharacterId,
     opponentName: String(opponent?.player?.fighter_id ?? ""),
     opponentUserCode: String(opponent?.player?.short_id ?? ""),
-    opponentCharacterName: characterName(opponent),
+    opponentCharacterName,
     opponentMr,
     opponentLp,
     opponentRating: opponentMr ?? opponentLp,
     opponentRatingType: opponentMr != null ? "MR" : opponentLp != null ? "LP" : null,
-    opponentCharacterId:
-      Number(opponent?.playing_character_id ?? opponent?.character_id ?? 0) ||
-      null,
+    opponentCharacterId,
+    opponentBattleInputType,
+    ...(characterNamesByLocale ? { characterNamesByLocale } : {}),
+    ...(ownRoundResults || opponentRoundResults
+      ? {
+          roundResults: {
+            self: ownRoundResults,
+            opponent: opponentRoundResults,
+          },
+        }
+      : {}),
   };
 }
 
@@ -787,6 +936,9 @@ module.exports = {
   normalizeFighter,
   normalizeProfilePlayer,
   normalizeReplay,
+  readHistoryActProvenance,
+  normalizeStoredRoundResults,
+  assessRoundResults,
   buildHistoryRatingState,
   profileCacheLookup,
   playerRatingType,
@@ -795,6 +947,8 @@ module.exports = {
   parseBuildId,
   parseNextData,
   resetRatingSeries,
+  sanitizeRoundResultArray,
   snapshotCurrentCharacter,
   syncCurrentPlayerRatingState,
+  summarizeRoundResults,
 };

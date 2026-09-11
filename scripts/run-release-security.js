@@ -94,11 +94,6 @@ function run(command, args, spawnOptions = {}) {
 if (!/^\d+\.\d+\.\d+$/.test(packageJson.version)) {
   throw new Error(`Release version must use SemVer: ${packageJson.version}`);
 }
-if (!fs.existsSync(cliEntrypoint)) {
-  throw new Error(
-    `Codex Security CLI is unavailable. Expected: ${cliEntrypoint}`,
-  );
-}
 if (!isSameOrWithin(securityRoot, outputDirectory)) {
   throw new Error(`Security output escaped the tools directory: ${outputDirectory}`);
 }
@@ -117,6 +112,12 @@ if (printConfigOnly) {
     })}\n`,
   );
   process.exit(0);
+}
+
+if (!fs.existsSync(cliEntrypoint)) {
+  throw new Error(
+    `Codex Security CLI is unavailable. Expected: ${cliEntrypoint}`,
+  );
 }
 
 const [nodeMajor, nodeMinor] = process.versions.node.split(".").map(Number);

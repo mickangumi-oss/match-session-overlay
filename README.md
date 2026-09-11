@@ -13,13 +13,13 @@
 - 公式サイトへのログインと戦績取得に必要なインターネット接続
 - OBSで表示する場合のみ、OBS Studio（任意）
 
-公開版: v1.11.1
+公開版: v1.12.0
 
 ## ダウンロード
 
 [最新版をダウンロード（GitHub Releases）](https://github.com/mickangumi-oss/match-session-overlay/releases/latest)
 
-ページの「Assets」から`Match-Session-Overlay-1.11.1-Setup.exe`をダウンロードして実行してください。最新版以外のファイルや、配布元を確認できないファイルは使用しないでください。
+ページの「Assets」から`Match-Session-Overlay-1.12.0-Setup.exe`をダウンロードして実行してください。最新版以外のファイルや、配布元を確認できないファイルは使用しないでください。
 
 詳しい操作手順は[`docs/usage.md`](docs/usage.md)、表示レイアウトは[`docs/window-layout.md`](docs/window-layout.md)、対戦履歴は[`docs/match-history.md`](docs/match-history.md)、フォントは[`docs/font-settings.md`](docs/font-settings.md)をご覧ください。
 
@@ -27,7 +27,7 @@
 
 正式な配布インストーラーは、公開前にMicrosoft DefenderとVirusTotalで確認しています。検査結果は公開時点のものであり、安全性を完全に保証するものではありません。インストーラーは必ずこのリポジトリの公式GitHub Releaseから取得し、リリースノートに記載されたSHA-256と一致することを確認してください。
 
-`v1.11.1`の検査結果は[`v1.11.1リリースノート`](docs/release-notes/v1.11.1.md)をご覧ください。
+`v1.12.0`の検査結果は[`v1.12.0リリースノート`](docs/release-notes/v1.12.0.md)をご覧ください。
 
 ## 画面イメージ
 
@@ -63,11 +63,14 @@ CHARACTER RANK、現在のキャラクター、セッション戦績、FRIENDS�
 
 ![合成データを表示した対戦履歴画面](docs/images/match-history-example.png)
 
-## v1.11.1の変更内容
+## v1.12.0の変更内容
 
-- 最新試合のMR／LP差分が誤って`+0`などと表示される問題を修正しました。
+- 対戦履歴でACTを選択し、ACTごとの履歴・集計・相手情報を確認できるようにしました。
+- 選択した試合のラウンド結果を表示できるようにしました。
+- 選択した試合について、自分と相手のバトル傾向・ラウンド傾向を比較できるようにしました。
+- 保存済みの対戦履歴を先に表示し、対戦履歴の取得時に重複通信を抑えるようにしました。
 
-詳しい変更内容は[`v1.11.1リリースノート`](docs/release-notes/v1.11.1.md)をご覧ください。
+詳しい変更内容は[`v1.12.0リリースノート`](docs/release-notes/v1.12.0.md)をご覧ください。
 
 ## v1.11.0の変更内容
 

@@ -1,6 +1,8 @@
 appId: io.github.mickangumi.matchsessionoverlay
 productName: Match Session Overlay
 artifactName: Match-Session-Overlay-${version}-Setup.${ext}
+directories:
+  output: dist/release
 asar: true
 electronFuses:
   runAsNode: false
