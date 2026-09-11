@@ -76,9 +76,8 @@ function requestBuffer(rawUrl, { maxBytes, onProgress, signal } = {}, redirectCo
         if (status >= 300 && status < 400 && response.headers.location) {
           const nextUrl = new URL(response.headers.location, url).toString();
           response.resume();
-          requestBuffer(nextUrl, { maxBytes, onProgress, signal }, redirectCount + 1)
+          return requestBuffer(nextUrl, { maxBytes, onProgress, signal }, redirectCount + 1)
             .then(resolve, reject);
-          return;
         }
         if (status < 200 || status >= 300) {
           response.resume();
@@ -159,7 +158,7 @@ function downloadToFile(
           response.resume();
           output.close(() => {
             try { fs.rmSync(destinationPath, { force: true }); } catch { /* best effort */ }
-            downloadToFile(nextUrl, destinationPath, onProgress, redirectCount + 1, signal)
+            return downloadToFile(nextUrl, destinationPath, onProgress, redirectCount + 1, signal)
               .then(resolve, reject);
           });
           return;

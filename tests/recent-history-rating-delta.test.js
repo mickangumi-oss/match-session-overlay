@@ -11,7 +11,7 @@ const rendererSource = fs.readFileSync(
   path.resolve(__dirname, "..", "src", "renderer", "renderer.js"),
   "utf8",
 );
-const functionStart = rendererSource.indexOf("function historyRatingDelta(");
+const functionStart = rendererSource.indexOf("function historyRatingValue(");
 const functionEnd = rendererSource.indexOf("\nfunction filteredHistoryRecords(", functionStart);
 assert.notEqual(functionStart, -1);
 assert.notEqual(functionEnd, -1);
@@ -45,6 +45,30 @@ test("latest LP uses the current profile LP", () => {
       { useCurrentRating: true },
     ),
     40,
+  );
+});
+
+test("latest parallel LP/MR snapshots are valid delta baselines", () => {
+  const latestLp = { ownRatingType: "LP", ownLp: 18000, characterId: 2, playedAt: 200 };
+  assert.equal(
+    historyRatingDelta(
+      latestLp,
+      [latestLp],
+      { characterId: 2, lp: 18040, ratingSource: "profile", profileUpdatedAt: 201 },
+      { useCurrentRating: true },
+    ),
+    40,
+  );
+
+  const latestMr = { ownRatingType: "MR", ownMr: 2000, characterId: 1, playedAt: 200 };
+  assert.equal(
+    historyRatingDelta(
+      latestMr,
+      [latestMr],
+      { characterId: 1, mr: 2008, ratingSource: "profile", profileUpdatedAt: 201 },
+      { useCurrentRating: true },
+    ),
+    8,
   );
 });
 

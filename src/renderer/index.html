@@ -141,12 +141,12 @@
             </div>
 
             <div class="session-actions">
-              <button class="button accent wide-action tracking-indicator" id="startTrackingButton" disabled aria-live="polite">
-                <span class="play-icon" aria-hidden="true"></span><span id="startTrackingLabel">計測を開始</span>
+              <button class="button button-with-icon accent wide-action tracking-indicator" id="startTrackingButton" disabled aria-live="polite">
+                <svg class="button-icon" aria-hidden="true" viewBox="0 0 16 16"><path d="M5 3.25 12 8l-7 4.75Z"></path></svg><span id="startTrackingLabel">計測を開始</span>
               </button>
-              <span class="session-timer" id="nextUpdateInfo" data-i18n="nextUpdate">次回更新 --:--</span>
-              <button class="button secondary" id="resetTrackingButton" disabled data-i18n="reset">リセット</button>
-              <button class="button danger-ghost" id="stopTrackingButton" disabled data-i18n="end">終了</button>
+              <span class="button-with-icon session-timer" id="nextUpdateInfo"><svg class="button-icon" aria-hidden="true" viewBox="0 0 16 16"><path d="M12.5 6A4.5 4.5 0 1 0 12 10.5"></path><path d="M12.5 3.25V6h-2.75"></path></svg><span id="nextUpdateLabel" data-i18n="nextUpdate">次回更新</span><span id="nextUpdateValue">--:--</span></span>
+              <button class="button button-with-icon secondary" id="resetTrackingButton" disabled><svg class="button-icon" aria-hidden="true" viewBox="0 0 16 16"><path d="M3.5 6A4.5 4.5 0 1 0 4.5 11"></path><path d="M3.5 3.25V6h2.75"></path><circle cx="8" cy="8" r=".9"></circle></svg><span data-i18n="reset">リセット</span></button>
+              <button class="button button-with-icon danger-ghost" id="stopTrackingButton" disabled><svg class="button-icon" aria-hidden="true" viewBox="0 0 16 16"><path d="M4 4 12 12M12 4 4 12"></path></svg><span data-i18n="end">終了</span></button>
             </div>
 
             <section class="monitor-chart" id="managementChartPanel" data-display-card="graph">
@@ -174,7 +174,7 @@
               </header>
               <div class="recent-history-scroll">
                 <table>
-                  <thead><tr><th data-i18n="date">DATE</th><th data-i18n="result">RESULT</th><th data-i18n="matchType">MODE</th><th data-i18n="opponentCharacter">OPPONENT CHARACTER</th><th data-i18n="opponent">OPPONENT</th><th id="recentHistoryRatingHeader">MR</th></tr></thead>
+                  <thead><tr><th data-i18n="date">DATE</th><th data-i18n="result">RESULT</th><th data-i18n="matchType">MODE</th><th data-i18n="opponentCharacter">OPPONENT CHARACTER</th><th data-i18n="opponent">OPPONENT</th><th id="recentHistoryRatingHeader">MR</th><th data-i18n="inputType">INPUT</th></tr></thead>
                   <tbody id="recentHistoryBody"></tbody>
                 </table>
                 <p class="recent-history-empty" id="recentHistoryEmpty" data-i18n="historyEmpty">取得した対戦履歴はありません</p>
@@ -191,25 +191,25 @@
                 <h2 data-i18n="displayLayout">表示レイアウト</h2>
               </div>
               <div class="display-actions">
-                <button class="button secondary" id="openHistoryButton" data-i18n="matchHistory">対戦履歴</button>
-                <button class="button secondary option-button" id="optionsButton" aria-expanded="false">
-                  <span aria-hidden="true">⚙</span> <span data-i18n="options">オプション</span>
+                <button class="button button-with-icon secondary" id="openHistoryButton"><svg class="button-icon" aria-hidden="true" viewBox="0 0 16 16"><circle cx="2.5" cy="4" r=".75"></circle><circle cx="2.5" cy="8" r=".75"></circle><circle cx="2.5" cy="12" r=".75"></circle><path d="M5.5 4h7M5.5 8h7M5.5 12h7"></path></svg><span data-i18n="matchHistory">対戦履歴</span></button>
+                <button class="button button-with-icon secondary option-button" id="optionsButton" aria-expanded="false">
+                  <svg class="button-icon" aria-hidden="true" viewBox="0 0 16 16"><path d="M8 1.5 9.3 3.2 12.6 3.4 12.3 5.5 14.5 8l-2.2 2.5.3 2.1-3.3.2L8 14.5l-1.3-1.7-3.3-.2.3-2.1L1.5 8l2.2-2.5-.3-2.1 3.3-.2L8 1.5Z"></path><circle cx="8" cy="8" r="2.1"></circle></svg><span data-i18n="options">オプション</span>
                   <span class="update-badge hidden" id="optionsUpdateBadge" data-i18n="updateAvailable">UPDATE</span>
                 </button>
-                <button class="button secondary" id="overlayLockButton" disabled>
-                  <span data-i18n="overlayMove">オーバーレイ移動</span>
+                <button class="button button-with-icon secondary" id="overlayLockButton" disabled>
+                  <svg class="button-icon" aria-hidden="true" viewBox="0 0 16 16"><path d="M8 1.75v12.5M1.75 8h12.5M8 1.75l-2 2M8 1.75l2 2M8 14.25l-2-2M8 14.25l2-2M1.75 8l2-2M1.75 8l2 2M14.25 8l-2-2M14.25 8l-2 2"></path></svg><span id="overlayLockLabel" data-i18n="overlayMove">オーバーレイ移動</span>
                 </button>
-                <button class="button primary" id="toggleStatsButton" data-i18n="showStats">戦績ウィンドウを表示</button>
+                <button class="button button-with-icon primary" id="toggleStatsButton"><svg class="button-icon" aria-hidden="true" viewBox="0 0 16 16"><rect x="2.25" y="2.25" width="11.5" height="8" rx="1"></rect><path d="M5.25 13.5h5.5M8 10.25v3.25"></path></svg><span id="toggleStatsLabel" data-i18n="showStats">戦績ウィンドウを表示</span></button>
               </div>
             </header>
 
             <section class="options-drawer hidden" id="optionsPanel" aria-hidden="true">
               <header class="options-heading">
                 <div>
-                  <p class="kicker" data-i18n="displayOptions">DISPLAY OPTIONS</p>
-                  <h3 data-i18n="displayOptions">表示オプション</h3>
+                  <p class="kicker">OPTIONS</p>
+                  <h3 data-i18n="options">オプション</h3>
                 </div>
-                <button class="icon-button" id="closeOptionsButton" data-i18n-title="closeOptions" title="オプションを閉じる">×</button>
+                <button class="button secondary" id="closeOptionsButton" data-i18n-title="backToManagement" title="管理画面に戻る"><span data-i18n="backToManagement">管理画面</span></button>
               </header>
               <div class="options-category-grid">
                 <section class="options-category-card maintenance-card" id="maintenanceSettingsCard">
@@ -226,7 +226,7 @@
                   <div class="utility-divider"></div>
                   <div class="utility-row local-data-row">
                     <div class="local-data-copy"><span class="control-label" data-i18n="localData">ローカルデータ</span><p data-i18n="localDataClearNote">公式サイトのログイン状態、保存した対戦履歴、プロフィール・ランキング・FRIENDSなどの一時キャッシュを削除します。表示設定は残ります。ID・パスワード自体は保存していません。</p></div>
-                    <button class="maintenance-action-button danger" id="clearDataButton" data-i18n="clear">消去</button>
+                    <button class="maintenance-action-button danger" id="clearDataButton" data-i18n="clear">削除</button>
                   </div>
                 </section>
 
@@ -361,7 +361,7 @@
                     <div><span class="control-label" data-i18n="friendOnlineNotifications">FRIEND ONLINE NOTIFICATIONS</span><h3 data-i18n="friendOnlineNotificationsHeading">フレンドのオンライン通知</h3></div>
                     <label class="switch"><input id="friendOnlineNotificationsEnabledInput" type="checkbox" data-i18n-aria-label="friendOnlineNotificationsHeading" aria-label="フレンドのオンライン通知" /><span aria-hidden="true"></span></label>
                   </div>
-                  <p class="setting-note" data-i18n="friendOnlineNotificationsNote">FRIENDSのみを通知します。</p>
+                  <p class="setting-note" data-i18n="friendOnlineNotificationsNote">FRIENDSのオンライン変化だけを通知します。</p>
                   <fieldset class="notification-timing-control">
                     <legend class="control-label" data-i18n="friendOnlineNotificationTiming">通知タイミング</legend>
                     <div class="notification-timing-options">
@@ -369,7 +369,7 @@
                       <label><input id="friendOnlineNotificationTimingGameOnlyInput" name="friendOnlineNotificationTiming" type="radio" value="game-only" /><span data-i18n="friendOnlineNotificationTimingGameOnly">ゲーム起動中のみ</span></label>
                     </div>
                   </fieldset>
-                  <p class="setting-note notification-game-exe-note" id="friendOnlineNotificationGameExeNote" data-i18n="friendOnlineNotificationGameExeNote">ゲーム起動中のみを使用するにはアプリ設定でゲーム.exeの登録が必要です。未登録の場合は通知されません。ゲーム起動検知をONにする必要はありません。</p>
+                  <p class="setting-note notification-game-exe-note" id="friendOnlineNotificationGameExeNote" data-i18n="friendOnlineNotificationGameExeNote">通知を「ゲーム起動中のみ」にするには、アプリ設定でゲーム.exeを登録してください。未登録の場合は通知されません。ゲーム起動検知をONにする必要はありません。</p>
                   <div class="category-control notification-sound-control">
                     <label for="friendOnlineNotificationSoundInput" class="control-label" data-i18n="friendOnlineNotificationSound">通知音</label>
                     <div class="notification-sound-picker">
@@ -433,6 +433,10 @@
         </div>
         <div class="history-filters">
           <label>
+            <span class="control-label" data-i18n="historyAct">ACT</span>
+            <select id="historyAct" aria-label="ACT"></select>
+          </label>
+          <label>
             <span class="control-label" data-i18n="dateFrom">DATE FROM</span>
             <input id="historyDateFrom" type="date" />
           </label>
@@ -456,25 +460,27 @@
             </select>
           </label>
         </div>
+        <div class="history-act-state" id="historyActState" aria-live="polite"></div>
         <div class="history-summary" aria-live="polite">
           <article><span data-i18n="winsLosses">W / L</span><strong id="historyWinsLosses">0 - 0</strong></article>
           <article><span data-i18n="winRate">WIN RATE</span><strong id="historyWinRate">0.0%</strong></article>
           <article><span data-i18n="maxStreak">MAX STREAK</span><strong id="historyMaxStreak">0</strong></article>
-          <article><span data-i18n="maxRating">MAX MR / LP</span><strong id="historyMaxRating">—</strong></article>
+          <article><span data-i18n="maxRating">最高MR／LP</span><strong id="historyMaxRating">—</strong></article>
           <article><span id="historyPotentialLabel">POTENTIAL MR</span><strong id="historyPotentialRating">—</strong><small class="history-potential-sample" id="historyPotentialSample"></small></article>
         </div>
         <section class="history-opponent-profile hidden" id="historyOpponentProfile" aria-live="polite" aria-labelledby="historyOpponentProfileTitle">
           <header>
             <span class="control-label" id="historyOpponentProfileTitle" data-i18n="historyOpponentProfile">OPPONENT PROFILE REFERENCE</span>
+            <div class="history-opponent-profile-actions"><button class="button secondary matchup-open-button" id="openMatchupButton" type="button" data-i18n="openMatchup">データ比較</button><button class="button secondary" id="closeHistoryOpponentProfileButton" type="button" data-i18n="close">CLOSE</button></div>
           </header>
           <div class="history-opponent-profile-state" id="historyOpponentProfileState"></div>
           <div class="history-opponent-profile-grid" id="historyOpponentProfileGrid">
             <div class="history-opponent-profile-field">
-              <span data-i18n="historyOpponentMatchCharacter">MATCH CHARACTER</span>
+              <span data-i18n="historyOpponentMatchCharacter">対戦時のキャラクター</span>
               <strong id="historyOpponentMatchCharacter">—</strong>
             </div>
             <div class="history-opponent-profile-field">
-              <span data-i18n="historyOpponentMatchRating">MATCH-TIME MR / LP</span>
+              <span data-i18n="historyOpponentMatchRating">対戦時のMR／LP</span>
               <strong id="historyOpponentMatchRating">—</strong>
             </div>
             <div class="history-opponent-profile-field">
@@ -495,20 +501,24 @@
               <small id="historyOpponentOtherRating">—</small>
             </div>
           </div>
+          <section class="history-selected-round-results" id="historySelectedRoundResults" aria-labelledby="historySelectedRoundResultsTitle">
+            <h3 class="control-label" id="historySelectedRoundResultsTitle" data-i18n="selectedRoundResults">選択試合のラウンド結果</h3>
+            <div class="history-selected-round-results-body" id="historySelectedRoundResultsBody"></div>
+          </section>
           <footer>
             <span id="historyOpponentProfileAct">ACT —</span>
             <span id="historyOpponentProfileRetrieved">—</span>
           </footer>
         </section>
         <div class="history-content">
-          <section class="history-chart-card">
+          <section class="history-chart-card history-secondary-card">
             <section class="history-result-card">
               <header><span class="control-label" data-i18n="resultTrend">MATCH RESULT TREND</span><span id="historyCount">0 MATCHES</span></header>
               <div class="history-chart-wrap"><canvas id="historyResultChart" aria-label="Match result trend"></canvas><p id="historyEmpty" data-i18n="historyEmpty">取得した対戦履歴はありません</p></div>
               <div class="history-legend"><span><i class="legend-win"></i><span data-i18n="win">WIN</span></span><span><i class="legend-loss"></i><span data-i18n="loss">LOSS</span></span><span><i class="legend-draw"></i><span data-i18n="draw">DRAW</span></span></div>
             </section>
             <div class="history-rating-heading">
-              <span class="control-label" data-i18n="ratingTrendHeading">MR / LP TREND</span>
+              <span class="control-label" data-i18n="ratingTrendHeading">MR／LPの推移</span>
               <div class="history-rating-toolbar" role="group" aria-label="MR and LP trend display options">
                 <label class="history-rating-period-select">
                   <span class="control-label" id="historyRatingPeriodLabel" data-i18n="historyRatingPeriod">DISPLAY PERIOD</span>
@@ -547,7 +557,7 @@
               <header><span class="control-label" data-i18n="matchList">MATCH LIST</span></header>
               <div class="history-table-scroll">
                 <table class="history-match-table">
-                  <thead><tr><th data-i18n="date">DATE</th><th data-i18n="result">RESULT</th><th data-i18n="matchType">MODE</th><th data-i18n="myCharacter">MY CHARACTER</th><th data-i18n="rating">MY MR / LP</th><th data-i18n="opponent">OPPONENT</th><th data-i18n="opponentCharacter">OPPONENT CHARACTER</th><th data-i18n="opponentRating">OPPONENT MR / LP</th><th data-i18n="replayId">REPLAY ID</th></tr></thead>
+                  <thead><tr><th data-i18n="date">DATE</th><th data-i18n="result">RESULT</th><th data-i18n="matchType">MODE</th><th data-i18n="myCharacter">自分のキャラクター</th><th data-i18n="rating">MY MR / LP</th><th data-i18n="opponent">OPPONENT</th><th data-i18n="opponentCharacter">相手のキャラクター</th><th data-i18n="opponentRating">相手のMR／LP</th><th data-i18n="replayId">REPLAY ID</th><th data-i18n="inputType">INPUT</th></tr></thead>
                   <tbody id="historyTableBody"></tbody>
                 </table>
               </div>
@@ -558,13 +568,13 @@
               </nav>
             </section>
             <section class="history-opponent-stats" aria-labelledby="historyOpponentStatsTitle">
-              <header><span class="control-label" id="historyOpponentStatsTitle" data-i18n="opponentCharacterStats">OPPONENT CHARACTER STATS</span></header>
+              <header class="history-opponent-stats-header"><span class="control-label" id="historyOpponentStatsTitle" data-i18n="opponentCharacterStats">OPPONENT CHARACTER STATS</span><span class="history-opponent-stats-state" id="historyOpponentStatsState" aria-live="polite"></span></header>
               <div class="history-opponent-stats-scroll">
                 <table>
                   <thead><tr>
                     <th data-i18n="opponentCharacter">OPPONENT CHARACTER</th>
                     <th id="historyOpponentMatchesHeader" aria-sort="descending"><button class="history-stats-sort matches" id="historyOpponentMatchesSort" type="button"><span data-i18n="matches">MATCHES</span><span class="history-sort-indicator" id="historyOpponentMatchesSortIndicator" aria-hidden="true">▼</span></button></th>
-                    <th data-i18n="winsLosses">W / L</th>
+                    <th data-i18n="wins">WINS</th>
                     <th id="historyOpponentWinRateHeader" aria-sort="none"><button class="history-stats-sort win-rate" id="historyOpponentWinRateSort" type="button"><span data-i18n="winRate">WIN RATE</span><span class="history-sort-indicator" id="historyOpponentWinRateSortIndicator" aria-hidden="true"></span></button></th>
                   </tr></thead>
                   <tbody id="historyOpponentStatsBody"></tbody>
@@ -574,6 +584,16 @@
             </section>
           </div>
         </div>
+      </section>
+
+      <section class="matchup-panel hud-panel hidden" id="matchupPanel" aria-hidden="true" aria-labelledby="matchupTitle">
+        <div class="matchup-data-strip"><span class="matchup-state unavailable" id="matchupState">UNAVAILABLE</span><div class="matchup-actions"><button class="button secondary" id="refreshMatchupButton" type="button" data-i18n="matchupRefresh">更新</button><button class="button secondary" id="closeMatchupButton" type="button"><span aria-hidden="true">×</span> <span data-i18n="close">CLOSE</span></button></div></div>
+        <header class="matchup-heading">
+          <div><p class="kicker" data-i18n="matchupAnalysis">SELECTED MATCH · POST-MATCH REVIEW</p><h2 id="matchupTitle" data-i18n="dataComparison">データ比較</h2></div>
+        </header>
+        <div class="matchup-foot"><span id="matchupProfileAct">ACT —</span><span id="matchupProfileRetrieved">—</span></div>
+        <section class="matchup-card matchup-buckler-card comparison-card" id="matchupBucklerCard"><header><div><span class="control-label" data-i18n="matchupBattleTrend">バトル傾向：過去100戦平均</span></div><span class="matchup-state matchup-state-inline" id="matchupBucklerState">UNAVAILABLE</span></header><div class="matchup-comparison-legend"><span><i class="matchup-swatch self"></i><span data-i18n="matchupSelf">自分</span></span><span><i class="matchup-swatch opponent"></i><span data-i18n="matchupOpponent">対戦相手</span></span><span data-i18n="matchupSameItemPeriod">同一項目・同一期間</span></div><div class="matchup-metrics" id="matchupMetrics"></div></section>
+        <section class="matchup-card matchup-round-card" id="matchupRoundCard"><header><div><span class="control-label" data-i18n="matchupRoundTrend">ラウンド傾向：取得できた対戦履歴を集計</span></div><span class="matchup-state matchup-state-inline" id="matchupRoundState">UNAVAILABLE</span></header><div class="matchup-round-scope" id="matchupRoundScope"></div><div class="matchup-comparison-legend"><span><i class="matchup-swatch self"></i><span data-i18n="matchupSelf">自分</span></span><span><i class="matchup-swatch opponent"></i><span data-i18n="matchupOpponent">対戦相手</span></span></div><div class="matchup-round-metrics" id="matchupRoundMetrics"></div><p class="matchup-note" id="matchupRoundNote"></p></section>
       </section>
 
       <div class="bottom-line">
@@ -594,6 +614,7 @@
     </div>
     <script src="../history-chart-model.js"></script>
     <script src="../history-opponent-character-stats.js"></script>
+    <script src="../official-opponent-character-stats.js"></script>
     <script src="../display-number-format.js"></script>
     <script src="../potential-rating.js"></script>
     <script src="../history-current-rating.js"></script>

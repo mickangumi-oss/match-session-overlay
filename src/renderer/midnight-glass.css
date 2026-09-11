@@ -70,9 +70,9 @@ input,select{border-width:1px!important;border-radius:5px!important;background:#
   outline-offset:-4px!important;
   background:var(--mg-panel)!important;
 }
-.cockpit{grid-template-rows:minmax(0,1fr) auto}
+.cockpit{grid-template-rows:max-content auto}
 .side-column,.main-column{grid-row:1}
-.main-column{grid-template-rows:auto minmax(0,1fr)!important}
+.main-column{grid-template-rows:auto max-content!important}
 .telemetry-panel .session-actions{margin-top:12px;gap:12px}
 .telemetry-panel .monitor-chart{margin-top:12px}
 .dashboard-history-panel{padding:12px 16px!important}
@@ -81,10 +81,232 @@ input,select{border-width:1px!important;border-radius:5px!important;background:#
 .display-panel{grid-column:1/-1;grid-row:2;min-height:64px}
 .display-panel>.display-heading{margin-bottom:0}
 .options-category-grid{gap:12px}
-.display-panel:has(.options-drawer:not(.hidden)){min-height:430px}
+.display-panel:has(.options-drawer:not(.hidden)){min-height:0}
+@media(min-width:841px){
+  .cockpit:has(.options-drawer:not(.hidden)){
+    height:100%;
+    min-height:0;
+    overflow:hidden;
+    grid-template-rows:max-content minmax(0,1fr);
+  }
+}
+.display-panel>.options-drawer{
+  display:grid;
+  min-height:0;
+  grid-template-rows:auto minmax(0,1fr);
+  overflow:hidden;
+}
+.display-panel>.options-drawer>.options-category-grid{
+  min-height:0;
+  overflow-x:hidden;
+  overflow-y:auto;
+}
 @media(max-width:840px){
   .cockpit{grid-template-rows:auto auto auto}
   .side-column{grid-row:1}
   .main-column{grid-row:2}
   .display-panel{grid-row:3}
+  .cockpit:has(.options-drawer:not(.hidden)){
+    overflow:hidden;
+  }
+  .display-panel:has(.options-drawer:not(.hidden)){
+    position:fixed;
+    z-index:20;
+    right:14px;
+    bottom:10px;
+    left:14px;
+    height:min(430px,calc(100vh - 20px));
+    min-height:0;
+  }
 }
+
+/* Design-team readability pass for the next app release. Keep the released
+   layout and data behavior unchanged while giving dense surfaces a predictable
+   reading width and reducing decorative competition with content. */
+.history-table-scroll{overflow-x:auto}
+.history-match-table{width:100%;min-width:0;table-layout:fixed}
+.history-match-table th,.history-match-table td{padding-inline:10px;line-height:1.3}
+.history-match-table th:nth-child(1){width:13%}
+.history-match-table th:nth-child(2){width:5%}
+.history-match-table th:nth-child(3){width:9%}
+.history-match-table th:nth-child(4){width:10%}
+.history-match-table th:nth-child(5){width:10%}
+.history-match-table th:nth-child(6){width:12%}
+.history-match-table th:nth-child(7){width:11%}
+.history-match-table th:nth-child(8){width:10%}
+.history-match-table th:nth-child(9){width:10%}
+.history-match-table th:nth-child(10){width:10%}
+
+.history-opponent-stats-header{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.history-input-type-filter select{min-width:72px;padding:4px 8px;font-size:10px}
+
+.options-heading{position:sticky;top:-7px;z-index:3;margin:-7px -7px 4px;padding:7px;background:rgba(7,10,24,.98);border-bottom:1px solid rgba(67,216,255,.22)}
+.options-category-grid{gap:16px}
+.options-category-card{gap:8px;padding:10px}
+.eyebrow,.kicker,.control-label,.monitor-character .control-label,.monitor-rank .control-label,.monitor-metric .control-label,.monitor-chart small,.chart-state{font-family:"Segoe UI Variable","Yu Gothic UI",Meiryo,sans-serif;font-size:11px;line-height:1.25}
+.monitor-chart > header{gap:8px}
+.history-match-table th,.history-match-table td{font-family:"Segoe UI Variable","Yu Gothic UI",Meiryo,sans-serif;font-size:11px}
+
+.hud-panel,.history-panel,.history-result-card,.history-rating-card,.history-table-card,.history-opponent-stats,.history-opponent-profile,.history-acquisition,.recent-history-preview,.options-category-card,.initial-language-dialog{box-shadow:inset 0 0 0 1px #0c1024,inset 0 0 25px rgba(104,120,204,.094),0 0 8px rgba(125,131,255,.09)}
+.telemetry-panel .monitor-chart{box-shadow:inset 0 0 22px rgba(113,128,220,.1),0 0 8px rgba(112,112,255,.09)!important}
+
+@media(max-width:560px){
+  .options-category-grid{grid-template-columns:1fr}
+  .design-options-card{grid-template-columns:1fr}
+  .options-category-wide{grid-column:auto}
+  .display-item-fieldset{grid-template-columns:1fr}
+}
+
+/* Approved Option B: OPTIONS is a standalone screen, like match history.
+   Keep the management DOM mounted so existing control state and handlers are
+   preserved, while the screen owns one viewport-level scroll container. */
+body.options-screen-open{overflow:hidden}
+body.options-screen-open .cockpit > *:not(.display-panel),
+body.options-screen-open .display-panel > .display-heading{visibility:hidden}
+body.options-screen-open .display-panel{position:static;min-height:0}
+body.options-screen-open .display-panel>.options-drawer{
+  position:fixed;
+  z-index:30;
+  inset:12px;
+  max-height:calc(100vh - 24px);
+  margin:0;
+  padding:20px;
+  display:grid;
+  grid-template-rows:auto auto;
+  overflow-x:hidden;
+  overflow-y:auto;
+}
+body.options-screen-open .display-panel>.options-drawer>.options-category-grid{
+  min-height:0;
+  overflow:visible;
+}
+
+/* MATCHUP ANALYSIS follows the supplied compact neon mock. Unknown data stays
+   visibly unavailable instead of being replaced with fabricated values. */
+body.matchup-screen-open{overflow:hidden} body.matchup-screen-open .cockpit{display:none}
+.matchup-panel{position:fixed;z-index:40;inset:12px;max-height:calc(100vh - 24px);overflow-x:hidden;overflow-y:auto;margin:0;padding:16px 18px;background:linear-gradient(125deg,#020714,#091323 55%,#080313);color:#dce7f8}
+.matchup-panel.hidden{display:none}.matchup-data-strip{display:flex;justify-content:space-between;align-items:center;padding:7px 12px;border:1px solid #25445e;background:#050d18}.matchup-data-strip .button{height:28px;padding-inline:10px;font-size:10px}
+.matchup-heading{display:flex;justify-content:space-between;align-items:end;gap:18px;padding:12px 12px 14px;border:1px solid #2c5978;border-top:0;background:#07101b}.matchup-heading h2{margin:4px 0;font-size:clamp(22px,2.2vw,28px);letter-spacing:.05em}.matchup-subheading{margin:4px 0 0;color:#97abc0;font-size:11px}.matchup-meta{display:flex;gap:28px;color:#8da4bc;font-size:10px;text-align:right}.matchup-meta b{display:block;color:#fff;font-size:13px;margin-top:5px}.matchup-state{display:inline-flex;align-items:center;justify-content:center;min-height:22px;padding:0 9px;border:1px solid rgba(198,131,255,.6);border-radius:999px;color:#dcb7ff;font-size:10px;font-weight:800;letter-spacing:.08em;white-space:nowrap}.matchup-state.ready{border-color:#19e5ff;color:#19e5ff}.matchup-state.loading{border-color:#83a8ff;color:#83a8ff}.matchup-state.insufficient{border-color:#ffd671;color:#ffd671}.matchup-state.unavailable{border-color:#c783ff;color:#dcb7ff}
+.insight-stats{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:9px;margin-top:11px}.insight-stats>article{min-width:0;padding:11px 12px;border:1px solid #2b4861;background:#050d18}.insight-stats span{display:block;color:#9aafc4;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.insight-stats b{display:block;margin-top:6px;color:#fff;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.insight-stats .pink{color:#d25fff}.insight-stats small{display:block;margin-top:3px;color:#b7c5d8}.matchup-foot{display:flex;justify-content:space-between;padding:7px 10px;color:#8ea1b5;font-size:10px}.matchup-summary{display:grid;grid-template-columns:minmax(280px,.78fr) minmax(470px,1.22fr);gap:13px;margin-top:7px}.matchup-card{min-width:0;padding:13px 16px;border:1px solid #2b4861;border-radius:4px;background:#050d18;box-shadow:inset 0 0 18px #0a1930}.matchup-card>header,.matchup-history>header{display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #284159;padding-bottom:8px}.matchup-card>header>span:last-child,.matchup-history>header>span:last-child{font-size:10px;color:#90a7bf}.winrate-layout{display:flex;align-items:center;justify-content:center;gap:28px;min-height:245px}.matchup-donut{width:180px;height:180px;border-radius:50%;display:flex;flex-direction:column;align-items:center;justify-content:center;background:conic-gradient(#16dfff 0 var(--self-rate),#a943ee var(--self-rate) 100%);position:relative;box-shadow:0 0 24px #16dfff30}.matchup-donut::after{content:"";position:absolute;inset:22px;border-radius:50%;background:#07101d;border:1px solid #243d5b}.matchup-donut strong,.matchup-donut small{z-index:1}.matchup-donut strong{font-size:31px;color:#16e5ff}.matchup-donut small{font-size:10px;color:#d5def0;margin-top:3px}.matchup-win-legend{display:grid;gap:15px;font-size:11px}.matchup-win-legend>div{display:grid;grid-template-columns:12px auto;gap:7px;align-items:center;color:#c9d6e7}.matchup-win-legend strong{grid-column:2;font-size:22px;color:#15e1ff}.matchup-win-legend>div+div strong{color:#c15bff}.matchup-swatch{display:inline-block;width:9px;height:9px;border-radius:50%}.matchup-swatch.self{background:#16dfff;box-shadow:0 0 7px #16dfff}.matchup-swatch.opponent{background:#b34fff;box-shadow:0 0 7px #b34fff}.matchup-state-inline{min-height:18px;font-size:9px}
+.radar-card{display:grid;grid-template-columns:minmax(280px,.9fr) minmax(280px,1.1fr);column-gap:8px}.radar-card>header{grid-column:1/-1}.radar-card>.matchup-state-inline{justify-self:start;align-self:start}.matchup-radar-layout{display:grid;grid-template-columns:minmax(210px,1fr) minmax(240px,1fr);align-items:center;gap:7px}.matchup-radar{width:100%;height:auto;overflow:visible}.matchup-radar text{fill:#abc0d7;font:700 8px "Segoe UI Variable","Yu Gothic UI",sans-serif;text-anchor:middle}.matchup-radar text:nth-of-type(2),.matchup-radar text:nth-of-type(3){text-anchor:start}.matchup-radar text:nth-of-type(5),.matchup-radar text:nth-of-type(6){text-anchor:end}.radar-grid{fill:none;stroke:#37506e;stroke-width:1}.radar-series{stroke-width:2}.radar-series.self{fill:#16dfff28;stroke:#16dfff}.radar-series.opponent{fill:#b34fff28;stroke:#b34fff}.matchup-radar-legend{display:flex;gap:14px;justify-content:center;color:#90a7bf;font-size:10px}.matchup-radar-legend span{display:inline-flex;align-items:center;gap:5px}.matchup-metrics{display:grid;gap:11px;padding:0 4px}.matchup-metric-row{display:grid;grid-template-columns:45px 22px 1fr 22px;align-items:center;gap:6px;color:#c1d3e8;font-size:9px}.matchup-metric-row strong{display:none}.matchup-metric-row .matchup-metric-bar{grid-column:3;height:7px;background:#15283c;border:1px solid #2c4a67}.matchup-metric-row .matchup-metric-bar.self{grid-row:1}.matchup-metric-row .matchup-metric-bar.opponent{grid-row:1}.matchup-metric-bar{position:relative;overflow:hidden}.matchup-metric-bar::after{content:"";display:block;width:var(--metric-value);height:100%;border-radius:inherit}.matchup-metric-bar.self::after{background:#16dfff}.matchup-metric-bar.opponent::after{background:#b34fff}.matchup-history{margin-top:12px}.matchup-history-list{display:flex;flex-wrap:wrap;gap:9px;padding-top:11px}.matchup-history-row{padding:7px 9px;border:1px solid #2b4861;color:#9fb1c8;font-size:10px}.matchup-empty{margin:0;padding:8px;color:#9fb1c8;font-size:10px}
+.matchup-metric-row{grid-template-rows:7px 7px;row-gap:4px}.matchup-metric-row .matchup-metric-bar.opponent{grid-row:2}
+.matchup-card{overflow:hidden}.radar-card{grid-template-columns:minmax(0,.9fr) minmax(0,1.1fr)}.radar-card>header{min-width:0;flex-wrap:wrap;gap:8px}.radar-card>.matchup-radar-legend{min-width:0;max-width:100%;flex:0 0 100%;flex-wrap:wrap;gap:8px;justify-content:flex-start;overflow:hidden}.radar-card>.matchup-radar-layout{grid-column:1/-1}.matchup-radar-layout{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.matchup-radar{min-width:0}.matchup-radar text:nth-of-type(2),.matchup-radar text:nth-of-type(3){text-anchor:end}.matchup-radar text:nth-of-type(5),.matchup-radar text:nth-of-type(6){text-anchor:start}.matchup-metrics{min-width:0}.matchup-metric-row>span:first-child{visibility:hidden}
+.radar-card{padding:9px 14px 8px}.radar-card>header{grid-column:1/-1;align-items:center;padding-bottom:7px}.matchup-buckler-samples{color:#90a7bf;font-size:10px}.radar-card>.matchup-radar-layout{display:grid;grid-template-columns:minmax(205px,.8fr) minmax(280px,1.2fr);grid-template-rows:auto auto;align-items:center;gap:9px 24px}.matchup-radar-side{display:grid;justify-items:center;gap:8px;min-width:0}.matchup-radar{width:220px;height:220px;max-width:100%;overflow:visible}.matchup-radar text{font-size:8px}.matchup-radar .radar-scale{fill:#607292;font-size:8px;text-anchor:middle}.matchup-metrics-panel{min-width:0;padding-left:8px}.matchup-metrics-title{margin-bottom:9px;color:#9db7db;font-size:10px;letter-spacing:.08em}.matchup-metrics{display:grid;gap:8px;padding:0;align-content:center}.matchup-metrics-heading,.matchup-metric-row{display:grid;grid-template-columns:58px 30px minmax(40px,1fr) 36px minmax(40px,1fr);align-items:center;gap:6px;min-width:0}.matchup-metrics-heading{color:#8da4bc;font-size:8px;letter-spacing:.05em;text-transform:uppercase}.matchup-metrics-heading span:nth-child(2){color:#16e5ff}.matchup-metrics-heading span:nth-child(4){color:#c15bff}.matchup-metric-row{color:#c1d3e8;font-size:9px}.matchup-metric-row>span:first-child{visibility:visible;color:#c1d3e8}.matchup-metric-value{font-weight:800;text-align:right}.matchup-metric-value.self{color:#16e5ff}.matchup-metric-value.opponent{color:#c15bff}.matchup-metric-row .matchup-metric-bar{grid-column:auto!important;grid-row:auto!important;width:100%;height:7px;border:0;border-radius:4px;background:#15283c;box-shadow:none}.matchup-metric-bar::after{height:100%;border-radius:4px}.radar-card>.matchup-radar-layout>.matchup-radar-legend{grid-column:1/-1;display:flex;width:100%;flex-wrap:nowrap;justify-content:flex-start;gap:24px;color:#16e5ff;font-size:9px;white-space:nowrap}.matchup-radar-legend span{display:inline-flex;align-items:center;gap:5px}.matchup-radar-legend span:last-child{color:#c15bff}.matchup-radar-legend .matchup-swatch{width:20px;height:2px;border-radius:0}.radar-card>#matchupBucklerState{display:none}
+@media(max-width:840px){.matchup-panel{inset:8px;padding:10px}.matchup-heading{display:block}.matchup-meta{justify-content:space-between;text-align:left;margin-top:12px}.insight-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.matchup-summary{grid-template-columns:1fr}.radar-card{grid-template-columns:1fr}.radar-card>header{align-items:flex-start}.radar-card>.matchup-radar-legend{flex:1 1 100%;justify-content:flex-start}.matchup-radar-layout{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.winrate-layout{min-height:220px}.matchup-donut{width:160px;height:160px}}
+@media(max-width:560px){.insight-stats{grid-template-columns:1fr}.matchup-radar-layout{grid-template-columns:1fr}.winrate-layout{gap:15px}.matchup-donut{width:140px;height:140px}.matchup-donut strong{font-size:25px}.matchup-meta{gap:14px}}
+
+/* Keep the reference card's metric columns compact at the desktop preview width. */
+.radar-card{width:520px;max-width:100%;justify-self:start}
+.radar-card{background:linear-gradient(135deg,#020e26 0%,#020d24 62%,#04132b 100%)}
+.radar-card>.matchup-radar-layout{grid-template-columns:205px 260px;gap:9px 13px}
+.matchup-metrics-heading{position:relative;display:block;height:11px}
+.matchup-metrics-heading span:nth-child(2),.matchup-metrics-heading span:nth-child(4){position:absolute;top:0;white-space:nowrap}
+.matchup-metrics-heading span:nth-child(2){left:85px}
+.matchup-metrics-heading span:nth-child(4){left:184px}
+.matchup-metrics-heading span:nth-child(3),.matchup-metrics-heading span:nth-child(5){display:none}
+.matchup-metric-row>span:first-child{padding-left:8px}
+.matchup-metric-row .matchup-metric-bar.self{margin-left:7px;width:calc(100% - 7px)}
+.matchup-metric-row .matchup-metric-bar.opponent{margin-left:2px;width:calc(100% + 3px)}
+.radar-card>header{transform:translateY(-5px)}
+.matchup-metrics{gap:11px}
+.matchup-metrics-panel{transform:translateY(9px)}
+.matchup-metric-row{font-size:10px}
+.matchup-metric-value{font-size:11px}
+.radar-card>.matchup-radar-layout>.matchup-radar-legend{transform:translateY(-4px)}
+.matchup-radar .radar-scale{text-anchor:middle!important}
+.matchup-radar text:nth-of-type(5){text-anchor:middle}
+.matchup-radar text:nth-of-type(6),.matchup-radar text:nth-of-type(7){text-anchor:start}
+.matchup-radar text:nth-of-type(8),.matchup-radar text:nth-of-type(9),.matchup-radar text:nth-of-type(10){text-anchor:middle}
+@media(max-width:840px){
+  .radar-card{width:100%;}
+  .radar-card>.matchup-radar-layout{grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:9px 12px}
+}
+@media(max-width:560px){
+  .radar-card>.matchup-radar-layout{grid-template-columns:1fr}
+  .matchup-metrics-panel,.radar-card>.matchup-radar-layout>.matchup-radar-legend{transform:none}
+}
+@media(max-width:900px){
+  .radar-card{width:100%;}
+  .radar-card>.matchup-radar-layout{grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:9px 12px}
+  .matchup-radar-side{padding-inline:5px}
+  .matchup-metrics-panel{width:100%;overflow:hidden}
+  .matchup-metrics{width:100%;}
+  .matchup-metrics-heading span:nth-child(4){left:auto;right:0}
+  .matchup-metric-row .matchup-metric-bar.self,.matchup-metric-row .matchup-metric-bar.opponent{margin-left:0;width:100%}
+}
+@media(max-width:600px){
+  .radar-card>.matchup-radar-layout{grid-template-columns:1fr}
+  .matchup-metrics-panel,.radar-card>.matchup-radar-layout>.matchup-radar-legend{transform:none}
+}
+.matchup-drive-gauge-card{width:520px;max-width:100%;margin-top:12px;padding:10px 14px;background:linear-gradient(135deg,#2a302f 0%,#263440 55%,#364467 100%)}
+.matchup-drive-gauge-card>header{display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid rgba(211,220,227,.45);padding-bottom:7px}
+.matchup-drive-gauge-card>header>span:last-child{color:#c7d1df;font-size:9px;letter-spacing:.08em}
+.matchup-drive-gauge-list{display:grid;margin-top:3px}
+.matchup-drive-gauge-row{display:grid;grid-template-columns:44px minmax(0,1fr) 58px;align-items:center;gap:8px;min-height:28px;border-bottom:1px solid rgba(208,217,224,.34);color:#f0f3f7;font-size:10px}
+.matchup-drive-gauge-swatch{display:block;width:42px;height:4px;background:var(--drive-gauge-color);box-shadow:0 0 8px color-mix(in srgb,var(--drive-gauge-color) 55%,transparent)}
+.matchup-drive-gauge-row>span{min-width:0;overflow-wrap:anywhere;white-space:normal}
+.matchup-drive-gauge-row strong{text-align:right;color:#f2f4f8;font-size:10px}
+.matchup-state.preview{border-color:#ffd671;color:#ffd671}
+.matchup-state.insufficient_sample{border-color:#ffd671;color:#ffd671}
+.matchup-state.partial{border-color:#ffd671;color:#ffd671}
+.matchup-state.error{border-color:#ff759b;color:#ff759b}
+.radar-card>header>.matchup-state{font-size:8px;min-height:16px;padding:0 6px}
+.radar-card>header>span:last-child{color:#90a7bf}
+@media(max-width:600px){.matchup-drive-gauge-card{width:100%}.matchup-drive-gauge-row{grid-template-columns:40px minmax(0,1fr) 54px;font-size:9px}.matchup-drive-gauge-swatch{width:38px}}
+.radar-card.play-comparison>.matchup-radar-layout{grid-template-columns:minmax(0,1fr);gap:8px}
+.radar-card.play-comparison .matchup-radar-side.hidden,.radar-card.play-comparison .matchup-radar-legend.hidden{display:none}
+.radar-card.play-comparison .matchup-metrics-panel{grid-column:1/-1;transform:none;padding-left:0}
+.radar-card.play-comparison .matchup-metrics{gap:6px;max-height:560px;overflow-y:auto;padding-right:4px}
+.matchup-play-group-header{display:flex;justify-content:space-between;align-items:baseline;gap:10px;padding:6px 0 3px;border-bottom:1px solid #284159;color:#a9c2df;font-size:10px}
+.matchup-play-group-header strong{font-weight:700;letter-spacing:.03em}
+.matchup-play-group-header small{color:#8198b1;font-size:8px;text-align:right;white-space:nowrap}
+.matchup-play-metric-row{display:grid;grid-template-columns:minmax(145px,1fr) minmax(92px,auto) minmax(55px,1fr) minmax(92px,auto) minmax(55px,1fr);align-items:center;gap:6px;min-width:0;padding:3px 0;color:#c1d3e8;font-size:9px}
+.matchup-play-metric-row>span:first-child{min-width:0;overflow-wrap:anywhere}
+.matchup-play-metric-row .matchup-metric-value{font-size:9px;white-space:nowrap}
+.matchup-play-metric-row .matchup-metric-bar{width:100%;height:6px;border:0;border-radius:4px;background:#15283c;box-shadow:none}
+.matchup-play-metric-row .matchup-metric-bar::after{height:100%;border-radius:4px}
+@media(max-width:600px){.matchup-play-metric-row{grid-template-columns:minmax(100px,1fr) minmax(70px,auto) 45px minmax(70px,auto) 45px;font-size:8px}.matchup-play-metric-row .matchup-metric-value{font-size:8px}.matchup-play-group-header small{white-space:normal}}
+
+/* Production data-comparison panel: paired values and bars are the primary
+   visual. The old six-axis radar remains intentionally unused because the
+   official PLAY fields are not one common 0-100 scale. */
+.matchup-actions{display:flex;align-items:center;gap:7px}.matchup-actions .button{min-width:58px}.matchup-card>header>div{min-width:0}.matchup-card>header>div>span{display:block}.matchup-scope-note{display:block;margin-top:4px;color:#8198b1;font-size:9px;font-weight:400;letter-spacing:.02em}.matchup-comparison-legend{display:flex;justify-content:center;align-items:center;gap:18px;flex-wrap:wrap;padding:10px 0 6px;color:#91a8bf;font-size:9px}.matchup-comparison-legend span{display:inline-flex;align-items:center;gap:5px}.matchup-comparison-legend .matchup-swatch{width:22px;height:3px;border-radius:0}.matchup-comparison-legend span:first-child{color:#16e5ff}.matchup-comparison-legend span:nth-child(2){color:#c15bff}.matchup-metrics{display:grid;gap:0;min-width:0}.matchup-play-group-header{display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:8px 0 5px;border-bottom:1px solid #284159;color:#a9c2df;font-size:10px}.matchup-play-group-header strong{font-weight:700;letter-spacing:.03em}.matchup-play-group-header small{color:#8198b1;font-size:8px;text-align:right;white-space:nowrap}.matchup-play-metric-row,.matchup-round-metric-row{display:grid;grid-template-columns:minmax(86px,auto) minmax(44px,1fr) minmax(142px,190px) minmax(44px,1fr) minmax(86px,auto);align-items:center;gap:8px;min-width:0;min-height:29px;padding:4px 0;border-bottom:1px solid rgba(40,65,89,.55);color:#c1d3e8;font-size:9px}.matchup-play-metric-row>b,.matchup-round-metric-row>b{text-align:center;min-width:0;overflow-wrap:anywhere;color:#dce7f3;font-weight:700}.matchup-metric-value{font-size:9px;font-weight:800;white-space:nowrap}.matchup-metric-value.self{text-align:right;color:#16e5ff}.matchup-metric-value.opponent{text-align:left;color:#c15bff}.matchup-metric-bar{display:block;width:100%;height:7px;border:0;border-radius:5px;background:#15283c;overflow:hidden}.matchup-metric-bar::after{content:"";display:block;width:var(--metric-value,0%);height:100%;border-radius:inherit}.matchup-metric-bar.self::after{margin-left:auto;background:#16dfff}.matchup-metric-bar.opponent::after{background:#b34fff}.matchup-round-card{margin-top:12px}.matchup-round-scope{display:flex;gap:16px;flex-wrap:wrap;padding:8px 0 2px;color:#a7b9ca;font-size:9px}.matchup-round-metrics{display:grid;gap:0;min-width:0}.matchup-note{margin:8px 0 0;color:#a7b9ca;font-size:9px;line-height:1.4}.matchup-state.insufficient_sample{border-color:#ffd671;color:#ffd671}.matchup-state.partial{border-color:#ffd671;color:#ffd671}.matchup-state.error{border-color:#ff759b;color:#ff759b}.matchup-state.loading{border-color:#83a8ff;color:#83a8ff}.comparison-card,.matchup-round-card{overflow:visible}.comparison-card .matchup-metrics,.matchup-round-card .matchup-round-metrics{overflow:visible}.matchup-panel{scrollbar-gutter:stable}.matchup-history{margin-bottom:4px}
+@media(max-width:840px){.matchup-actions{margin-top:0}.matchup-summary{grid-template-columns:1fr}.matchup-play-group-header{align-items:flex-start;flex-direction:column;gap:4px}.matchup-play-group-header small{white-space:normal;text-align:left}.matchup-play-metric-row,.matchup-round-metric-row{grid-template-columns:minmax(74px,auto) minmax(28px,1fr) minmax(92px,125px) minmax(28px,1fr) minmax(74px,auto);gap:5px;font-size:8px}.matchup-metric-value{font-size:8px;white-space:normal;line-height:1.15}.matchup-round-scope{display:grid;gap:4px}.matchup-comparison-legend{justify-content:flex-start;gap:12px}}
+@media(max-width:560px){.matchup-panel{inset:6px;padding:9px}.matchup-heading{display:block}.matchup-meta{justify-content:space-between;text-align:left;margin-top:12px}.insight-stats{grid-template-columns:1fr}.matchup-data-strip{padding:7px 9px}.matchup-actions{margin-left:auto}.matchup-play-metric-row,.matchup-round-metric-row{grid-template-columns:minmax(58px,auto) minmax(20px,1fr) minmax(72px,92px) minmax(20px,1fr) minmax(58px,auto);gap:4px}.matchup-play-metric-row>b,.matchup-round-metric-row>b{font-size:8px}.matchup-metric-value{font-size:7px}.matchup-metric-bar{height:6px}}
+
+.matchup-drive-radar-layout{display:grid;grid-template-columns:minmax(250px,.95fr) minmax(300px,1.05fr);gap:18px;align-items:center;padding:8px 0}.matchup-drive-radar{width:100%;max-width:280px;justify-self:center}.matchup-radar-grid{fill:none;stroke:#37506e;stroke-width:1}.matchup-radar-axis{stroke:#2d4662;stroke-width:1}.matchup-radar-series{stroke-width:2}.matchup-radar-axis-label{fill:#b8cae0;font-size:8px;font-weight:700}.matchup-radar-axis-label.number{display:none}.matchup-drive-radar-table{display:grid;gap:4px;min-width:0}.matchup-drive-radar-row{display:grid;grid-template-columns:24px minmax(0,1fr) 66px 66px;gap:6px;align-items:center;border-bottom:1px solid rgba(40,65,89,.55);padding:4px 0;color:#c1d3e8;font-size:9px}.matchup-drive-radar-row span{overflow-wrap:anywhere}.matchup-drive-radar-row b{text-align:right;white-space:nowrap}.matchup-drive-radar-row b.self{color:#16e5ff}.matchup-drive-radar-row b.opponent{color:#c15bff}.matchup-sa-bars{display:grid;gap:8px;padding:9px 0}.matchup-sa-row{display:grid;grid-template-columns:82px minmax(0,1fr);gap:8px;align-items:center}.matchup-sa-row>strong{font-size:9px}.matchup-sa-row>strong.self{color:#16e5ff}.matchup-sa-row>strong.opponent{color:#c15bff}.matchup-sa-bar{display:flex;height:24px;border:1px solid #2b4861;background:#0a1524;overflow:hidden}.matchup-sa-bar span{display:flex;align-items:center;justify-content:center;min-width:0;color:#07101b;font-size:8px;font-weight:800;border-right:1px solid #08111e;overflow:hidden;white-space:nowrap}.matchup-sa-bar .level-level1{background:#d58ac8}.matchup-sa-bar .level-level2{background:#b852a6}.matchup-sa-bar .level-level3{background:#8b2d7c}.matchup-sa-bar .level-ca{background:#2476d8}.matchup-sa-legend{display:flex;flex-wrap:wrap;gap:8px 14px;color:#b9c8d8;font-size:8px}.matchup-sa-legend span::before{content:"";display:inline-block;width:18px;height:4px;margin-right:4px;background:currentColor;vertical-align:middle}.matchup-sa-legend .level-level1{color:#d58ac8}.matchup-sa-legend .level-level2{color:#b852a6}.matchup-sa-legend .level-level3{color:#8b2d7c}.matchup-sa-legend .level-ca{color:#2476d8}.matchup-play-metric-row{grid-template-columns:minmax(70px,1fr) minmax(74px,auto) minmax(100px,1.2fr) minmax(74px,auto);}.matchup-play-metric-row .matchup-metric-value.self{grid-column:2;grid-row:1}.matchup-play-metric-row>b{grid-column:1;grid-row:1;text-align:left}.matchup-dumbbell-track{grid-column:3;grid-row:1;position:relative;height:10px;border-top:1px solid #6b7f9b;margin-top:4px}.matchup-dumbbell-point{position:absolute;top:-5px;width:10px;height:10px;border-radius:50%;transform:translateX(-50%);box-sizing:border-box}.matchup-dumbbell-point.self{background:#16dfff;border:2px solid #061622}.matchup-dumbbell-point.opponent{background:#b34fff;border:2px solid #1a0825}.matchup-play-metric-row .matchup-metric-value.opponent{grid-column:4;grid-row:1}.matchup-play-metric-row .matchup-metric-bar{display:none}
+@media(max-width:700px){.matchup-drive-radar-layout{grid-template-columns:1fr}.matchup-drive-radar{max-width:220px}.matchup-drive-radar-table{width:100%}}
+.matchup-drive-radar-axis-label.full{display:block}@media(max-width:700px){.matchup-radar-axis-label.full{display:none}.matchup-radar-axis-label.number{display:block}.matchup-drive-radar-row{grid-template-columns:24px minmax(0,1fr) 60px 60px}}
+.matchup-dumbbell-point.same-value{box-shadow:0 0 0 3px rgba(255,255,255,.78),0 0 0 5px rgba(22,229,255,.35)}
+.matchup-play-metric-row{grid-template-columns:minmax(64px,auto) minmax(90px,1fr) minmax(64px,auto);grid-template-rows:auto 12px;gap:2px 8px;padding:5px 0}.matchup-play-metric-row>b{grid-column:1/-1;grid-row:1;text-align:center;white-space:normal}.matchup-play-metric-row .matchup-metric-value.self{grid-column:1;grid-row:2}.matchup-play-metric-row .matchup-dumbbell-track{grid-column:2;grid-row:2}.matchup-play-metric-row .matchup-metric-value.opponent{grid-column:3;grid-row:2}
+
+/* Round comparison keeps both numeric labels next to the center code so the
+   eye can compare value → code → value without crossing the bars. */
+.matchup-play-metric-row{grid-template-columns:minmax(44px,1fr) minmax(86px,auto) minmax(100px,140px) minmax(86px,auto) minmax(44px,1fr)}
+.matchup-play-metric-row .matchup-metric-bar.self{grid-column:1;grid-row:1}
+.matchup-play-metric-row .matchup-metric-value.self{grid-column:2;grid-row:1;justify-self:end;text-align:right}
+.matchup-play-metric-row>b{grid-column:3;grid-row:1}
+.matchup-play-metric-row .matchup-metric-value.opponent{grid-column:4;grid-row:1;justify-self:start;text-align:left}
+.matchup-play-metric-row .matchup-metric-bar.opponent{grid-column:5;grid-row:1}
+.matchup-round-metric-row{grid-template-columns:minmax(44px,1fr) minmax(86px,auto) minmax(100px,140px) minmax(86px,auto) minmax(44px,1fr)}
+.matchup-round-metric-row .matchup-metric-bar.self{grid-column:1;grid-row:1}
+.matchup-round-metric-row .matchup-metric-value.self{grid-column:2;grid-row:1;justify-self:end;text-align:right}
+.matchup-round-metric-row>b{grid-column:3;grid-row:1}
+.matchup-round-metric-row .matchup-metric-value.opponent{grid-column:4;grid-row:1;justify-self:start;text-align:left}
+.matchup-round-metric-row .matchup-metric-bar.opponent{grid-column:5;grid-row:1}
+@media(max-width:840px){.matchup-play-metric-row,.matchup-round-metric-row{grid-template-columns:minmax(28px,1fr) minmax(74px,auto) minmax(92px,125px) minmax(74px,auto) minmax(28px,1fr)}}
+@media(max-width:560px){.matchup-play-metric-row,.matchup-round-metric-row{grid-template-columns:minmax(20px,1fr) minmax(58px,auto) minmax(72px,92px) minmax(58px,auto) minmax(20px,1fr)}}
+.history-opponent-profile-actions{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.matchup-state.unknown{border-color:#c783ff;color:#dcb7ff}
+.matchup-radar-grid.minor{opacity:.42;stroke-width:.7}.matchup-radar-grid.major{opacity:.9;stroke-width:1.1}
+
+/* Final dumbbell layout: keep the metric name and both values adjacent to a
+   single shared comparison track.  This override intentionally follows the
+   legacy bar rules above so the DOM order remains semantic while the visual
+   order is stable across wide and narrow panels. */
+.matchup-play-metric-row{grid-template-columns:minmax(0,1.4fr) minmax(72px,auto) minmax(72px,auto) minmax(130px,1fr);grid-template-rows:auto;gap:6px;align-items:center}
+.matchup-play-metric-row>b{grid-column:1;grid-row:1;text-align:left;justify-self:start}
+.matchup-play-metric-row .matchup-metric-value.self{grid-column:2;grid-row:1;justify-self:end;text-align:right}
+.matchup-play-metric-row .matchup-metric-value.opponent{grid-column:3;grid-row:1;justify-self:start;text-align:left}
+.matchup-play-metric-row .matchup-dumbbell-track{grid-column:4;grid-row:1}
+@media(max-width:700px){.matchup-play-metric-row{grid-template-columns:minmax(0,1fr) minmax(64px,auto) minmax(64px,auto);grid-template-rows:auto 12px;gap:2px 6px}.matchup-play-metric-row>b{grid-column:1/-1;grid-row:1;justify-self:start;text-align:left}.matchup-play-metric-row .matchup-metric-value.self{grid-column:1;grid-row:2;justify-self:start;text-align:left}.matchup-play-metric-row .matchup-metric-value.opponent{grid-column:2;grid-row:2;justify-self:start;text-align:left}.matchup-play-metric-row .matchup-dumbbell-track{grid-column:3;grid-row:2}}
