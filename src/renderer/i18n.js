@@ -111,6 +111,7 @@ const EN = {
   displayLayout: "Display Layout",
   options: "Options",
   closeOptions: "Close options",
+  backToManagement: "Management",
   overlayMove: "Overlay move",
   overlayLock: "Overlay lock",
   showStats: "Show stats window",
@@ -159,6 +160,7 @@ const EN = {
   resetStats: "Reset stats",
   closeStats: "Close stats window",
   matches: "MATCHES",
+  wins: "WINS",
   winsLosses: "Wins and losses",
   unknown: "—",
   loginOpened: "The official login page was opened",
@@ -215,6 +217,9 @@ const EN = {
   historyStep: "LOCAL MATCH HISTORY",
   fetchHistory: "Import 100 matches",
   closeHistory: "Close match history",
+  historyAct: "ACT",
+  historyActLatest: "Latest",
+  historyActUnavailable: "ACT scope unavailable",
   dateFrom: "DATE FROM",
   dateTo: "DATE TO",
   allModes: "All modes",
@@ -238,6 +243,10 @@ const EN = {
   matchList: "MATCH LIST",
   opponentCharacterStats: "OPPONENT CHARACTER STATS",
   opponentCharacterStatsEmpty: "No opponent character data",
+  opponentCharacterStatsLoading: "Loading official stats…",
+  opponentCharacterStatsProgress: "Fetching official match data {page}/{total}",
+  opponentCharacterStatsUnavailable: "Official stats unavailable",
+  opponentCharacterStatsPartial: "Official stats incomplete",
   date: "DATE",
   result: "RESULT",
   myCharacter: "MY CHARACTER",
@@ -266,6 +275,13 @@ const EN = {
   copyReplayId: "Copy replay ID",
   replayIdCopied: "Replay ID copied",
   matchUnit: "Match",
+  inputType: "INPUT",
+  inputTypeFilter: "INPUT TYPE",
+  historyInputTypeAll: "ALL",
+  historyInputTypeClassic: "C",
+  historyInputTypeModern: "M",
+  classic: "C",
+  modern: "M",
   historyTargetCode: "VIEW USER CODE",
   historySelectTarget: "Set display target",
   historySelectSelf: "Use my player",
@@ -286,30 +302,161 @@ const EN = {
   historyOpponentProfileLoading: "Loading official profile reference…",
   historyOpponentProfileUnavailable: "Official profile reference unavailable",
   historyOpponentProfileEmpty: "No official profile reference data",
+  selectedRoundResults: "SELECTED MATCH ROUND RESULTS",
+  battleLabel: "BATTLE",
+  roundLabel: "ROUND",
+  openMatchup: "DATA COMPARISON",
+  dataComparison: "DATA COMPARISON",
+  matchupAnalysis: "MATCHUP ANALYSIS",
+  matchupOverview: "Character matchup overview",
+  close: "CLOSE",
+  matchCharacter: "MATCH CHARACTER",
+  matchTimeRating: "MATCH-TIME MR / LP",
+  otherCharacterPeak: "OTHER CHARACTER PEAK",
+  selfWinRate: "SELF WIN RATE",
+  self: "SELF",
+  sampleUnavailable: "Sample unavailable",
+  bucklerComparison: "BUCKLER PROFILE COMPARISON",
+  matchupBattleTrend: "BATTLE TENDENCY: LAST 100 MATCHES AVERAGE",
+  matchupRoundTrend: "ROUND TENDENCY: IMPORTED MATCH HISTORY",
+  matchupSelf: "SELF",
+  matchupOpponent: "OPPONENT",
+  matchupSameItemPeriod: "Same metrics · aligned period",
+  matchupRefresh: "Refresh",
+  metricDriveGaugeUsage: "DRIVE GAUGE USAGE DISTRIBUTION",
+  metricSaGaugeUsage: "SA GAUGE USAGE SHARE",
+  metricDirectActions: "DRIVE REVERSAL / DRIVE PARRY / JUST PARRY",
+  metricDriveImpactSelf: "DRIVE IMPACT (SELF ATTACK)",
+  metricDriveImpactOpponent: "DRIVE IMPACT (OPPONENT ATTACK)",
+  metricStun: "STUN",
+  metricThrows: "THROWS",
+  metricCornerTime: "CORNER TIME (SEC / MATCH)",
+  metricDriveParry: "Drive Parry",
+  metricDriveImpact: "Drive Impact",
+  metricOverdriveArts: "Overdrive Arts",
+  metricParryDriveRush: "Parry Drive Rush",
+  metricCancelDriveRush: "Cancel Drive Rush",
+  metricDriveReversal: "Drive Reversal",
+  metricDamage: "Damage",
+  metricLevel1: "Lv1",
+  metricLevel2: "Lv2",
+  metricLevel3: "Lv3",
+  metricCa: "CA",
+  metricDriveReversalUse: "Drive Reversal used",
+  metricDriveParrySuccess: "Drive Parry success",
+  metricDriveParryThrowOpponent: "Threw opponent's Drive Parry",
+  metricDriveParryThrownByOpponent: "Own Drive Parry was thrown",
+  metricJustParry: "Just Parry",
+  metricLanded: "Landed",
+  metricPunishCounter: "Punish Counter",
+  metricCounteredOpponent: "Countered opponent's Drive Impact",
+  metricReceived: "Received",
+  metricReturnedByOpponent: "Returned by opponent's Drive Impact",
+  metricDealt: "Stun dealt",
+  metricStunReceived: "Stun received",
+  metricThrowLanded: "Throws landed",
+  metricThrowReceived: "Throws received",
+  metricTeched: "Throws teched",
+  metricOpponentCornered: "Opponent cornered",
+  metricSelfCornered: "Cornered by opponent",
+  averageCount: "AVG {average} / COUNT {count}",
+  secondsUnit: "{value} sec",
+  countUnit: "{value} times",
+  wonRounds: "{value} rounds won",
+  matchupUnknownRoundNote: "{count} unknown round codes were excluded from classification and win/loss totals.",
+  matchupNoUnknownRoundNote: "Zeros, missing values, and unavailable results are excluded from won-round totals and shown as unavailable.",
 };
 
 const JA = {
   ...EN,
-  historyTargetCode: "表示対象USER CODE",
-  historySelectTarget: "表示対象を設定",
-  historySelectSelf: "自分のプレイヤーに戻す",
+  matchUnit: "試合",
+  inputType: "操作",
+  inputTypeFilter: "操作タイプ",
+  historyInputTypeAll: "すべて",
+  historyInputTypeClassic: "C",
+  historyInputTypeModern: "M",
+  classic: "C",
+  modern: "M",
+  historyTargetCode: "表示対象のUSER CODE",
+  historySelectTarget: "表示対象を選択",
+  historySelectSelf: "自分のプレイヤーを表示",
   historyViewing: "表示中",
   historyViewingSelf: "自分のプレイヤーを表示中",
-  historyTargetSelected: "プレイヤーを選択しました。必要に応じて履歴を取得してください。",
-  historyAutoUpdating: "自動更新中: {seconds}秒間隔",
-  historyAutoStopped: "無通信時間が長いため自動更新を停止しました",
+  historyTargetSelected: "プレイヤーを選択しました。必要に応じて対戦履歴を取得してください。",
+  historyAutoUpdating: "自動更新中：{seconds}秒間隔",
+  historyAutoStopped: "長時間通信がなかったため、自動更新を停止しました",
   historyViewOpponent: "このプレイヤーの対戦履歴を表示",
-  historyOpponentProfile: "相手プロフィールの参考情報",
-  historyOpponentMatchCharacter: "対戦キャラ",
-  historyOpponentMatchRating: "対戦時MR / LP",
+  historyOpponentProfile: "相手プロフィール（参考情報）",
+  historyOpponentMatchCharacter: "対戦時のキャラクター",
+  historyOpponentMatchRating: "対戦時のMR／LP",
   historyOpponentRecord: "対戦前の直近20試合",
-  historyOpponentPotentialMr: "このキャラのPOTENTIAL MR",
-  historyOpponentPotentialLp: "このキャラのPOTENTIAL LP",
-  historyOpponentOtherPeak: "現在の別キャラ最高MR",
+  historyOpponentPotentialMr: "このキャラクターのPOTENTIAL MR",
+  historyOpponentPotentialLp: "このキャラクターのPOTENTIAL LP",
+  historyOpponentOtherPeak: "別キャラクターの最高MR",
   historyOpponentRetrieved: "取得時点",
-  historyOpponentProfileLoading: "公式プロフィールを参照中…",
-  historyOpponentProfileUnavailable: "公式プロフィールを参照できません",
-  historyOpponentProfileEmpty: "公式プロフィールの参考データがありません",
+  historyOpponentProfileLoading: "公式プロフィールを確認中…",
+  historyOpponentProfileUnavailable: "公式プロフィールを確認できません",
+  historyOpponentProfileEmpty: "公式プロフィールのデータがありません",
+  selectedRoundResults: "選択試合のラウンド結果",
+  battleLabel: "BATTLE",
+  roundLabel: "ROUND",
+  openMatchup: "データ比較",
+  dataComparison: "データ比較",
+  matchupAnalysis: "対戦レビュー",
+  matchupOverview: "Character matchup overview",
+  close: "閉じる",
+  matchCharacter: "対戦キャラクター",
+  matchTimeRating: "対戦時のMR／LP",
+  otherCharacterPeak: "別キャラクターの最高MR",
+  selfWinRate: "SELF WIN RATE",
+  self: "自分",
+  opponent: "相手",
+  sampleUnavailable: "データ未取得",
+  bucklerComparison: "BUCKLERプロフィール比較",
+  matchupBattleTrend: "バトル傾向：過去100戦平均",
+  matchupRoundTrend: "ラウンド傾向：取得できた対戦履歴を集計",
+  matchupSelf: "自分",
+  matchupOpponent: "対戦相手",
+  matchupSameItemPeriod: "同一項目・同一期間",
+  matchupRefresh: "更新",
+  metricDriveGaugeUsage: "ドライブゲージ使用分布",
+  metricSaGaugeUsage: "SAゲージ使用割合",
+  metricDirectActions: "ドライブリバーサル／ドライブパリィ／ジャストパリィ",
+  metricDriveImpactSelf: "ドライブインパクト（自分の使用）",
+  metricDriveImpactOpponent: "ドライブインパクト（相手の使用）",
+  metricStun: "スタン",
+  metricThrows: "投げ",
+  metricCornerTime: "壁際（秒／戦）",
+  metricDriveParry: "ドライブパリィ",
+  metricDriveImpact: "ドライブインパクト",
+  metricOverdriveArts: "オーバードライブアーツ",
+  metricParryDriveRush: "パリィドライブラッシュ",
+  metricCancelDriveRush: "キャンセルドライブラッシュ",
+  metricDriveReversal: "ドライブリバーサル",
+  metricDamage: "ダメージ",
+  metricDriveReversalUse: "ドライブリバーサル使用",
+  metricDriveParrySuccess: "ドライブパリィ成功",
+  metricDriveParryThrowOpponent: "相手のドライブパリィを投げた",
+  metricDriveParryThrownByOpponent: "自分のドライブパリィを投げられた",
+  metricJustParry: "ジャストパリィ",
+  metricLanded: "決めた回数",
+  metricPunishCounter: "パニッシュカウンター",
+  metricCounteredOpponent: "相手のドライブインパクトに決めた回数",
+  metricReceived: "受けた回数",
+  metricReturnedByOpponent: "相手にドライブインパクトで返された回数",
+  metricDealt: "スタンさせた",
+  metricStunReceived: "スタンさせられた",
+  metricThrowLanded: "投げ決めた",
+  metricThrowReceived: "投げ受けた",
+  metricTeched: "投げ抜け",
+  metricOpponentCornered: "相手を追い詰めた時間",
+  metricSelfCornered: "相手に追い詰められた時間",
+  averageCount: "平均 {average} / 回数 {count}",
+  secondsUnit: "{value}秒",
+  countUnit: "{value}回",
+  wonRounds: "{value}獲得ラウンド",
+  matchupUnknownRoundNote: "未知コード {count}件は分類・勝敗集計から除外しています。",
+  matchupNoUnknownRoundNote: "0・欠損・取得不能は獲得ラウンドへ数えず、未取得として表示します。",
   fontStyle: "スタイル",
   fontNormal: "通常",
   fontItalic: "斜体",
@@ -330,13 +477,13 @@ const JA = {
   categoryNotifications: "通知",
   friendOnlineNotifications: "FRIEND ONLINE NOTIFICATIONS",
   friendOnlineNotificationsHeading: "フレンドのオンライン通知",
-  friendOnlineNotificationsNote: "FRIENDSのみを通知します。",
+  friendOnlineNotificationsNote: "FRIENDSのオンライン変化だけを通知します。",
   friendOnlineNotificationTiming: "通知タイミング",
   friendOnlineNotificationTimingAlways: "常に通知",
   friendOnlineNotificationTimingGameOnly: "ゲーム起動中のみ",
-  friendOnlineNotificationGameExeNote: "ゲーム起動中のみを使用するにはアプリ設定でゲーム.exeの登録が必要です。未登録の場合は通知されません。ゲーム起動検知をONにする必要はありません。",
+  friendOnlineNotificationGameExeNote: "通知を「ゲーム起動中のみ」にするには、アプリ設定でゲーム.exeを登録してください。未登録の場合は通知されません。ゲーム起動検知をONにする必要はありません。",
   friendOnlineNotificationSound: "通知音",
-  friendOnlineNotificationSoundNote: "Windows標準サウンドから選択できます。",
+  friendOnlineNotificationSoundNote: "Windows標準のサウンドから選べます。",
   notificationSoundNone: "サウンドなし",
   previewSound: "試聴",
   previewSoundPlaying: "再生中…",
@@ -369,25 +516,25 @@ const JA = {
   nextPage: "次へ",
   socialEmpty: "表示するプレイヤーはいません",
   socialLoadError: "プレイヤー状態を取得できませんでした",
-  socialMonitoringSuspended: "FRIENDS取得休止中",
-  socialMonitoringSuspendedNote: "アプリ操作またはゲーム起動時に再開します",
+  socialMonitoringSuspended: "FRIENDSの取得を休止中",
+  socialMonitoringSuspendedNote: "アプリを操作するか、ゲームを起動すると再開します",
   privacy: "PRIVACY",
   localData: "ローカルデータ",
-  currentAppVersion: "現在のアプリバージョン",
-  localDataClearNote: "公式サイトのログイン状態、保存した対戦履歴・セッション戦績、プロフィール・ランキング・FRIENDSなどの一時キャッシュを削除します。表示設定は残ります。ID・パスワード自体は保存していません。",
+  currentAppVersion: "アプリのバージョン",
+  localDataClearNote: "公式サイトのログイン状態、保存した対戦履歴・セッション戦績、プロフィール・ランキング・FRIENDSなどの一時データを削除します。表示設定は残ります。ID・パスワードは保存していません。",
   deleteLogin: "ログイン情報を削除",
-  clear: "消去",
+  clear: "削除",
   appUpdate: "APP UPDATE",
   updateAvailable: "UPDATE",
-  githubUpdateNote: "GitHub Releasesから更新を確認できます",
+  githubUpdateNote: "GitHub Releasesで更新を確認できます",
   location: "場所",
   check: "確認",
   startup: "STARTUP",
-  startupHeading: "コンピューターの起動時にアプリを実行する",
-  startupNote: "Windowsへのサインイン時に管理画面を表示せず、通知領域へ最小化してアプリを起動します。ゲーム起動検知を使う場合は、この設定をONにしてください。",
+  startupHeading: "Windowsへのサインイン時にアプリを起動する",
+  startupNote: "Windowsへのサインイン時に管理画面を表示せず、通知領域に最小化してアプリを起動します。ゲーム起動検知を使う場合は、この設定をONにしてください。",
   gameDetection: "GAME DETECTION",
-  gameDetectionHeading: "ゲーム起動を検知してオーバーレイを表示する",
-  gameDetectionNote: "対象ゲームの.exeを指定します。この機能は「コンピューターの起動時にアプリを実行する」がONで、アプリが起動中の場合に動作します。",
+  gameDetectionHeading: "ゲームの起動を検知してオーバーレイを表示する",
+  gameDetectionNote: "対象ゲームの.exeを指定します。この機能は「Windowsへのサインイン時にアプリを起動する」がONで、アプリが起動しているときに動作します。",
   gameNotSelected: "ゲーム未選択",
   chooseExecutable: "実行ファイルを選択",
   liveStep: "STEP 02 / LIVE SESSION",
@@ -397,7 +544,7 @@ const JA = {
   currentCharacter: "CURRENT CHARACTER",
   sessionPeak: "SESSION PEAK",
   sessionPeakRating: "SESSION PEAK MR / LP",
-  graphAriaLabel: "起動後のMR増減グラフ",
+  graphAriaLabel: "アプリ起動後のMR増減グラフ",
   currentRating: "CURRENT",
   // Keep the metric name consistent with the other English-style labels
   // (MR DELTA, CURRENT MR, etc.) even when the UI language is Japanese.
@@ -405,7 +552,7 @@ const JA = {
   trend: "TREND",
   trendDescription: "アプリ起動後の変動",
   dataWaiting: "データ待機中",
-  graphEmptyRanked: "ランクマッチを計測するとグラフが表示されます",
+  graphEmptyRanked: "ランクマッチを計測すると、グラフが表示されます",
   graphEmptyOther: "グラフはランクマッチでのみ表示されます",
   startMeasure: "計測を開始",
   resumeMeasure: "計測を再開",
@@ -416,6 +563,7 @@ const JA = {
   displayLayout: "表示レイアウト",
   options: "オプション",
   closeOptions: "オプションを閉じる",
+  backToManagement: "管理画面",
   overlayMove: "オーバーレイ移動",
   overlayLock: "オーバーレイ固定",
   showStats: "戦績ウィンドウを表示",
@@ -428,7 +576,7 @@ const JA = {
   windowOrientation: "WINDOW ORIENTATION",
   horizontal: "横",
   vertical: "縦",
-  orientationWindowOnly: "WINDOW MODEでのみ使用できます",
+  orientationWindowOnly: "WINDOW MODEでのみ利用できます",
   normal: "通常",
   overlay: "オーバーレイ",
   displayOptions: "表示オプション",
@@ -438,7 +586,7 @@ const JA = {
   categoryDesign: "デザイン",
   categoryDataIntegration: "データ取得・連携",
   displayedStats: "表示する戦績項目",
-  potentialBaseline: "POTENTIAL MR基準線",
+  potentialBaseline: "POTENTIAL MRの基準線",
   graph: "GRAPH",
   graphMatchCount: "グラフ表示試合数",
   matches20: "20戦",
@@ -451,21 +599,22 @@ const JA = {
   font: "FONT",
   color: "COLOR",
   updateInterval: "UPDATE INTERVAL",
-  updateIntervalNote: "30分間対戦がなければ5分間隔、60分で自動停止します",
-  obsBrowser: "OPTION  OBS ブラウザソース",
-  copyUrl: "URLコピー",
-  disclaimer: "非公式のツールです。",
+  updateIntervalNote: "30分間対戦がない場合は5分間隔にし、60分間対戦がない場合は自動停止します",
+  obsBrowser: "OPTION  OBSブラウザソース",
+  copyUrl: "URLをコピー",
+  disclaimer: "非公式ツールです。",
   matchSession: "MATCH SESSION",
   resetStats: "戦績をリセット",
   closeStats: "戦績ウィンドウを閉じる",
   matches: "対戦数",
-  winsLosses: "勝数と敗数",
+  wins: "勝利数",
+  winsLosses: "勝敗",
   unknown: "—",
   loginOpened: "公式ログイン画面を開きました",
   fetchingPlayer: "ログイン中のプレイヤー情報を取得しています…",
   playerConfigured: "ログイン中のプレイヤーを設定しました",
   loginRequired: "要ログイン",
-  startingSession: "現在の戦績を基準としてセッションを開始しています…",
+  startingSession: "現在の戦績を基準にセッションを開始しています…",
   monitoringStarted: "ランクマッチの監視を開始しました",
   sessionEnded: "配信セッションを終了しました",
   statsReset: "起動後の戦績を0から数え直します",
@@ -475,12 +624,12 @@ const JA = {
   overlayUnlockedNotice: "オーバーレイをドラッグして配置を調整できます",
   pollChanged: "戦績の取得間隔を変更しました",
   gameConfigured: "ゲーム実行ファイルを設定しました",
-  launchEnabled: "コンピューター起動時のアプリ実行を有効にしました",
-  launchDisabled: "コンピューター起動時のアプリ実行を無効にしました",
+  launchEnabled: "Windowsへのサインイン時のアプリ起動を有効にしました",
+  launchDisabled: "Windowsへのサインイン時のアプリ起動を無効にしました",
   chooseGameFirst: "先にゲーム実行ファイルを選択してください",
   gameDetectionEnabled: "ゲーム起動のバックグラウンド監視を有効にしました",
   gameDetectionDisabled: "ゲーム起動の検知を無効にしました",
-  gameDetectionRequiresStartup: "ゲーム起動検知を使うには、コンピューター起動時のアプリ実行をONにしてください",
+  gameDetectionRequiresStartup: "ゲーム起動検知を使うには、Windowsへのサインイン時のアプリ起動をONにしてください",
   obsCopied: "OBS用URLをコピーしました",
   privateDataDeleted: "このPCのログイン情報を削除しました",
   autoPlayerConfigured: "ログイン中のプレイヤーを自動設定しました",
@@ -504,17 +653,20 @@ const JA_HISTORY = {
   historyStep: "LOCAL MATCH HISTORY",
   fetchHistory: "100件を取得",
   closeHistory: "対戦履歴を閉じる",
+  historyAct: "ACT",
+  historyActLatest: "最新",
+  historyActUnavailable: "ACTの範囲を取得できません",
   dateFrom: "開始日",
   dateTo: "終了日",
   allModes: "すべて",
   characterFilter: "キャラクター",
   allCharacters: "すべてのキャラクター",
   maxStreak: "最大連勝",
-  maxRating: "最大MR / LP",
+  maxRating: "最高MR／LP",
   resultTrend: "勝敗の推移",
   mrTrend: "MRの推移",
   lpTrend: "LPの推移",
-  ratingTrendHeading: "MR / LP推移",
+  ratingTrendHeading: "MR／LPの推移",
   historyRatingPeriod: "表示期間",
   historyRatingPeriodAll: "全期間",
   historyRatingPeriodWeek: "週別",
@@ -527,25 +679,29 @@ const JA_HISTORY = {
   matchList: "対戦一覧",
   opponentCharacterStats: "対戦キャラクター別成績",
   opponentCharacterStatsEmpty: "表示できる対戦データがありません",
+  opponentCharacterStatsLoading: "公式戦績を取得中…",
+  opponentCharacterStatsProgress: "公式対戦データを取得中 {page}/{total}",
+  opponentCharacterStatsUnavailable: "公式戦績を取得できません",
+  opponentCharacterStatsPartial: "公式戦績が一部未取得です",
   date: "対戦日時",
   result: "結果",
-  myCharacter: "自分のキャラ",
+  myCharacter: "自分のキャラクター",
   opponent: "相手",
   rating: "レート",
-  opponentCharacter: "相手のキャラ",
-  opponentRating: "相手のMR / LP",
+  opponentCharacter: "相手のキャラクター",
+  opponentRating: "相手のMR／LP",
   win: "勝利",
   loss: "敗北",
   draw: "引き分け",
   historyEmpty: "取得した対戦履歴はありません",
-  historyFetchReady: "取得できます（最大100件／10ページ、10分に1回）",
+  historyFetchReady: "取得できます（最大100件・10ページ、10分に1回）",
   historyFetchCooldown: "あと{seconds}秒で取得できます",
-  historyFetched: "対戦履歴をローカルに保存しました",
+  historyFetched: "このPCに対戦履歴を保存しました",
   historyFetching: "読み込み中…",
-  historyFetchProgress: "読み込み中：{completed}/{max}ページ・{count}件取得済み",
-  historyFetchComplete: "取得完了：{count}件（{pages}ページ）",
-  historyFetchCompleteEmpty: "取得完了：0件",
-  historyFetchPartial: "取得途中で停止：{count}件（{pages}ページ）",
+  historyFetchProgress: "読み込み中：{completed}/{max}ページ（{count}件取得済み）",
+  historyFetchComplete: "対戦履歴を取得しました：{count}件（{pages}ページ）",
+  historyFetchCompleteEmpty: "対戦履歴はありません",
+  historyFetchPartial: "対戦履歴の取得が途中で停止しました：{count}件（{pages}ページ）",
   historyFetchUnavailable: "ログインすると対戦履歴を取得できます",
   recentMatches: "最近の対戦",
   historyPrevious: "前へ",
@@ -921,6 +1077,87 @@ for (const [locale, labels] of Object.entries(ORIENTATION_LABELS)) {
 
 let activeLocale = "ja-jp";
 
+// Character labels are part of the locale-specific Buckler payload. Existing
+// history can retain a Japanese label, so resolve the stable IDs through the
+// verified locale labels before rendering. IDs not present here stay unknown
+// instead of being guessed from a different locale.
+const CHARACTER_NAMES_BY_ID = Object.freeze({
+  "ja-jp": Object.freeze({ 9: "キャミィ", 22: "豪鬼", 31: "アレックス" }),
+  en: Object.freeze({ 9: "CAMMY", 22: "AKUMA", 31: "ALEX" }),
+  de: Object.freeze({ 9: "CAMMY", 22: "AKUMA", 31: "ALEX" }),
+  "es-es": Object.freeze({ 9: "CAMMY", 22: "AKUMA", 31: "ALEX" }),
+  "es-us": Object.freeze({ 9: "CAMMY", 22: "AKUMA", 31: "ALEX" }),
+  fr: Object.freeze({ 9: "CAMMY", 22: "AKUMA", 31: "ALEX" }),
+  it: Object.freeze({ 9: "CAMMY", 22: "AKUMA", 31: "ALEX" }),
+  "ko-kr": Object.freeze({ 9: "캐미", 22: "고우키", 31: "알렉스" }),
+  "zh-hans": Object.freeze({ 9: "嘉米", 22: "豪鬼", 31: "阿历克斯" }),
+  "zh-hant": Object.freeze({ 9: "凱米", 22: "豪鬼", 31: "亞歷克斯" }),
+  "pt-br": Object.freeze({ 9: "CAMMY", 22: "AKUMA", 31: "ALEX" }),
+  pl: Object.freeze({ 9: "CAMMY", 22: "AKUMA", 31: "ALEX" }),
+  ru: Object.freeze({ 9: "КЭММИ", 22: "АКУМА", 31: "АЛЕКС" }),
+  ar: Object.freeze({ 9: "كامي", 22: "أكوما", 31: "أليكس" }),
+});
+
+// Locale labels observed in the official history payload are more complete
+// than the small compatibility table above (and grow with new fighters).
+// Keep them in memory by locale, never across locales, so a partial cache can
+// be filled without allowing a different-language label to leak into the UI.
+const runtimeCharacterNamesByLocale = Object.create(null);
+const runtimeCharacterNameConflictsByLocale = Object.create(null);
+
+function resetCharacterNamesByLocale() {
+  for (const locale of Object.keys(runtimeCharacterNamesByLocale)) {
+    delete runtimeCharacterNamesByLocale[locale];
+  }
+  for (const locale of Object.keys(runtimeCharacterNameConflictsByLocale)) {
+    delete runtimeCharacterNameConflictsByLocale[locale];
+  }
+}
+
+function registerCharacterNamesByLocale(value, options = {}) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return;
+  const replaceBatch = options?.replaceBatch === true;
+  for (const [locale, labels] of Object.entries(value)) {
+    if (!LOCALES[locale] || !labels || typeof labels !== "object" || Array.isArray(labels)) continue;
+    const target = runtimeCharacterNamesByLocale[locale] ?? (runtimeCharacterNamesByLocale[locale] = Object.create(null));
+    const conflicts = runtimeCharacterNameConflictsByLocale[locale] ?? (runtimeCharacterNameConflictsByLocale[locale] = new Set());
+    for (const [id, label] of Object.entries(labels)) {
+      const numericId = Number(id);
+      const candidates = (Array.isArray(label) ? label : [label])
+        .map((candidate) => String(candidate ?? "").trim())
+        .filter(Boolean);
+      const unique = [...new Set(candidates)];
+      if (!Number.isFinite(numericId) || numericId <= 0 || !unique.length) continue;
+      if (unique.length > 1) {
+        delete target[numericId];
+        conflicts.add(numericId);
+        continue;
+      }
+      if (!replaceBatch && target[numericId] && target[numericId] !== unique[0]) {
+        delete target[numericId];
+        conflicts.add(numericId);
+        continue;
+      }
+      conflicts.delete(numericId);
+      target[numericId] = unique[0];
+    }
+  }
+}
+
+function localeCharacterName(id) {
+  const numericId = Number(id);
+  if (!Number.isFinite(numericId) || numericId <= 0) return null;
+  if (runtimeCharacterNameConflictsByLocale[activeLocale]?.has(numericId)) return null;
+  return runtimeCharacterNamesByLocale[activeLocale]?.[numericId] ??
+    CHARACTER_NAMES_BY_ID[activeLocale]?.[numericId] ?? null;
+}
+
+function hasCharacterNameConflict(locale = activeLocale, id = null) {
+  const numericId = Number(id);
+  return Number.isFinite(numericId) && numericId > 0 &&
+    runtimeCharacterNameConflictsByLocale[String(locale)]?.has(numericId) === true;
+}
+
 function packFor(locale = activeLocale) {
   return PACKS[locale] ?? EN;
 }
@@ -930,9 +1167,11 @@ function translate(key, locale = activeLocale) {
   return pack[key] ?? EN[key] ?? key;
 }
 
-function characterName(value, locale = activeLocale) {
-  const raw = String(value ?? "").trim();
-  return raw;
+function characterName(value, id = null) {
+  const mapped = localeCharacterName(id);
+  // An unresolved ID is unavailable data, not a user-facing label. Never
+  // expose an unverified raw label or internal numeric identifier.
+  return mapped || "—";
 }
 
 function applyTranslations(root = document, locale = activeLocale) {
@@ -966,8 +1205,12 @@ function statusLabel(status, locale = activeLocale) {
 window.matchOverlayI18n = {
   LOCALES,
   applyTranslations,
+  getLocale: () => activeLocale,
   ratingLabel,
   statusLabel,
   characterName,
+  hasCharacterNameConflict,
+  resetCharacterNamesByLocale,
+  registerCharacterNamesByLocale,
   t: translate,
 };

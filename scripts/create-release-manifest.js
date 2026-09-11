@@ -15,12 +15,20 @@ const {
 
 const root = path.resolve(__dirname, "..");
 const outputDirectory = String(
-  process.env.MATCH_SESSION_OVERLAY_DIST_DIR ?? "dist",
+  process.env.MATCH_SESSION_OVERLAY_DIST_DIR ?? "dist/release",
 ).trim();
-if (!/^[a-zA-Z0-9._-]+$/.test(outputDirectory)) {
-  throw new Error("MATCH_SESSION_OVERLAY_DIST_DIR must be a repository-local directory name");
+const distPath = path.resolve(root, outputDirectory);
+const distRelativePath = path.relative(root, distPath);
+if (
+  !outputDirectory ||
+  path.isAbsolute(outputDirectory) ||
+  !distRelativePath ||
+  distRelativePath === ".." ||
+  distRelativePath.startsWith(`..${path.sep}`) ||
+  path.isAbsolute(distRelativePath)
+) {
+  throw new Error("MATCH_SESSION_OVERLAY_DIST_DIR must stay within the repository");
 }
-const distPath = path.join(root, outputDirectory);
 const packageJson = JSON.parse(
   fs.readFileSync(path.join(root, "package.json"), "utf8"),
 );

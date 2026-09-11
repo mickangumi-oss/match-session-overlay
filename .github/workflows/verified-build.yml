@@ -53,12 +53,12 @@ jobs:
         id: installer
         shell: pwsh
         run: |
-          $installer = Get-ChildItem dist -Filter '*-Setup.exe' -File
+          $installer = Get-ChildItem dist\release -Filter '*-Setup.exe' -File
           if ($installer.Count -ne 1) {
             throw "Expected exactly one installer, found $($installer.Count)"
           }
           $hash = (Get-FileHash -LiteralPath $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-          "$hash  $($installer.Name)" | Set-Content -LiteralPath dist\SHA256SUMS.txt -Encoding ascii
+          "$hash  $($installer.Name)" | Set-Content -LiteralPath dist\release\SHA256SUMS.txt -Encoding ascii
           "path=$($installer.FullName)" >> $env:GITHUB_OUTPUT
 
       - name: Create GitHub build attestation
@@ -72,5 +72,5 @@ jobs:
           name: windows-installer
           if-no-files-found: error
           path: |
-            dist/*-Setup.exe
-            dist/SHA256SUMS.txt
+            dist/release/*-Setup.exe
+            dist/release/SHA256SUMS.txt

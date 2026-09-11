@@ -236,7 +236,7 @@ function buildOpponentOfficialInsight({ records, characterId, player, deriveHist
   for (const record of selected) {
     if (record?.result === "win") result.wins += 1;
     else if (record?.result === "loss") result.losses += 1;
-    else result.draws += 1;
+    else if (record?.result === "draw") result.draws += 1;
   }
   for (const type of RATING_TYPES) {
     const series = typeof deriveHistoryRatingSeries === "function"

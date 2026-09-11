@@ -39,6 +39,35 @@ function compactStatsWindowInitialSize(preset, scale = 0.9) {
   };
 }
 
+function mainWindowInitialHeight(workAreaHeight, {
+  preferredHeight = 920,
+  margin = 0,
+} = {}) {
+  const preferred = Number.isFinite(Number(preferredHeight))
+    ? Math.max(1, Math.round(Number(preferredHeight)))
+    : 920;
+  const available = Number(workAreaHeight) - Number(margin);
+  if (!Number.isFinite(available)) return preferred;
+  return Math.max(1, Math.min(preferred, Math.floor(available)));
+}
+
+function clampBoundsToWorkArea(bounds, workArea, margin = 0) {
+  if (!bounds || !workArea) return bounds;
+  const width = Math.min(bounds.width, Math.max(1, workArea.width - margin * 2));
+  const height = Math.min(bounds.height, Math.max(1, workArea.height - margin * 2));
+  const minX = workArea.x + margin;
+  const minY = workArea.y + margin;
+  const maxX = workArea.x + workArea.width - margin - width;
+  const maxY = workArea.y + workArea.height - margin - height;
+  return {
+    ...bounds,
+    x: Math.min(Math.max(Number.isFinite(bounds.x) ? bounds.x : minX, minX), maxX),
+    y: Math.min(Math.max(Number.isFinite(bounds.y) ? bounds.y : minY, minY), maxY),
+    width,
+    height,
+  };
+}
+
 function resizeBoundsForGraphVisibility(currentBounds, previousPreset, nextPreset) {
   const graphWasRemoved = nextPreset.height < previousPreset.height;
   return {
@@ -106,8 +135,10 @@ function resizeBoundsForDisplayItemCount(
 
 module.exports = {
   compactStatsWindowInitialSize,
+  clampBoundsToWorkArea,
   expandBoundsToMinimumHeight,
   horizontalMetricMinimumWidth,
+  mainWindowInitialHeight,
   resizeBoundsForDisplayItemCount,
   resizeBoundsForGraphVisibility,
   statsWindowSizeConstraints,

@@ -12,6 +12,19 @@ contextBridge.exposeInMainWorld("matchOverlay", {
   resetTracking: () => ipcRenderer.invoke("tracker:reset"),
   getState: () => ipcRenderer.invoke("tracker:state"),
   getHistoryState: () => ipcRenderer.invoke("history:state"),
+  getHistoryOpponentCharacterStats: (profileId, locale, actId = null, selectedOwnCharacterId = null, requestToken = null, matchMode = "all", actSelectionSource = "latest", options = {}) =>
+    ipcRenderer.invoke("history:opponent-character-stats", {
+      profileId,
+      locale,
+      actId,
+      selectedOwnCharacterId,
+      requestToken,
+      matchMode,
+      actSelectionSource,
+      forceRefresh: options?.forceRefresh === true,
+    }),
+  getHistoryCharacterNames: (profileId, locale, actId = null) =>
+    ipcRenderer.invoke("history:character-names", { profileId, locale, actId }),
   fetchHistory: () => ipcRenderer.invoke("history:fetch"),
   selectHistoryProfile: (userCode) =>
     ipcRenderer.invoke("history:select-profile", { userCode }),
@@ -24,6 +37,11 @@ contextBridge.exposeInMainWorld("matchOverlay", {
       characterDisplayName: payload?.characterDisplayName,
       historyOwnerProfileId: payload?.historyOwnerProfileId,
       replayId: payload?.replayId,
+      selectedActSelector: payload?.selectedActSelector,
+      selectedActId: payload?.selectedActId,
+      actSelectionSource: payload?.actSelectionSource === "explicit" ? "explicit" : "latest",
+      currentActId: payload?.currentActId,
+      currentActStatus: payload?.currentActStatus,
       selectedRecord: payload?.selectedRecord,
       forceRefresh: payload?.forceRefresh === true,
     }),
@@ -72,6 +90,11 @@ contextBridge.exposeInMainWorld("matchOverlay", {
     const listener = (_event, state) => callback(state);
     ipcRenderer.on("history:progress", listener);
     return () => ipcRenderer.removeListener("history:progress", listener);
+  },
+  onHistoryOpponentCharacterStatsProgress: (callback) => {
+    const listener = (_event, state) => callback(state);
+    ipcRenderer.on("history:opponent-character-stats-progress", listener);
+    return () => ipcRenderer.removeListener("history:opponent-character-stats-progress", listener);
   },
   onSocialState: (callback) => {
     const listener = (_event, state) => callback(state);
