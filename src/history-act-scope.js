@@ -15,7 +15,22 @@ function normalizeHistoryActId(value) {
     : null;
 }
 
-function buildOfficialActOptions(currentActId) {
+function buildOfficialActOptions(currentActId, registry = null) {
+  if (
+    registry?.status === "ready" &&
+    Array.isArray(registry.acts) &&
+    registry.acts.length > 0
+  ) {
+    return registry.acts.map((act) => ({
+      id: act.id,
+      label: act.label,
+      startDate: act.startDate ?? "",
+      endDate: act.endDate ?? "",
+      source: act.source ?? registry.source ?? "official_profile_play_act_selector",
+      retrievedAt: registry.retrievedAt ?? null,
+      proof: registry.proof ?? null,
+    }));
+  }
   const current = normalizePositiveActId(currentActId);
   if (current == null) return [];
   return Array.from({ length: current + 1 }, (_unused, index) => {

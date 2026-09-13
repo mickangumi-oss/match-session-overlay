@@ -147,6 +147,10 @@ const {
   PLAY_APPROVED_FIELD_CONTRACT,
   comparePlayProfiles,
 } = require("./opponent-play-metrics");
+const {
+  opponentProfileFailureReason,
+  playComparisonReason,
+} = require("./opponent-profile-retrieval-status");
   const {
     ALLOWED_MODES: OFFICIAL_CHARACTER_STATS_MODES,
     aggregateOfficialCharacterWinRates,
@@ -189,6 +193,10 @@ const {
   normalizeVerifiedHistoryCurrentAct,
   resolveHistoryActSelection,
 } = require("./history-act-scope");
+const {
+  buildOfficialActRegistry,
+  isFreshOfficialActRegistry,
+} = require("./official-act-registry");
 const {
   assertUpdateAllowed,
   resolveUpdateRequirement,
@@ -481,6 +489,15 @@ let verifiedHistoryCurrentAct = {
   source: null,
   reason: "ACT_SCOPE_MISSING",
 };
+let officialActRegistryState = {
+  status: "unavailable",
+  currentActId: null,
+  acts: [],
+  source: null,
+  retrievedAt: null,
+  proof: null,
+  reason: "ACT_REGISTRY_MISSING",
+};
 let verifiedHistoryCurrentActScope = 0;
 let privateDataClearing = false;
 let persistenceReadyForQuit = false;
@@ -678,6 +695,22 @@ function invalidateVerifiedHistoryCurrentAct() {
     source: null,
     reason: "ACT_SCOPE_MISSING",
   };
+  officialActRegistryState = {
+    status: "unavailable",
+    currentActId: null,
+    acts: [],
+    source: null,
+    retrievedAt: null,
+    proof: null,
+    reason: "ACT_REGISTRY_MISSING",
+  };
+}
+
+function isCurrentHistoryActRequest({ profileId, locale, generation, scopeToken } = {}) {
+  return normalizeHistoryProfileId(profileId) === activeHistoryProfileId() &&
+    locale === serviceLocale() &&
+    generation === privateDataGeneration &&
+    scopeToken === verifiedHistoryCurrentActScope;
 }
 
 function currentVerifiedHistoryActState(profileId) {
@@ -715,6 +748,9 @@ function publishVerifiedHistoryCurrentAct({
   ) return;
   const normalizedProfileId = normalizeHistoryProfileId(profileId);
   const normalized = normalizeVerifiedHistoryCurrentAct(result);
+  if (result?.actRegistry?.status === "ready") {
+    officialActRegistryState = result.actRegistry;
+  }
   verifiedHistoryCurrentAct = {
     profileId: normalizedProfileId,
     locale,
@@ -1422,7 +1458,9 @@ function publicHistoryState(
       .filter((value) => Number.isInteger(value) && value >= 0),
   )].sort((left, right) => right - left);
   const verifiedCurrentAct = currentVerifiedHistoryActState(normalizedProfileId);
-  const officialActOptions = buildOfficialActOptions(verifiedCurrentAct.currentActId);
+  const officialActOptions = isFreshOfficialActRegistry(officialActRegistryState)
+    ? buildOfficialActOptions(verifiedCurrentAct.currentActId, officialActRegistryState)
+    : [];
   const authenticated = Boolean(authenticatedProfileId);
   const actsById = new Map(
     [...officialActOptions, ...persistedActIds.map((id) => ({ id, label: `ACT ${id}` }))]
@@ -1436,6 +1474,9 @@ function publicHistoryState(
     // stored records. A record remains unscoped until its replay payload
     // contains explicit Act evidence.
     acts: [...actsById.values()].sort((left, right) => right.id - left.id),
+    actRegistry: isFreshOfficialActRegistry(officialActRegistryState)
+      ? officialActRegistryState
+      : null,
     ...verifiedCurrentAct,
     characterNamesVerifiedLocales: [...historyLabelBackfillCompleted]
       .filter((key) => key.startsWith(`${normalizedProfileId}:`))
@@ -4952,6 +4993,7 @@ function emptyOpponentProfileContext({
   retrievedAt = null,
   reason = null,
   roundTrend = null,
+  playComparison = null,
   diagnostics = null,
 } = {}) {
   return {
@@ -4981,11 +5023,13 @@ function emptyOpponentProfileContext({
     // Keep the PLAY comparison state explicit even when the profile card
     // itself is empty/error.  This prevents the renderer from falling back to
     // a visual fixture for a real unavailable request.
-    playComparison: comparePlayProfiles(null, null, {
-      selfError: status === "error",
-      opponentError: status === "error",
-      verifiedFieldContract: PLAY_APPROVED_FIELD_CONTRACT,
-    }),
+    playComparison: playComparison && typeof playComparison === "object"
+      ? playComparison
+      : comparePlayProfiles(null, null, {
+          selfError: status === "error",
+          opponentError: status === "error",
+          verifiedFieldContract: PLAY_APPROVED_FIELD_CONTRACT,
+        }),
     diagnostics,
   };
 }
@@ -5204,6 +5248,11 @@ async function fetchPlayComparison({
       verifiedFieldContract: PLAY_APPROVED_FIELD_CONTRACT,
     },
   );
+  const { reason, failureReasons } = playComparisonReason(
+    comparison,
+    selfResult,
+    opponentResult,
+  );
   const receiptStatus = comparison.status === "ready"
     ? "ready"
     : comparison.status === "unavailable" || comparison.status === "error"
@@ -5215,6 +5264,8 @@ async function fetchPlayComparison({
   });
   return {
     ...comparison,
+    reason,
+    failureReasons,
     diagnostics: { productionReceipt },
     retrievedAt: {
       self: selfResult.status === "fulfilled" ? selfResult.value?.retrievedAt ?? null : null,
@@ -5306,6 +5357,35 @@ async function fetchOfficialCharacterNameRegistry({
         initialPlay.current_season_id > 0
         ? initialPlay.current_season_id
         : null;
+      const actRegistry = buildOfficialActRegistry(initialPlay, {
+        retrievedAt,
+      });
+      if (
+        actRegistry.status === "ready" &&
+        isCurrentHistoryActRequest({
+          profileId: normalizedProfileId,
+          locale,
+          generation,
+          scopeToken: currentActScopeToken,
+        })
+      ) {
+        officialActRegistryState = actRegistry;
+      } else if (requestedActId == null && isCurrentHistoryActRequest({
+        profileId: normalizedProfileId,
+        locale,
+        generation,
+        scopeToken: currentActScopeToken,
+      })) {
+        officialActRegistryState = {
+          status: "unavailable",
+          currentActId: null,
+          acts: [],
+          source: null,
+          retrievedAt,
+          proof: null,
+          reason: actRegistry.reason,
+        };
+      }
       recordProductionReceipt(productionReceipt, "stats.names.current-act", {
         status: currentAct != null ? "ok" : "unavailable",
         requestedAct: requestedActId,
@@ -5367,6 +5447,7 @@ async function fetchOfficialCharacterNameRegistry({
         labels,
         selfRows: validated.rows,
         rowCount: Object.keys(labels).length,
+        actRegistry: actRegistry.status === "ready" ? actRegistry : null,
         retryable: false,
       };
       recordProductionReceipt(productionReceipt, "stats.names.normalized", {
@@ -6359,7 +6440,7 @@ async function fetchHistoryOpponentContext({
     activeOwnerProfileId &&
     requestedOwnerProfileId !== activeOwnerProfileId
   ) {
-    return emptyOpponentProfileContext({ status: "empty" });
+    return emptyOpponentProfileContext({ status: "empty", reason: "HISTORY_OWNER_SCOPE_MISMATCH" });
   }
   const ownerProfileId = activeOwnerProfileId ?? requestedOwnerProfileId;
   let currentActState = currentVerifiedHistoryActState(ownerProfileId);
@@ -6421,6 +6502,7 @@ async function fetchHistoryOpponentContext({
       profileId: ownerProfileId,
       actId: requestedActId,
       status: "empty",
+      reason: "HISTORY_SELECTED_REPLAY_MISSING",
       diagnostics: historyScopeDiagnostics({
         currentActState,
         selectorRaw,
@@ -6448,7 +6530,9 @@ async function fetchHistoryOpponentContext({
       characterId: normalizedCharacterId,
       characterDisplayName: resolvedCharacterDisplayName,
       actId: requestedActId,
-      reason: "PROFILE_REFERENCE_EMPTY",
+      // Keep the diagnostic reason separate, but expose the canonical
+      // renderer-facing reason so the user sees a cause-specific message.
+      reason: "OPPONENT_PROFILE_DATA_EMPTY",
       diagnostics: historyScopeDiagnostics({
         currentActState,
         selectorRaw,
@@ -6529,10 +6613,26 @@ async function fetchHistoryOpponentContext({
     cacheKey,
     async () => {
       const retrievedAt = Date.now();
+      let playComparison = null;
       try {
         const storedSnapshots = snapshotObject(
           resolvedRecord.opponentInsightSnapshots,
         );
+        // PLAY comparison is an independent companion source. Start it
+        // before profile/history enrichment so a missing opponent profile
+        // card does not suppress a comparison that can still be built.
+        try {
+          playComparison = await fetchPlayComparison({
+            selfProfileId: ownerProfileId,
+            opponentProfileId: normalizedProfileId,
+            generation,
+            requestedLocale,
+          });
+        } catch {
+          playComparison = comparePlayProfiles(null, null, {
+            verifiedFieldContract: PLAY_APPROVED_FIELD_CONTRACT,
+          });
+        }
         // A persisted snapshot is authoritative even when it records a
         // definitive insufficiency. Transient network/auth failures are not
         // persisted, so only rows without any snapshot need battle-log I/O.
@@ -6634,22 +6734,6 @@ async function fetchHistoryOpponentContext({
               peakActId: selectedActId,
             })
           : baseContext;
-        let playComparison;
-        try {
-          playComparison = await fetchPlayComparison({
-            selfProfileId: ownerProfileId,
-            opponentProfileId: normalizedProfileId,
-            generation,
-            requestedLocale,
-          });
-        } catch {
-          // The PLAY page is an optional companion source. A profile card
-          // failure must not erase the existing six-field context; the
-          // comparison renderer will show an unavailable state instead.
-          playComparison = comparePlayProfiles(null, null, {
-            verifiedFieldContract: PLAY_APPROVED_FIELD_CONTRACT,
-          });
-        }
         let snapshots = storedSnapshots;
         if (!hasPersistedSnapshot && officialHistory?.complete === true) {
           snapshots = buildHistoricalOpponentSnapshots({
@@ -6803,26 +6887,29 @@ async function fetchHistoryOpponentContext({
         if (error?.message === "PRIVATE_DATA_CLEARED") throw error;
         // A profile-reference failure must never replace the already-rendered
         // match history. The renderer receives a card-local error state.
-        const failureReason = [
-          "ACT_SCOPE_MISSING",
-          "HISTORY_ACT_METADATA_MISSING_OR_MISMATCH",
-          "HISTORY_SELECTED_REPLAY_SCOPE_MISSING",
-        ].includes(error?.message)
-          ? "ACT_SCOPE_MISSING"
-          : ["HISTORY_PAGE_SET_INCOMPLETE", "HISTORY_REPLAY_DUPLICATE_CONFLICT"].includes(error?.message)
-            ? "PARTIAL"
-            : "RETRIEVAL_FAILED";
+        const failureReason = opponentProfileFailureReason(error);
+        const failureStatus = failureReason === "PRIVATE_DATA_CLEARED"
+          ? "error"
+          : [
+              "ACT_SCOPE_MISSING",
+              "HISTORY_SCOPE_INCOMPLETE",
+              "HISTORY_DUPLICATE_CONFLICT",
+              "HISTORY_SELECTED_REPLAY_MISSING",
+            ].includes(failureReason)
+            ? "partial"
+            : "error";
         const context = emptyOpponentProfileContext({
           profileId: normalizedProfileId,
           characterId: normalizedCharacterId,
           characterDisplayName: resolvedCharacterDisplayName,
           actId: selectedActId,
-          status: failureReason === "RETRIEVAL_FAILED" ? "error" : "partial",
+          status: failureStatus,
           reason: failureReason,
           roundTrend: buildRoundTrendFailure(trendScope, {
-            status: failureReason === "RETRIEVAL_FAILED" ? "error" : "partial",
+            status: failureStatus,
             reason: failureReason,
           }),
+          playComparison,
           diagnostics: historyScopeDiagnostics({
             currentActState,
             selectorRaw,
@@ -6840,7 +6927,7 @@ async function fetchHistoryOpponentContext({
           }),
         });
         finalizeProductionReceipt(productionReceipt, {
-          status: failureReason === "RETRIEVAL_FAILED" ? "unavailable" : "partial",
+          status: failureStatus === "error" ? "unavailable" : "partial",
           reason: failureReason,
         });
         // Network/auth failures are transient. Do not persist/cache this
@@ -8010,6 +8097,7 @@ function startOverlayServer() {
   overlayServer.listen(OVERLAY_PORT, OVERLAY_HOST);
 }
 
+if (process.env.MATCH_OVERLAY_TEST_MODE !== "1") {
 void app.whenReady().then(() => {
   if (!hasSingleInstanceLock) return;
   if (initialLanguageSelectionRequired) {
@@ -8145,3 +8233,38 @@ app.on("before-quit", (event) => {
       });
   }
 });
+}
+
+// Available only to the external local QA harness. Normal and packaged
+// launches never enter this branch or expose these test hooks.
+if (process.env.MATCH_OVERLAY_TEST_MODE === "1") {
+  module.exports = {
+    __testFetchOfficialCharacterNameRegistry: fetchOfficialCharacterNameRegistry,
+    __testInvalidateVerifiedHistoryCurrentAct: invalidateVerifiedHistoryCurrentAct,
+    __testPublicHistoryState: publicHistoryState,
+    __testConfigureOpponentContext({
+      ownerProfileId,
+      currentActId = 13,
+      records = [],
+      fetch = null,
+    } = {}) {
+      const profileId = normalizeHistoryProfileId(ownerProfileId);
+      historyViewPlayer = { profileId, userCode: profileId, characterId: 1 };
+      authenticatedProfileId = profileId;
+      matchHistoryStores.set(profileId, normalizeMatchHistoryStore({ records }));
+      verifiedHistoryCurrentAct = {
+        profileId,
+        locale: serviceLocale(),
+        generation: privateDataGeneration,
+        scopeToken: verifiedHistoryCurrentActScope,
+        status: "ready",
+        actId: currentActId,
+        source: "qa-test",
+        reason: null,
+      };
+      sourceSession = fetch ? { fetch } : null;
+      return { profileId, currentActId };
+    },
+    fetchHistoryOpponentContext,
+  };
+}
