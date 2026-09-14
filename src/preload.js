@@ -25,7 +25,8 @@ contextBridge.exposeInMainWorld("matchOverlay", {
     }),
   getHistoryCharacterNames: (profileId, locale, actId = null) =>
     ipcRenderer.invoke("history:character-names", { profileId, locale, actId }),
-  fetchHistory: () => ipcRenderer.invoke("history:fetch"),
+  fetchHistory: (options = {}) =>
+    ipcRenderer.invoke("history:fetch", { actId: options?.actId ?? null }),
   selectHistoryProfile: (userCode) =>
     ipcRenderer.invoke("history:select-profile", { userCode }),
   clearHistoryProfile: () => ipcRenderer.invoke("history:clear-profile"),

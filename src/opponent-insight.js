@@ -7,7 +7,36 @@
 
 const RATING_TYPES = Object.freeze(["MR", "LP"]);
 const INSIGHT_MATCH_LIMIT = 20;
-const OPPONENT_INSIGHT_ALGORITHM_VERSION = "historical-before-match-v1";
+const POTENTIAL_MR_MATCH_LIMIT = 100;
+const LEGACY_ALGORITHM_VERSION = "legacy-unknown";
+const OPPONENT_INSIGHT_ALGORITHM_VERSION = "historical-before-match-v4";
+
+function potentialMrHistoryCandidates(
+  records,
+  { characterId = null, beforeTimestamp = null, actId = null } = {},
+) {
+  const targetCharacterId = finitePositive(characterId);
+  const cutoff = finitePositive(beforeTimestamp);
+  const hasActFilter = actId != null;
+  const targetActId = Number(actId);
+  return (Array.isArray(records) ? records : [])
+    .filter((record) => record?.matchType === "ranked")
+    .filter((record) => record?.result === "win" || record?.result === "loss")
+    .filter((record) => targetCharacterId == null || finitePositive(record?.characterId) === targetCharacterId)
+    .filter((record) => {
+      if (!hasActFilter) return true;
+      const recordActId = Number(record?.actId);
+      const known = Number.isInteger(recordActId) && recordActId >= 0 &&
+        (recordActId > 0 || record?.actIdKnown === true) && record?.actIdKnown !== false;
+      return known && Number.isInteger(targetActId) && targetActId >= 0 && recordActId === targetActId;
+    })
+    .filter((record) => {
+      if (cutoff == null) return true;
+      const timestamp = timestampOf(record);
+      return timestamp != null && timestamp < cutoff;
+    })
+    .sort((a, b) => timestampOf(a) - timestampOf(b));
+}
 
 function finitePositive(value) {
   const n = Number(value);
@@ -65,9 +94,13 @@ function normalizeSnapshot(value) {
   const sampleCount = finite(value.sampleCount);
   const snapshot = {
     status,
-    algorithmVersion: String(value.algorithmVersion ?? "").slice(0, 64) || OPPONENT_INSIGHT_ALGORITHM_VERSION,
+    algorithmVersion: String(value.algorithmVersion ?? "").trim().slice(0, 64) || LEGACY_ALGORITHM_VERSION,
     cutoffReplayId: String(value.cutoffReplayId ?? "").trim().slice(0, 120) || null,
     cutoffPlayedAt: finite(value.cutoffPlayedAt),
+    actId: value.actId != null && String(value.actId).trim() !== "" &&
+      Number.isInteger(Number(value.actId)) && Number(value.actId) >= 0
+      ? Number(value.actId)
+      : null,
     historyOwnerProfileId: profileId(value.historyOwnerProfileId),
     opponentUserCode: profileId(value.opponentUserCode),
     characterId: character != null && character > 0 && character <= 100000 ? Math.floor(character) : null,
@@ -100,7 +133,11 @@ function mergeSnapshotObject(existing, incoming) {
   const merged = { ...previous };
   for (const type of RATING_TYPES) {
     if (!next[type]) continue;
-    if (previous[type]?.status === "ready" && previous[type].complete === true) {
+    if (
+      previous[type]?.status === "ready" &&
+      previous[type].complete === true &&
+      previous[type].algorithmVersion === OPPONENT_INSIGHT_ALGORITHM_VERSION
+    ) {
       continue;
     }
     merged[type] = next[type];
@@ -114,6 +151,8 @@ function buildHistoricalOpponentSnapshots({
   historyOwnerProfileId,
   opponentUserCode,
   characterId,
+  actId = null,
+  estimatePotentialMrFromMatches,
   potentialRatingValue,
   limit = INSIGHT_MATCH_LIMIT,
   capturedAt = Date.now(),
@@ -130,6 +169,7 @@ function buildHistoricalOpponentSnapshots({
     algorithmVersion: OPPONENT_INSIGHT_ALGORITHM_VERSION,
     cutoffReplayId: selectedReplayId || null,
     cutoffPlayedAt,
+    actId: Number.isInteger(Number(actId)) && Number(actId) >= 0 ? Number(actId) : null,
     historyOwnerProfileId: owner || null,
     opponentUserCode: opponent || null,
     characterId: targetCharacterId,
@@ -165,6 +205,13 @@ function buildHistoricalOpponentSnapshots({
     .filter((record) => String(record?.replayId ?? "").trim() !== selectedReplayId)
     .filter((record) => record?.matchType === "ranked")
     .filter((record) => finitePositive(record?.characterId) === targetCharacterId)
+    .filter((record) => {
+      if (actId == null) return true;
+      const recordActId = Number(record?.actId);
+      const known = Number.isInteger(recordActId) && recordActId >= 0 &&
+        (recordActId > 0 || record?.actIdKnown === true) && record?.actIdKnown !== false;
+      return known && recordActId === Number(actId);
+    })
     // Equality is intentionally excluded: replayId identifies the cutoff and
     // time alone cannot establish which same-time match came first.
     .filter((record) => {
@@ -173,12 +220,22 @@ function buildHistoricalOpponentSnapshots({
     })
     .sort((a, b) => timestampOf(a) - timestampOf(b))
     .slice(-count);
+  const potentialMrPrior = potentialMrHistoryCandidates(source, {
+    characterId: targetCharacterId,
+    beforeTimestamp: cutoffPlayedAt,
+    actId,
+  })
+    .filter((record) => String(record?.replayId ?? "").trim() !== selectedReplayId)
+    .slice(-POTENTIAL_MR_MATCH_LIMIT);
   const wins = prior.filter((record) => record?.result === "win").length;
   const losses = prior.filter((record) => record?.result === "loss").length;
   const draws = prior.filter((record) => record?.result === "draw").length;
   return Object.fromEntries(RATING_TYPES.map((type) => {
     const endpoint = selectedOpponentRating(selectedRecord, type);
     const values = prior.map((record) => recordRating(record, type)).filter((value) => value != null);
+    const estimate = type === "MR" && typeof estimatePotentialMrFromMatches === "function"
+      ? estimatePotentialMrFromMatches(potentialMrPrior, { characterId: targetCharacterId, actId })
+      : null;
     const ratingTypeKnown = String(selectedRecord?.opponentRatingType ?? "").toUpperCase() === type || endpoint != null;
     const complete = historyComplete;
     let status = "ready";
@@ -190,15 +247,37 @@ function buildHistoricalOpponentSnapshots({
     } else if (endpoint == null) {
       status = "insufficient";
       reason = "match-time-rating-missing-or-out-of-range";
-    } else if (values.length < 1 || typeof potentialRatingValue !== "function") {
+    } else if (
+      type === "MR" &&
+      typeof estimatePotentialMrFromMatches !== "function"
+    ) {
+      status = "insufficient";
+      reason = "potential-unavailable";
+    } else if (type === "LP" && (values.length < 1 || typeof potentialRatingValue !== "function")) {
       status = "insufficient";
       reason = values.length < 1 ? "sample-insufficient" : "potential-unavailable";
     } else {
-      potential = potentialRatingValue([...values, endpoint], type);
+      const ratingEstimate = type === "MR"
+        ? estimate
+        : {
+            value: potentialRatingValue([...values, endpoint], type),
+            sampleCount: values.length,
+            wins,
+            losses,
+            bound: null,
+          };
+      potential = ratingEstimate?.value ?? null;
       if (!validRating(potential, type)) {
         status = "insufficient";
         reason = "potential-out-of-range";
         potential = null;
+      }
+      if (type === "MR") {
+        if (ratingEstimate?.sampleCount < 2) {
+          status = "insufficient";
+          reason = "sample-insufficient";
+          potential = null;
+        }
       }
     }
     return [type, {
@@ -206,7 +285,7 @@ function buildHistoricalOpponentSnapshots({
       status,
       ratingType: ratingTypeKnown ? type : null,
       matchTimeRating: endpoint,
-      sampleCount: values.length,
+      sampleCount: type === "MR" ? estimate?.sampleCount ?? 0 : values.length,
       wins,
       losses,
       draws,
@@ -217,21 +296,29 @@ function buildHistoricalOpponentSnapshots({
   }));
 }
 
-function recentRecords(records, characterId, limit = 20) {
+function recentRecords(records, characterId, limit = 20, actId = null) {
   const id = finitePositive(characterId);
   const requestedLimit = Number(limit);
   const count = Number.isFinite(requestedLimit)
-    ? Math.max(0, Math.min(INSIGHT_MATCH_LIMIT, Math.floor(requestedLimit)))
+    ? Math.max(0, Math.min(POTENTIAL_MR_MATCH_LIMIT, Math.floor(requestedLimit)))
     : INSIGHT_MATCH_LIMIT;
   return (Array.isArray(records) ? records : [])
     .filter((record) => record?.matchType === "ranked")
     .filter((record) => id == null || finitePositive(record?.characterId ?? record?.opponentCharacterId) === id)
+    .filter((record) => {
+      if (actId == null) return true;
+      const recordActId = Number(record?.actId);
+      const known = Number.isInteger(recordActId) && recordActId >= 0 &&
+        (recordActId > 0 || record?.actIdKnown === true) && record?.actIdKnown !== false;
+      return known && recordActId === Number(actId);
+    })
     .sort((a, b) => Number(a?.playedAt ?? a?.uploadedAt) - Number(b?.playedAt ?? b?.uploadedAt))
     .slice(-count);
 }
 
-function buildOpponentOfficialInsight({ records, characterId, player, deriveHistoryRatingSeries, potentialRatingValue, limit = 20 } = {}) {
-  const selected = recentRecords(records, characterId, limit);
+function buildOpponentOfficialInsight({ records, characterId, actId = null, player, deriveHistoryRatingSeries, estimatePotentialMrFromMatches, potentialRatingValue, limit = 20 } = {}) {
+  const selected = recentRecords(records, characterId, limit, actId);
+  const selectedMr = recentRecords(records, characterId, POTENTIAL_MR_MATCH_LIMIT, actId);
   const result = { matches: selected.length, wins: 0, losses: 0, draws: 0, record: [], ratings: {} };
   for (const record of selected) {
     if (record?.result === "win") result.wins += 1;
@@ -243,10 +330,15 @@ function buildOpponentOfficialInsight({ records, characterId, player, deriveHist
       ? deriveHistoryRatingSeries(selected, player, type, { characterId })
       : { records: selected, values: [] };
     const values = (series.values ?? []).map(Number).filter((value) => Number.isFinite(value) && value > 0);
+    const potentialEstimate = type === "MR" && typeof estimatePotentialMrFromMatches === "function"
+      ? estimatePotentialMrFromMatches(selectedMr, { characterId, actId })
+      : null;
     result.ratings[type] = {
       values,
-      potential: values.length >= 2 && typeof potentialRatingValue === "function"
-        ? potentialRatingValue(values.slice(-INSIGHT_MATCH_LIMIT), type)
+      potential: type === "MR"
+        ? potentialEstimate?.value ?? null
+        : values.length >= 2 && typeof potentialRatingValue === "function"
+          ? potentialRatingValue(values.slice(-INSIGHT_MATCH_LIMIT), type)
         : null,
       currentValue: finitePositive(series.currentValue),
       currentApplied: Boolean(series.currentApplied),
@@ -269,6 +361,7 @@ return {
   OPPONENT_INSIGHT_ALGORITHM_VERSION,
   buildOpponentOfficialInsight,
   buildHistoricalOpponentSnapshots,
+  potentialMrHistoryCandidates,
   normalizeSnapshot,
   snapshotObject,
   mergeSnapshotObject,

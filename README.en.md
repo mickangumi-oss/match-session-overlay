@@ -13,13 +13,34 @@ Match Session Overlay is an unofficial Windows app that retrieves Street Fighter
 - An internet connection for signing in to the official website and retrieving match data
 - OBS Studio only if you want to display the overlay on stream (optional)
 
+Current release: v1.12.1
+
 ## Download
 
-[Get the latest version from GitHub Releases](https://github.com/mickangumi-oss/match-session-overlay/releases/latest)
+[Get the official build from GitHub Releases](https://github.com/mickangumi-oss/match-session-overlay/releases).
 
-Open the latest release and download the installer named `Match-Session-Overlay-1.12.0-Setup.exe` from **Assets**. Do not use installers from an unverified source.
+Open the release and download `Match-Session-Overlay-1.12.1-Setup.exe` from **Assets**. Do not use an installer from an unverified source.
 
 For step-by-step instructions, see the [English usage guide](docs/usage.en.md).
+
+## What's new in v1.13.0
+
+- `POTENTIAL MR` now uses opponent MR and match results from up to 100 recent same-character Ranked Matches.
+- Match history, graphs, and opponent information use the same `POTENTIAL MR` method.
+- Opponent profile display (up to 20 matches) is separate from `POTENTIAL MR` calculation history (up to 100 matches).
+- `POTENTIAL LP` retains the previous method.
+
+See the [v1.13.0 release notes](docs/release-notes/v1.13.0.md) for the details.
+
+## What's new in v1.12.1
+
+- ACT selection and match-history display now use the ACT information retrieved from the official site as their reference.
+- ACT-specific history, aggregates, opponent information, and caches remain separated when you switch ACTs.
+- The selected match's round results are displayed in match history.
+- You can compare your battle and round trends with the selected opponent.
+- Saved history is displayed first, and duplicate requests are reduced when loading the same history scope.
+
+See the [v1.12.1 release notes](docs/release-notes/v1.12.1.md) for the installer checksum and release details.
 
 ## What's new in v1.12.0
 
@@ -28,7 +49,7 @@ For step-by-step instructions, see the [English usage guide](docs/usage.en.md).
 - You can compare your battle and round trends with the selected opponent.
 - Saved history is displayed first, and duplicate requests are reduced while loading history.
 
-See the [v1.12.0 release notes](https://github.com/mickangumi-oss/match-session-overlay/releases/tag/v1.12.0) for the installer checksum and security check results.
+See the [v1.12.0 release notes](docs/release-notes/v1.12.0.md) for the earlier release details.
 
 ## What's new in v1.11.0
 
@@ -45,13 +66,13 @@ See the [v1.11.0 release notes](https://github.com/mickangumi-oss/match-session-
 - Ranked, Battle Hub, and Casual session records
 - Wins, losses, win rate, current MR/LP, and the change since tracking began
 - `CHARACTER RANK` for the current character
-- `POTENTIAL MR` or `POTENTIAL LP`, calculated as a reference value from up to 20 recent ranked matches for the same player and character
+- `POTENTIAL MR` from up to 100 recent same-character ranked matches, or `POTENTIAL LP` from up to 20 recent matches
 - Match history filtered by date, mode, and character
 - MR/LP trends and records by opponent character
 - FRIENDS and FOLLOWING lists, with an optional notification when a friend comes online
 - Japanese, English, and 12 other display languages
 
-`POTENTIAL MR/LP` is not an official rating and does not predict a future rating. It uses robust exponential smoothing over up to 20 recent ranked matches to follow recent changes while reducing short-term fluctuations.
+`POTENTIAL MR` is estimated from opponent MR and win/loss results using an Elo-style expected-win model over up to 100 recent same-character ranked matches. `POTENTIAL LP` retains the existing robust exponential smoothing over up to 20 recent matches. Both are app-specific reference values, not official ratings or predictions of a future rating.
 
 ## Display options
 
