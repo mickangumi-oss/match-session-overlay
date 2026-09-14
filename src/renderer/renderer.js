@@ -49,6 +49,7 @@ const RECENT_HISTORY_PREVIEW_LIMIT = 5;
 let historyPage = 0;
 let historyActUserSelected = false;
 let historyActProfileScope = "";
+let historyActFetchInFlight = null;
 let historyAutoFetchInFlight = null;
 let historyAutoFetchAttemptedScope = "";
 let historyAutoFetchReadinessKey = "";
@@ -100,6 +101,7 @@ let historyOpponentProfileState = {
   ownerProfileId: null,
   preserveOnTargetChange: false,
   context: null,
+  reason: null,
 };
 let matchupReturnToHistory = false;
 let matchupState = {
@@ -293,6 +295,7 @@ const elements = Object.fromEntries(
     "matchupBucklerState",
     "matchupBucklerCard",
     "matchupMetrics",
+    "matchupComparisonNote",
     "matchupRoundCard",
     "matchupRoundState",
     "matchupRoundScope",
@@ -445,6 +448,15 @@ function historyRatingValue(record, ratingType) {
     record?.derivedOwnRating ?? record?.ownRating ?? parallelSnapshot,
   );
   return Number.isFinite(primaryNumber) && primaryNumber > 0 ? primaryNumber : null;
+}
+
+function historyPotentialMrRecords(records, characterId) {
+  const targetCharacterId = Number(characterId) > 0 ? Number(characterId) : null;
+  return (Array.isArray(records) ? records : [])
+    .filter((record) => record?.matchType === "ranked")
+    .filter((record) => record?.result === "win" || record?.result === "loss")
+    .filter((record) => targetCharacterId == null || Number(record?.characterId) === targetCharacterId)
+    .sort((left, right) => Number(left?.playedAt ?? left?.uploadedAt) - Number(right?.playedAt ?? right?.uploadedAt));
 }
 
 function formatHistoryRating(ratingType, value) {
@@ -733,9 +745,17 @@ function drawHistoryRatingChart(historyRecords, ratingType, canvas, emptyElement
   const values = allPoints
     .filter(hasFinitePointValue)
     .map((point) => Number(point.value));
-  const potentialRating = values.length >= 2
-    ? window.MatchPotentialRating?.potentialRatingValue(values.slice(-20), ratingType) ?? null
-    : null;
+  const characterId = historySelectedCharacterId(player);
+  const potentialRating = ratingType === "MR"
+    ? window.MatchPotentialRating?.estimatePotentialMrFromMatches
+      ? window.MatchPotentialRating.estimatePotentialMrFromMatches(
+          historyPotentialMrRecords(historyRecords, characterId),
+          { characterId },
+        ).value
+      : null
+    : values.length >= 2
+      ? window.MatchPotentialRating?.potentialRatingValue(values.slice(-20), ratingType) ?? null
+      : null;
   const axisValues = Number.isFinite(potentialRating)
     ? [...values, potentialRating]
     : values;
@@ -1029,13 +1049,32 @@ function renderHistoryOpponentProfile(record = historyOpponentProfileState.recor
   const labelConflict = [record.characterId, record.opponentCharacterId]
     .some((id) => localeApi?.hasCharacterNameConflict?.(selectedLocale, id) === true);
   const status = labelConflict && baseStatus === "ready" ? "partial" : baseStatus;
+  const profileReasonText = {
+    ALL_HISTORY_SCOPE: "historyOpponentProfileAllHistoryScope",
+    PROFILE_REFERENCE_MISSING: "historyOpponentProfileReferenceMissing",
+    HISTORY_OWNER_SCOPE_MISMATCH: "historyOpponentProfileOwnerScopeMismatch",
+    HISTORY_SELECTED_REPLAY_MISSING: "historyOpponentProfileSelectedReplayMissing",
+    PROFILE_REFERENCE_EMPTY: "historyOpponentProfileDataEmpty",
+    OPPONENT_PROFILE_DATA_EMPTY: "historyOpponentProfileDataEmpty",
+    OPPONENT_PROFILE_NOT_FOUND: "historyOpponentProfileNotFound",
+    OPPONENT_PROFILE_AUTH_REQUIRED: "historyOpponentProfileAuthRequired",
+    OPPONENT_PROFILE_RATE_LIMITED: "historyOpponentProfileRateLimited",
+    OPPONENT_PROFILE_HTTP_ERROR: "historyOpponentProfileHttpError",
+    OPPONENT_PROFILE_LOCALE_CHANGED: "historyOpponentProfileLocaleChanged",
+    OPPONENT_PROFILE_REQUEST_FAILED: "historyOpponentProfileRequestFailed",
+    ACT_SCOPE_MISSING: "historyOpponentProfileActScopeMissing",
+    HISTORY_SCOPE_INCOMPLETE: "historyOpponentProfileHistoryIncomplete",
+    HISTORY_DUPLICATE_CONFLICT: "historyOpponentProfileHistoryConflict",
+  };
+  const profileReason = context?.reason ?? historyOpponentProfileState.reason ?? null;
   const stateText = status === "loading"
     ? t("historyOpponentProfileLoading", "Loading official profile reference…")
-    : status === "error"
-      ? t("historyOpponentProfileUnavailable", "Official profile reference unavailable")
-      : status === "empty"
-        ? t("historyOpponentProfileEmpty", "No official profile reference data")
-        : "";
+    : (status === "error" || status === "empty")
+      ? t(
+          profileReasonText[profileReason] || (status === "error" ? "historyOpponentProfileUnavailable" : "historyOpponentProfileEmpty"),
+          status === "error" ? "Official opponent profile could not be retrieved" : "No official opponent profile data is available",
+        )
+      : "";
   if (elements.historyOpponentProfileState) {
     elements.historyOpponentProfileState.textContent = stateText;
     elements.historyOpponentProfileState.className = `history-opponent-profile-state ${status}`;
@@ -1349,6 +1388,28 @@ function renderPlayComparison(comparison) {
     elements.matchupBucklerState.className = `matchup-state matchup-state-inline ${status}`;
   }
   elements.matchupMetrics.replaceChildren();
+  if (elements.matchupComparisonNote) {
+    const reasonKeys = {
+      PLAY_PROFILE_AUTH_REQUIRED: "matchupPlayProfileAuthRequired",
+      PLAY_PROFILE_RATE_LIMITED: "matchupPlayProfileRateLimited",
+      PLAY_PROFILE_NOT_FOUND: "matchupPlayProfileNotFound",
+      PLAY_PROFILE_HTTP_ERROR: "matchupPlayProfileHttpError",
+      PLAY_PROFILE_REQUEST_FAILED: "matchupPlayProfileRequestFailed",
+      PLAY_COMPARISON_PERIOD_MISMATCH: "matchupPlayComparisonPeriodMismatch",
+      PLAY_COMPARISON_SAMPLE_MISMATCH: "matchupPlayComparisonSampleMismatch",
+      PLAY_COMPARISON_SCOPE_MISMATCH: "matchupPlayComparisonScopeMismatch",
+      PLAY_COMPARISON_WINDOW_EXCEEDED: "matchupPlayComparisonWindowExceeded",
+      PLAY_COMPARISON_INSUFFICIENT: "matchupPlayComparisonInsufficient",
+      PLAY_COMPARISON_DATA_EMPTY: "matchupPlayComparisonDataEmpty",
+      PLAY_COMPARISON_UNAVAILABLE: "matchupPlayComparisonUnavailable",
+      PLAY_COMPARISON_PARTIAL: "matchupPlayComparisonPartial",
+    };
+    const reasonKey = reasonKeys[comparison.reason];
+    elements.matchupComparisonNote.textContent = reasonKey
+      ? t(reasonKey, "Comparison data is insufficient: the reason is shown here.")
+      : "";
+    elements.matchupComparisonNote.className = `matchup-note ${status}`;
+  }
   for (const group of Array.isArray(comparison.groups) ? comparison.groups : []) {
     const groupHeader = document.createElement("div");
     groupHeader.className = "matchup-play-group-header";
@@ -1592,6 +1653,7 @@ function selectHistoryRecord(record, { forceRefresh = false } = {}) {
     preserveOnTargetChange: preservePinnedOpponentProfile,
     requestScope,
     context: null,
+    reason: null,
   };
   renderHistoryOpponentProfile(nextRecord);
   syncOpenMatchupForHistoryProfile(nextRecord);
@@ -1603,6 +1665,7 @@ function selectHistoryRecord(record, { forceRefresh = false } = {}) {
     historyOpponentProfileState = {
       ...historyOpponentProfileState,
       status: "empty",
+      reason: "PROFILE_REFERENCE_MISSING",
     };
     renderHistoryOpponentProfile(nextRecord);
     syncOpenMatchupForHistoryProfile(nextRecord);
@@ -1634,6 +1697,7 @@ function selectHistoryRecord(record, { forceRefresh = false } = {}) {
       ...historyOpponentProfileState,
       status: result.data?.status || "empty",
       context: result.data ?? null,
+      reason: result.data?.reason ?? null,
     };
     const insightKey = historyOpponentInsightKey(nextRecord);
     if (insightKey && result.data) historyOpponentInsightCache.set(insightKey, result.data);
@@ -1651,6 +1715,7 @@ function selectHistoryRecord(record, { forceRefresh = false } = {}) {
       ...historyOpponentProfileState,
       status: "error",
       context: null,
+      reason: "OPPONENT_PROFILE_REQUEST_FAILED",
     };
     const insightKey = historyOpponentInsightKey(nextRecord);
     if (insightKey) historyOpponentInsightCache.delete(insightKey);
@@ -1810,6 +1875,13 @@ function selectHistoryPotentialRating(records, player = historyState.player) {
     .slice(-20);
   if (elements.historyPotentialLabel) {
     elements.historyPotentialLabel.textContent = `${t("potential", "POTENTIAL")} ${ratingType}`;
+  }
+  if (ratingType === "MR" && window.MatchPotentialRating?.estimatePotentialMrFromMatches) {
+    const estimate = window.MatchPotentialRating.estimatePotentialMrFromMatches(
+      historyPotentialMrRecords(records, characterId),
+      { characterId },
+    );
+    return { ratingType, value: estimate.value, sampleCount: estimate.sampleCount };
   }
   if (values.length < 2) {
     return { ratingType, value: null, sampleCount: values.length };
@@ -2114,6 +2186,37 @@ function selectedHistoryActId() {
   return /^\d+$/.test(value) && Number(value) >= 0 ? Number(value) : null;
 }
 
+function historyActHasScopedRecords(actId, state = historyState) {
+  return (Array.isArray(state?.records) ? state.records : []).some(
+    (record) => historyRecordActIsKnown(record) && Number(record?.actId) === Number(actId),
+  );
+}
+
+function fetchHistoryForSelectedActIfNeeded(actId) {
+  if (!Number.isInteger(actId) || actId < 0 || historyActHasScopedRecords(actId)) return null;
+  const profileId = historyStateProfileId(historyState);
+  const key = `${profileId}:${actId}`;
+  if (historyActFetchInFlight?.key === key) return historyActFetchInFlight.promise;
+  if (historyState.fetching || historyState.authenticated !== true || !historyState.canFetch) return null;
+  const request = (async () => {
+    try {
+      const next = await unwrap(api.fetchHistory({ actId }));
+      if (historyStateProfileId(historyState) === profileId) {
+        historyPage = 0;
+        scheduleHistoryRender(next, { resetPage: true });
+      }
+      return next;
+    } catch (error) {
+      if (error?.message !== "HISTORY_TARGET_CHANGED") showNotice(error.message, "error");
+      return null;
+    } finally {
+      if (historyActFetchInFlight?.promise === request) historyActFetchInFlight = null;
+    }
+  })();
+  historyActFetchInFlight = { key, promise: request };
+  return request;
+}
+
 function selectedHistoryRoundTrendActId() {
   const selected = selectedHistoryActId();
   if (selected != null) return selected;
@@ -2169,6 +2272,10 @@ function renderHistoryActControl(state = historyState) {
     select.value = "";
     return;
   }
+  const allOption = document.createElement("option");
+  allOption.value = "all";
+  allOption.textContent = t("all", "すべて");
+  select.append(allOption);
   for (const act of acts) {
     const option = document.createElement("option");
     option.value = String(act.id);
@@ -2184,7 +2291,7 @@ function renderHistoryActControl(state = historyState) {
     : latestActId == null
       ? ""
       : String(latestActId);
-  select.value = acts.some((act) => String(act.id) === desiredValue)
+  select.value = desiredValue === "all" || acts.some((act) => String(act.id) === desiredValue)
     ? desiredValue
     : "";
 }
@@ -2193,20 +2300,28 @@ function renderHistoryActState(state = historyState) {
   const element = elements.historyActState;
   if (!element) return;
   const selected = selectedHistoryActId();
-  const records = Array.isArray(state?.records) ? state.records : [];
   if (selected == null) {
-    element.textContent = normalizedHistoryActs(state).length
-      ? ""
-      : t("historyActUnavailable", "ACT scope unavailable");
+    element.textContent = state?.currentActStatus === "unavailable" || !normalizedHistoryActs(state).length
+      ? t("historyActUnavailable", "ACT scope unavailable")
+      : "";
     return;
   }
-  const scopedRecords = records.filter((record) =>
-    historyRecordActIsKnown(record) && Number(record?.actId) === selected,
+  // An official Act option proves that the selected range is known. Unknown
+  // Act provenance on imported rows is a separate data-quality state and must
+  // not be rendered as "ACT scope unavailable".
+  const officialRegistryActIds = state?.actRegistry?.status === "ready" &&
+    Array.isArray(state.actRegistry.acts)
+    ? state.actRegistry.acts
+      .map((act) => Number(act?.id ?? act?.actId))
+      .filter((id) => Number.isInteger(id) && id >= 0)
+    : [];
+  const selectedActIsKnown = officialRegistryActIds.includes(selected) || (
+    state?.currentActVerified === true &&
+    Number(state?.currentActId) === selected
   );
-  const hasUnscopedRecords = records.some((record) => !historyRecordActIsKnown(record));
-  element.textContent = hasUnscopedRecords && !scopedRecords.length
-    ? t("historyActUnavailable", "ACT scope unavailable")
-    : "";
+  element.textContent = selectedActIsKnown
+    ? ""
+    : t("historyActUnavailable", "ACT scope unavailable");
 }
 
 function renderOpponentCharacterStats() {
@@ -3752,6 +3867,7 @@ function preserveCommittedHistoryOnEmptyState(nextState, previousState = history
       ? Number(previousState.count)
       : previousRecords.length,
     acts: previousState.acts,
+    actRegistry: previousState.actRegistry,
     currentActId: previousState.currentActId,
     currentActVerified: previousState.currentActVerified,
     currentActSource: previousState.currentActSource,
@@ -3908,6 +4024,20 @@ async function activateHistoryRecord(record) {
   selectHistoryRecord(record);
 }
 
+function activateHistoryOpponent(record, opponentUserCode) {
+  const normalizedCode = String(opponentUserCode ?? record?.opponentUserCode ?? "").trim();
+  if (!/^\d{4,12}$/.test(normalizedCode)) {
+    if (record) void activateHistoryRecord(record);
+    return;
+  }
+  // A direct opponent-name click is an explicit request to view that
+  // player's history. Reflect the target immediately, then use the normal
+  // target-selection path so the history import and readiness flow stay
+  // identical to manual USER CODE entry.
+  if (elements.historyTargetCode) elements.historyTargetCode.value = normalizedCode;
+  void selectHistoryTarget(normalizedCode, { autoFetch: true });
+}
+
 elements.selectHistoryTargetButton?.addEventListener("click", () =>
   selectHistoryTarget(elements.historyTargetCode?.value?.trim() ?? "", { autoFetch: true }),
 );
@@ -3952,9 +4082,9 @@ for (const body of [elements.recentHistoryBody, elements.historyTableBody]) {
         .slice(0, RECENT_HISTORY_PREVIEW_LIMIT);
       record = recent[row.sectionRowIndex ?? [...body.children].indexOf(row)] ?? null;
     }
-    // A match click first resolves the selected opponent profile reference,
-    // then switches the history target and imports that opponent's records.
-    if (record) void activateHistoryRecord(record);
+    // The opponent-name link is a direct target switch. Clicking elsewhere
+    // on the row remains a selection-only action for the current owner.
+    activateHistoryOpponent(record, button.dataset.historyOpponentCode);
   });
 }
 elements.historyTableBody?.addEventListener("click", (event) => {
@@ -4007,11 +4137,21 @@ for (const input of [
   });
 }
 elements.historyAct?.addEventListener("change", () => {
-  historyActUserSelected = true;
+  const selectedAct = Number(elements.historyAct?.value);
+  const latestAct = verifiedCurrentHistoryActId(historyState);
+  // Returning to the verified current Act is the same scope as the initial
+  // latest view. Keep it in latest mode so legacy rows without Act provenance
+  // are restored instead of disappearing after an Act round trip.
+  historyActUserSelected = !(
+    Number.isInteger(selectedAct) &&
+    latestAct != null &&
+    selectedAct === latestAct
+  );
   historyPage = 0;
   if (elements.historyDateFrom) elements.historyDateFrom.value = "";
   if (elements.historyDateTo) elements.historyDateTo.value = "";
   renderHistoryState();
+  void fetchHistoryForSelectedActIfNeeded(selectedAct);
   if (historyOpponentProfileState.record) {
     selectHistoryRecord(historyOpponentProfileState.record);
   }
