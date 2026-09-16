@@ -51,10 +51,19 @@ function normalizeStoredHistoryAct(value) {
 
 function mergeHistoryActProvenance(previous, incoming) {
   const next = normalizeStoredHistoryAct(incoming);
-  if (next.actIdKnown) return next;
   const prior = normalizeStoredHistoryAct(previous);
+  if (next.actIdKnown && prior.actIdKnown && next.actId !== prior.actId) {
+    return {
+      actId: prior.actId,
+      actIdKnown: true,
+      outcome: "conflict",
+      previousActId: prior.actId,
+      incomingActId: next.actId,
+    };
+  }
+  if (next.actIdKnown) return { ...next, outcome: "accepted" };
   if (prior.actIdKnown) return prior;
-  return { actId: null, actIdKnown: false };
+  return { actId: null, actIdKnown: false, outcome: "unknown" };
 }
 
 function isKnownHistoryActRecord(record) {

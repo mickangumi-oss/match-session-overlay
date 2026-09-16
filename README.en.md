@@ -13,15 +13,21 @@ Match Session Overlay is an unofficial Windows app that retrieves Street Fighter
 - An internet connection for signing in to the official website and retrieving match data
 - OBS Studio only if you want to display the overlay on stream (optional)
 
-Current release: v1.12.1
+Candidate release: v1.13.1 (pre-publication checks in progress)
 
 ## Download
 
 [Get the official build from GitHub Releases](https://github.com/mickangumi-oss/match-session-overlay/releases).
 
-Open the release and download `Match-Session-Overlay-1.12.1-Setup.exe` from **Assets**. Do not use an installer from an unverified source.
+Open the release and download `Match-Session-Overlay-1.13.1-Setup.exe` from **Assets**. Do not use an installer from an unverified source.
 
 For step-by-step instructions, see the [English usage guide](docs/usage.en.md).
+
+## What's new in v1.13.1
+
+- Opponent-profile status messages now distinguish loading, partial data, insufficient history, missing official data, and temporary restrictions.
+- Available battle-trend comparisons remain visible when the opponent profile cannot be retrieved.
+- Match-history retrieval fetches needed pages in bounded groups of up to three and reuses saved page-count hints to reduce waiting.
 
 ## What's new in v1.13.0
 

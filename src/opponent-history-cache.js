@@ -51,6 +51,37 @@ function completedHistoryReplayState(
     : "missing-round-results";
 }
 
+function explicitActHistoryCacheIsValid(
+  history,
+  {
+    profileId = null,
+    requestedLocale = null,
+    selectedActId = null,
+    requiredReplayId = null,
+    beforeTimestamp = null,
+    generation = null,
+  } = {},
+) {
+  if (!history || history.complete !== true) return false;
+  const requestedAct = Number(selectedActId);
+  if (!Number.isInteger(requestedAct) || requestedAct < 0) return false;
+  const proof = history.scopeProof;
+  if (proof?.method !== "verified-request" || proof.requestedAct !== requestedAct ||
+    proof.selectedReplayPresent !== true || proof.complete !== true || proof.mixedAct !== false) return false;
+  const identity = history.scopeIdentity;
+  if (!identity || String(identity.profileId ?? "") !== String(profileId ?? "") ||
+    String(identity.requestedLocale ?? "") !== String(requestedLocale ?? "") ||
+    Number(identity.requestedAct) !== requestedAct ||
+    String(identity.requiredReplayId ?? "") !== String(requiredReplayId ?? "") ||
+    Number(identity.beforeTimestamp ?? 0) !== Number(beforeTimestamp ?? 0) ||
+    Number(identity.generation) !== Number(generation)) return false;
+  const replayId = String(requiredReplayId ?? "").trim();
+  const selected = Array.isArray(history.records)
+    ? history.records.find((record) => String(record?.replayId ?? "").trim() === replayId)
+    : null;
+  return Boolean(selected && Number(selected.actId) === requestedAct);
+}
+
 async function acquireScopedOfficialHistories({
   cache,
   ownerProfileId,
@@ -83,22 +114,34 @@ async function acquireScopedOfficialHistories({
     selectedActId,
     cacheKeyForProfile: cacheKey,
   });
-  const cacheReplayStates = [ownerProfileId, opponentProfileId].map((profileId) =>
-    completedHistoryReplayState(cache, {
-      profileId,
-      requestedLocale,
-      selectedActId,
-      requiredReplayId,
-      cacheKeyForProfile: cacheKey,
-    }),
-  );
+  const cachedHistory = (profileId) => cache.get(cacheKey(profileId))?.history;
+  const explicitActRequest = actIndependent !== true && requestScopeProof === "explicit-season-request";
+  const cacheReplayStates = explicitActRequest
+    ? [ownerProfileId, opponentProfileId].map((profileId) =>
+      explicitActHistoryCacheIsValid(cachedHistory(profileId), {
+        profileId,
+        requestedLocale,
+        selectedActId,
+        requiredReplayId,
+        beforeTimestamp,
+        generation,
+      }) ? "present" : "absent",
+    )
+    : [ownerProfileId, opponentProfileId].map((profileId) =>
+      completedHistoryReplayState(cache, {
+        profileId,
+        requestedLocale,
+        selectedActId,
+        requiredReplayId,
+        cacheKeyForProfile: cacheKey,
+      }),
+    );
   let cacheRefreshUsed = forceRefresh === true || cacheReplayStates.some((state) =>
     ["missing", "missing-round-results"].includes(state),
   );
   if (cacheRefreshUsed) invalidate();
   if (!cacheRefreshUsed && cacheReplayStates.every((state) => state === "present")) {
     assertGeneration(generation);
-    const cachedHistory = (profileId) => cache.get(cacheKey(profileId))?.history;
     return {
       officialHistory: cachedHistory(opponentProfileId),
       ownerHistory: cachedHistory(ownerProfileId),
@@ -107,31 +150,37 @@ async function acquireScopedOfficialHistories({
 
   const acquire = async () => {
     assertGeneration(generation);
-    const opponentHistory = await acquireOfficialHistory({
-      profileId: opponentProfileId,
-      requestedLocale,
-      selectedRecord,
-      actId: selectedActId,
-      actIndependent,
-      beforeTimestamp,
-      requestScopeProof,
-      generation,
-      productionReceipt,
-      productionRole: "history.opponent",
-    });
+    const [opponentResult, ownerResult] = await Promise.allSettled([
+      acquireOfficialHistory({
+        profileId: opponentProfileId,
+        requestedLocale,
+        selectedRecord,
+        actId: selectedActId,
+        actIndependent,
+        beforeTimestamp,
+        requestScopeProof,
+        generation,
+        productionReceipt,
+        productionRole: "history.opponent",
+      }),
+      acquireOfficialHistory({
+        profileId: ownerProfileId,
+        requestedLocale,
+        selectedRecord,
+        actId: selectedActId,
+        actIndependent,
+        beforeTimestamp,
+        requestScopeProof,
+        generation,
+        productionReceipt,
+        productionRole: "history.owner",
+      }),
+    ]);
+    if (opponentResult.status === "rejected") throw opponentResult.reason;
+    if (ownerResult.status === "rejected") throw ownerResult.reason;
+    const opponentHistory = opponentResult.value;
+    const ownerHistory = ownerResult.value;
     assertGeneration(generation);
-    const ownerHistory = await acquireOfficialHistory({
-      profileId: ownerProfileId,
-      requestedLocale,
-      selectedRecord,
-      actId: selectedActId,
-      actIndependent,
-      beforeTimestamp,
-      requestScopeProof,
-      generation,
-      productionReceipt,
-      productionRole: "history.owner",
-    });
     assertGeneration(generation);
     if (opponentHistory?.complete !== true || ownerHistory?.complete !== true) {
       throw new Error("HISTORY_SCOPE_INCOMPLETE");
@@ -159,5 +208,6 @@ async function acquireScopedOfficialHistories({
 module.exports = {
   invalidateScopedOfficialHistoryCache,
   completedHistoryReplayState,
+  explicitActHistoryCacheIsValid,
   acquireScopedOfficialHistories,
 };

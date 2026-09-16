@@ -86,8 +86,24 @@ function isFreshOfficialActRegistry(registry, now = Date.now(), ttlMs = 5 * 60 *
     Number(now) - Number(registry.retrievedAt) < ttlMs;
 }
 
+function buildOfficialHistoryRequestContext(play, requestedAct) {
+  const requested = normalizeActId(requestedAct);
+  const registry = buildOfficialActRegistry(play);
+  const currentActId = normalizeActId(play?.current_season_id);
+  const ok = registry.status === "ready" && requested != null && registry.acts.some((act) => act.id === requested);
+  return {
+    ok,
+    method: ok ? "verified-request-context" : null,
+    currentActId: ok ? currentActId : null,
+    requestedActId: requested,
+    seasonIdsVerified: registry.status === "ready",
+    reason: ok ? null : "ACT_SCOPE_MISSING",
+  };
+}
+
 module.exports = {
   buildOfficialActRegistry,
+  buildOfficialHistoryRequestContext,
   isFreshOfficialActRegistry,
   normalizeActDate,
   normalizeActId,

@@ -8,6 +8,7 @@ async function fetchHistoryPagesConcurrently(
     maxPages = 10,
     pageSize = 10,
     concurrency = maxPages,
+    knownTotalPages = null,
     onPage = null,
     shareKey = null,
   } = {},
@@ -24,6 +25,9 @@ async function fetchHistoryPagesConcurrently(
   if (!Number.isInteger(concurrency) || concurrency < 1) {
     throw new TypeError("concurrency must be a positive integer.");
   }
+  if (knownTotalPages != null && (!Number.isInteger(knownTotalPages) || knownTotalPages < 1)) {
+    throw new TypeError("knownTotalPages must be a positive integer when provided.");
+  }
   if (onPage != null && typeof onPage !== "function") {
     throw new TypeError("onPage must be a function when provided.");
   }
@@ -32,12 +36,13 @@ async function fetchHistoryPagesConcurrently(
       maxPages,
       pageSize,
       concurrency,
+      knownTotalPages,
       onPage,
       shareKey: String(shareKey),
     });
   }
 
-  return fetchHistoryPagesDirect(fetchPage, { maxPages, pageSize, concurrency, onPage });
+  return fetchHistoryPagesDirect(fetchPage, { maxPages, pageSize, concurrency, knownTotalPages, onPage });
 }
 
 async function fetchSharedHistoryPages(fetchPage, options) {
@@ -106,6 +111,7 @@ async function fetchHistoryPagesDirect(
     maxPages = 10,
     pageSize = 10,
     concurrency = maxPages,
+    knownTotalPages = null,
     onPage = null,
   } = {},
 ) {
@@ -132,23 +138,43 @@ async function fetchHistoryPagesDirect(
     return result;
   };
 
-  const observe = (result) => {
+  let observedPageOneTotalPages = null;
+  const observe = (result, page = null) => {
     const totalPages = Number(result?.totalPages);
     if (Number.isInteger(totalPages) && totalPages > 0) {
-      discoveredTotalPages = discoveredTotalPages == null
-        ? totalPages
-        : Math.min(discoveredTotalPages, totalPages);
+      const boundedTotalPages = Math.min(totalPages, maxPages);
+      if (page === 1) {
+        // Page 1 is the authoritative current-window observation. A stale
+        // page response must not lower a newer page-1 increase.
+        observedPageOneTotalPages = boundedTotalPages;
+        discoveredTotalPages = boundedTotalPages;
+      } else if (observedPageOneTotalPages == null) {
+        discoveredTotalPages = discoveredTotalPages == null
+          ? boundedTotalPages
+          : Math.min(discoveredTotalPages, boundedTotalPages);
+      }
     }
     const rawCount = Number(result?.rawCount);
     terminalPage ||= rawCount === 0 || (rawCount > 0 && rawCount < pageSize);
   };
 
-  // Bootstrap page 1 before starting any overlap. This avoids launching
-  // pages that a short/empty first page or totalPages metadata would make
-  // unnecessary.
-  const first = await fetchAndPublish(1);
-  nextPage = 2;
-  observe(first);
+  const resolvedKnownTotalPages = knownTotalPages == null
+    ? null
+    : Math.min(knownTotalPages, maxPages);
+  if (resolvedKnownTotalPages == null) {
+    // Bootstrap page 1 before starting any overlap. This avoids launching
+    // pages that a short/empty first page or totalPages metadata would make
+    // unnecessary.
+    const first = await fetchAndPublish(1);
+    nextPage = 2;
+    observe(first, 1);
+  } else {
+    // A previously verified total-page count lets a refresh queue page 1
+    // together with the rest of the known window. The pool remains bounded
+    // and results are still returned in page order below.
+    discoveredTotalPages = resolvedKnownTotalPages;
+    nextPage = 1;
+  }
 
   // Keep the same bounded request count and concurrency, but refill a slot as
   // soon as a page completes. Waiting for an entire batch to settle leaves
@@ -165,7 +191,7 @@ async function fetchHistoryPagesDirect(
       active.set(
         page,
         fetchAndPublish(page).then((result) => {
-          observe(result);
+          observe(result, page);
           return result;
         }),
       );
@@ -191,11 +217,21 @@ async function fetchHistoryPagesDirect(
     schedule();
   }
 
-  return results
-    .sort((left, right) => left.page - right.page)
+  const effectiveTotalPages = discoveredTotalPages == null
+    ? maxPages
+    : Math.min(discoveredTotalPages, maxPages);
+  const eligibleResults = results
+    .filter(({ page }) => page <= effectiveTotalPages)
+    .sort((left, right) => left.page - right.page);
+  const replayList = eligibleResults
     .flatMap(({ result }) =>
       Array.isArray(result?.replays) ? result.replays : [],
     );
+  Object.defineProperties(replayList, {
+    totalPages: { value: discoveredTotalPages, enumerable: false },
+    fetchedPages: { value: eligibleResults.length, enumerable: false },
+  });
+  return replayList;
 }
 
 module.exports = { fetchHistoryPagesConcurrently };

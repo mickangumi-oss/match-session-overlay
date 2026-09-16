@@ -349,16 +349,37 @@ function normalizeOpponentProfileContext(data, {
   retrievedAt = Date.now(),
   peakProfileData = null,
   peakActId = null,
+  expectedActId = null,
+  expectedActLabel = null,
+  verifiedActId = null,
 } = {}) {
   const normalizedCharacterId = positiveNumber(characterId);
   const { candidates, explicitCurrentAct } = collectProfileContextCandidates(data);
-  const currentAct = explicitCurrentAct?.key
+  const responseAct = explicitCurrentAct?.key
     ? { id: explicitCurrentAct.key, label: explicitCurrentAct.label }
     : null;
+  const expectedAct = normalizeActValue(expectedActId)
+    ? { id: normalizeActValue(expectedActId), label: safeText(expectedActLabel ?? `ACT ${expectedActId}`, 80) }
+    : null;
+  const verifiedAct = normalizeActValue(verifiedActId);
+  const externalActMatches = Boolean(expectedAct && verifiedAct && verifiedAct === expectedAct.id);
+  const peakResponseAct = peakProfileData?.response && typeof peakProfileData.response === "object"
+    ? normalizeActValue(firstOwn(peakProfileData.response, ["current_season_id", "currentSeasonId"]))
+    : "";
+  const profileActMissing = Boolean(expectedAct && responseAct == null && externalActMatches);
+  const profileScopeMismatch = expectedAct && !externalActMatches && responseAct?.id !== expectedAct.id;
+  const peakScopeMismatch = expectedAct && peakProfileData && peakResponseAct !== expectedAct.id;
+  const scopeReason = profileActMissing
+    ? "PROFILE_ACT_MISSING"
+    : profileScopeMismatch || peakScopeMismatch
+    ? (responseAct == null || (peakProfileData && !peakResponseAct) ? "ACT_SCOPE_MISSING" : "ACT_SCOPE_MISMATCH")
+    : null;
+  const currentAct = scopeReason ? expectedAct : responseAct;
   // Never use a candidate without the same explicit current Act. This is the
   // key guard against showing a previous Act as the current reference value.
   const currentCandidates = currentAct
-    ? candidates.filter((candidate) => candidate.actKey === currentAct.id)
+    ? candidates.filter((candidate) => candidate.actKey === currentAct.id ||
+      profileActMissing && !candidate.actKey)
     : [];
   const targetCandidates = currentCandidates.filter(
     (candidate) => normalizedCharacterId == null || candidate.characterId === normalizedCharacterId,
@@ -388,9 +409,11 @@ function normalizeOpponentProfileContext(data, {
     peakActId ?? currentAct?.id,
   );
   const otherPeakMr = selectOtherCharacterPeakMr(
-    [...currentCandidates, ...peakProfileCandidates].filter(
+    peakScopeMismatch
+      ? []
+      : [...(profileScopeMismatch ? [] : currentCandidates), ...peakProfileCandidates].filter(
       (candidate) => candidate.actKey === currentAct?.id,
-    ),
+        ),
     normalizedCharacterId,
   );
   const other = otherPeakMr
@@ -404,7 +427,8 @@ function normalizeOpponentProfileContext(data, {
       }
     : null;
   return {
-    status: currentAct ? "ready" : "empty",
+    status: scopeReason ? "partial" : currentAct ? "ready" : "empty",
+    ...(scopeReason ? { reason: scopeReason } : {}),
     profileId: profileId == null ? null : String(profileId),
     retrievedAt: Number.isFinite(Number(retrievedAt)) ? Number(retrievedAt) : null,
     act: currentAct,

@@ -37,6 +37,8 @@ Records are kept separately by character. Master-rank characters show MR; other 
 
 When at least two eligible records are available for each value, the app may show `POTENTIAL MR` from up to 100 recent same-character ranked matches and `POTENTIAL LP` from up to 20 recent matches. `POTENTIAL MR` uses opponent MR and win/loss results with an Elo-style expected-win model; `POTENTIAL LP` retains the existing robust exponential smoothing. These are app-specific reference values, not official ratings or predictions.
 
+When you select an opponent in match history, the profile list shows up to 20 same-character Ranked Matches before the selected match. The history used for `POTENTIAL MR` is kept separate from that display list and may use the additional history needed for its calculation. If the profile cannot be retrieved, the app shows a situation-specific message while keeping any available battle-trend comparison visible.
+
 ## 4. Choose where to display it
 
 ### Regular window

@@ -95,6 +95,9 @@ function normalizeSnapshot(value) {
   const snapshot = {
     status,
     algorithmVersion: String(value.algorithmVersion ?? "").trim().slice(0, 64) || LEGACY_ALGORITHM_VERSION,
+    scopeProof: ["verified-request", "verified-response", "verified-record"].includes(String(value.scopeProof ?? ""))
+      ? String(value.scopeProof)
+      : null,
     cutoffReplayId: String(value.cutoffReplayId ?? "").trim().slice(0, 120) || null,
     cutoffPlayedAt: finite(value.cutoffPlayedAt),
     actId: value.actId != null && String(value.actId).trim() !== "" &&
@@ -157,6 +160,7 @@ function buildHistoricalOpponentSnapshots({
   limit = INSIGHT_MATCH_LIMIT,
   capturedAt = Date.now(),
   historyComplete = true,
+  scopeProof = null,
 } = {}) {
   const selectedReplayId = String(selectedRecord?.replayId ?? "").trim();
   const owner = String(historyOwnerProfileId ?? "").replace(/\s/g, "");
@@ -167,6 +171,7 @@ function buildHistoricalOpponentSnapshots({
   const cutoffPlayedAt = timestampOf(cutoff);
   const base = {
     algorithmVersion: OPPONENT_INSIGHT_ALGORITHM_VERSION,
+    scopeProof: typeof scopeProof === "string" ? scopeProof : null,
     cutoffReplayId: selectedReplayId || null,
     cutoffPlayedAt,
     actId: Number.isInteger(Number(actId)) && Number(actId) >= 0 ? Number(actId) : null,

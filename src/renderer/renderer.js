@@ -47,6 +47,7 @@ let historyRatingPeriod = { mode: "all", weekOffset: 0, dateMode: "played" };
 const HISTORY_PAGE_SIZE = 10;
 const RECENT_HISTORY_PREVIEW_LIMIT = 5;
 let historyPage = 0;
+let historyPageUserNavigated = false;
 let historyActUserSelected = false;
 let historyActProfileScope = "";
 let historyActFetchInFlight = null;
@@ -998,6 +999,8 @@ function historyInsightFromRecord(record) {
   const rating = (type) => {
     const snapshot = snapshots[type];
     return {
+      status: snapshot?.status ?? null,
+      reason: snapshot?.reason ?? null,
       potential: snapshot?.status === "ready" && snapshot.complete === true
         ? snapshot.potential
         : null,
@@ -1032,6 +1035,15 @@ function registerScopedContextCharacterLabels(context) {
   }
 }
 
+function contextHasVerifiedActRange(context, selectedActId = null) {
+  const contextActId = Number(context?.act?.id);
+  const roundScopeActId = Number(context?.roundTrend?.scope?.actId);
+  return String(context?.roundTrend?.status ?? "").toLowerCase() === "ready" &&
+    Number.isInteger(contextActId) && contextActId > 0 &&
+    Number.isInteger(roundScopeActId) && roundScopeActId === contextActId &&
+    (selectedActId == null || Number(selectedActId) === contextActId);
+}
+
 function renderHistoryOpponentProfile(record = historyOpponentProfileState.record) {
   const card = elements.historyOpponentProfile;
   if (!card) return;
@@ -1063,17 +1075,36 @@ function renderHistoryOpponentProfile(record = historyOpponentProfileState.recor
     OPPONENT_PROFILE_LOCALE_CHANGED: "historyOpponentProfileLocaleChanged",
     OPPONENT_PROFILE_REQUEST_FAILED: "historyOpponentProfileRequestFailed",
     ACT_SCOPE_MISSING: "historyOpponentProfileActScopeMissing",
+    PROFILE_ACT_MISSING: "historyOpponentProfileActScopeMissing",
     HISTORY_SCOPE_INCOMPLETE: "historyOpponentProfileHistoryIncomplete",
     HISTORY_DUPLICATE_CONFLICT: "historyOpponentProfileHistoryConflict",
   };
-  const profileReason = context?.reason ?? historyOpponentProfileState.reason ?? null;
+  const persistedInsight = historyInsightFromRecord(record);
+  const hasVerifiedActRange = contextHasVerifiedActRange(context);
+  const profileReason = hasVerifiedActRange &&
+    ["ACT_SCOPE_MISSING", "PROFILE_ACT_MISSING"].includes(context?.reason)
+    ? null
+    : context?.reason ?? historyOpponentProfileState.reason ?? null;
+  const insightReason = Object.values(persistedInsight?.ratings ?? {})
+    .map((rating) => String(rating?.reason ?? "").trim())
+    .find(Boolean) ?? null;
   const stateText = status === "loading"
     ? t("historyOpponentProfileLoading", "Loading official profile reference…")
-    : (status === "error" || status === "empty")
+    : (status === "error" || status === "empty" || status === "partial")
       ? t(
-          profileReasonText[profileReason] || (status === "error" ? "historyOpponentProfileUnavailable" : "historyOpponentProfileEmpty"),
-          status === "error" ? "Official opponent profile could not be retrieved" : "No official opponent profile data is available",
+          profileReasonText[profileReason] || (status === "error"
+            ? "historyOpponentProfileUnavailable"
+            : status === "partial"
+              ? "historyOpponentProfilePartial"
+              : "historyOpponentProfileEmpty"),
+          status === "error"
+            ? "Official opponent profile could not be retrieved"
+            : status === "partial"
+              ? "The opponent profile is only partially available"
+              : "No official opponent profile data is available",
         )
+      : status === "ready" && insightReason === "sample-insufficient"
+        ? t("historyOpponentProfileHistoryInsufficient", "公式プロフィールの履歴が不足しています")
       : "";
   if (elements.historyOpponentProfileState) {
     elements.historyOpponentProfileState.textContent = stateText;
@@ -1094,7 +1125,9 @@ function renderHistoryOpponentProfile(record = historyOpponentProfileState.recor
 
   // A persisted replay-keyed snapshot is authoritative for this card. Never
   // fall back to a current profile value after a historical snapshot exists.
-  const insight = historyInsightFromRecord(record) ?? context?.opponentInsight ?? null;
+  const insight = context?.opponentInsightSource
+    ? context.opponentInsight ?? null
+    : persistedInsight ?? context?.opponentInsight ?? null;
   const wins = Number(insight?.wins) || 0;
   const losses = Number(insight?.losses) || 0;
   const draws = Number(insight?.draws) || 0;
@@ -1211,10 +1244,16 @@ function renderSelectedRoundResults(record) {
   }
 }
 
+function matchupHasCompleteComparison(context) {
+  return String(context?.playComparison?.status ?? "").toLowerCase() === "ready" &&
+    String(context?.roundTrend?.status ?? "").toLowerCase() === "ready";
+}
+
 function matchupStatusForContext(context, profileStatus = null) {
   if (profileStatus === "loading" || context?.status === "loading") return "loading";
   if (profileStatus === "error") return "error";
   if (profileStatus === "empty" || !context) return "unavailable";
+  if (context.status === "partial" && matchupHasCompleteComparison(context)) return "ready";
   return ["ready", "partial", "insufficient_sample", "unavailable", "error"].includes(context.status)
     ? context.status
     : "unavailable";
@@ -1640,6 +1679,7 @@ function selectHistoryRecord(record, { forceRefresh = false } = {}) {
     historyOpponentProfileState.ownerProfileId !== historyStateProfileId(historyState),
   );
   selectedHistoryRecordKey = nextRecordKey;
+  historyPageUserNavigated = false;
   const requestToken = ++historyOpponentProfileRequestToken;
   historyOpponentProfileState = {
     status: nextRecord ? "loading" : "idle",
@@ -2192,12 +2232,19 @@ function historyActHasScopedRecords(actId, state = historyState) {
   );
 }
 
+function historyNeedsActRepair(state = historyState) {
+  if (!(Number(state?.lastFetchedAt) > 0)) return false;
+  return (Array.isArray(state?.records) ? state.records : [])
+    .some((record) => !historyRecordActIsKnown(record));
+}
+
 function fetchHistoryForSelectedActIfNeeded(actId) {
-  if (!Number.isInteger(actId) || actId < 0 || historyActHasScopedRecords(actId)) return null;
+  const repairNeeded = historyNeedsActRepair();
+  if (!Number.isInteger(actId) || actId < 0 || (historyActHasScopedRecords(actId) && !repairNeeded)) return null;
   const profileId = historyStateProfileId(historyState);
   const key = `${profileId}:${actId}`;
   if (historyActFetchInFlight?.key === key) return historyActFetchInFlight.promise;
-  if (historyState.fetching || historyState.authenticated !== true || !historyState.canFetch) return null;
+  if (historyState.fetching || historyState.authenticated !== true || (!historyState.canFetch && !repairNeeded)) return null;
   const request = (async () => {
     try {
       const next = await unwrap(api.fetchHistory({ actId }));
@@ -2318,7 +2365,7 @@ function renderHistoryActState(state = historyState) {
   const selectedActIsKnown = officialRegistryActIds.includes(selected) || (
     state?.currentActVerified === true &&
     Number(state?.currentActId) === selected
-  );
+  ) || contextHasVerifiedActRange(historyOpponentProfileState.context, selected);
   element.textContent = selectedActIsKnown
     ? ""
     : t("historyActUnavailable", "ACT scope unavailable");
@@ -2584,13 +2631,27 @@ function renderHistoryState(nextState = historyState) {
   renderOpponentCharacterStats();
   const totalPages = Math.ceil(records.length / HISTORY_PAGE_SIZE);
   historyPage = totalPages ? Math.min(historyPage, totalPages - 1) : 0;
+  const selectedRecord = selectedHistoryRecordKey
+    ? records.find((record) => historyRecordKey(record) === selectedHistoryRecordKey) ?? null
+    : null;
+  // While a history import is still publishing pages, keep the selected row
+  // visible as newly arrived records shift its stable-key index. An explicit
+  // pagination click opts out until the next selection/scope reset.
+  if (
+    historyState.fetching === true &&
+    selectedRecord &&
+    !preservePinnedOpponentProfile &&
+    !historyPageUserNavigated
+  ) {
+    const selectedIndex = records.findIndex(
+      (record) => historyRecordKey(record) === selectedHistoryRecordKey,
+    );
+    if (selectedIndex >= 0) historyPage = Math.floor(selectedIndex / HISTORY_PAGE_SIZE);
+  }
   const pageRecords = records.slice(
     historyPage * HISTORY_PAGE_SIZE,
     (historyPage + 1) * HISTORY_PAGE_SIZE,
   );
-  const selectedRecord = selectedHistoryRecordKey
-    ? records.find((record) => historyRecordKey(record) === selectedHistoryRecordKey) ?? null
-    : null;
   if (selectedHistoryRecordKey && !selectedRecord && !preservePinnedOpponentProfile) {
     selectedHistoryRecordKey = null;
     historyOpponentProfileRequestToken += 1;
@@ -2646,6 +2707,7 @@ function scheduleHistoryRender(nextState = historyState, { resetPage = false } =
   const nextProfileId = historyStateProfileId(historyState);
   if (previousProfileId !== nextProfileId) historyOpponentInsightCache.clear();
   pendingHistoryRenderState = historyState;
+  if (resetPage || previousProfileId !== nextProfileId) historyPageUserNavigated = false;
   pendingHistoryPageReset = pendingHistoryPageReset || resetPage ||
     previousProfileId !== nextProfileId;
   recheckHistoryReadiness(historyState);
@@ -3911,17 +3973,18 @@ function historyAutoFetchScopeKey(state = historyState) {
 function autoFetchHistoryIfReady(state = historyState) {
   const profileId = historyStateProfileId(state);
   const scopeKey = historyAutoFetchScopeKey(state);
+  const repairNeeded = historyNeedsActRepair(state);
   if (
     !profileId ||
     !scopeKey ||
     state?.authenticated !== true ||
     state?.fetching ||
-    !state?.canFetch
+    (!state?.canFetch && !repairNeeded)
   ) return null;
   if (historyAutoFetchInFlight?.scopeKey === scopeKey) {
     return historyAutoFetchInFlight.promise;
   }
-  if (historyAutoFetchAttemptedScope === scopeKey) return null;
+  if (historyAutoFetchAttemptedScope === scopeKey && !repairNeeded) return null;
   historyAutoFetchAttemptedScope = scopeKey;
   const request = (async () => {
     try {
@@ -4189,10 +4252,12 @@ elements.historyRatingWeekNext?.addEventListener("click", () => {
   renderHistoryRatingCharts(filteredHistoryRecords());
 });
 elements.historyPreviousButton?.addEventListener("click", () => {
+  historyPageUserNavigated = true;
   historyPage = Math.max(0, historyPage - 1);
   renderHistoryState();
 });
 elements.historyNextButton?.addEventListener("click", () => {
+  historyPageUserNavigated = true;
   historyPage += 1;
   renderHistoryState();
 });

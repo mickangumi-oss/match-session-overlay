@@ -145,6 +145,7 @@ const {
 const {
   buildHistoricalOpponentSnapshots,
   mergeSnapshotObject,
+  OPPONENT_INSIGHT_ALGORITHM_VERSION,
   potentialMrHistoryCandidates,
   snapshotObject,
 } = require("./opponent-insight");
@@ -185,10 +186,28 @@ const {
   ALLOWED_MATCH_MODES,
   classifyHttpResponse,
   classifyPayloadShape,
+  configureProductionReceiptDirectory,
   createProductionReceipt,
-  finalizeProductionReceipt,
+  finalizeProductionReceipt: finalizeProductionReceiptInternal,
   recordProductionReceipt,
 } = require("./production-receipt");
+
+const mainProductionReceiptState = {
+  overallOk: true,
+  finalizationCount: 0,
+  failedDiagnosticCount: 0,
+};
+
+function finalizeProductionReceipt(receipt, options) {
+  const finalized = finalizeProductionReceiptInternal(receipt, options);
+  const diagnosticResult = finalized?.diagnosticResult;
+  mainProductionReceiptState.finalizationCount += 1;
+  if (!diagnosticResult?.ok) {
+    mainProductionReceiptState.overallOk = false;
+    mainProductionReceiptState.failedDiagnosticCount += 1;
+  }
+  return finalized;
+}
 const {
   buildHistoryActDiagnostic,
   buildOfficialActOptions,
@@ -200,6 +219,7 @@ const {
 } = require("./history-act-scope");
 const {
   buildOfficialActRegistry,
+  buildOfficialHistoryRequestContext,
   isFreshOfficialActRegistry,
 } = require("./official-act-registry");
 const {
@@ -412,6 +432,7 @@ const MEDIAN_RATING_SAMPLE_LIMIT = 20;
 // Keep manual imports deliberately infrequent so the feature cannot be used
 // to poll the service repeatedly.
 const MATCH_HISTORY_FETCH_COOLDOWN_MS = 10 * 60 * 1000;
+const MATCH_HISTORY_TOTAL_PAGES_TTL_MS = MATCH_HISTORY_FETCH_COOLDOWN_MS;
 // Selecting another profile also performs a search request. Reuse a recent
 // lookup so repeated clicks or switching back and forth cannot create a
 // request burst against the official service.
@@ -448,7 +469,12 @@ fs.mkdirSync(matchHistoryDirectory, { recursive: true });
 const persistedDataWriter = createDebouncedAtomicWriter({ delayMs: 350 });
 app.setPath("userData", userDataPath);
 app.setPath("sessionData", sessionDataPath);
-const hasSingleInstanceLock = app.requestSingleInstanceLock();
+const productionReceiptConfiguration = configureProductionReceiptDirectory(userDataPath);
+if (!productionReceiptConfiguration?.overallOk) mainProductionReceiptState.overallOk = false;
+mainProductionReceiptState.initializationCode = productionReceiptConfiguration?.code ?? "INITIALIZED";
+const hasSingleInstanceLock = process.env.MATCH_OVERLAY_TEST_MODE === "1"
+  ? true
+  : app.requestSingleInstanceLock();
 if (!hasSingleInstanceLock) {
   app.quit();
 }
@@ -553,6 +579,8 @@ const officialCharacterStatsCache = new Map();
 const officialCharacterStatsInFlight = new Map();
 const officialCharacterNamesCache = new Map();
 const officialCharacterNamesInFlight = new Map();
+const officialHistoryContextCache = new Map();
+const officialHistoryContextInFlight = new Map();
 const historyLabelBackfillInFlight = new Map();
 const historyLabelBackfillCompleted = new Set();
 let matchHistoryFetchInFlight = null;
@@ -1148,7 +1176,11 @@ function historyStorePath(profileId) {
 }
 
 function emptyMatchHistoryStore() {
-  return { version: 1, lastFetchedAt: 0, records: [] };
+  return { version: 1, lastFetchedAt: 0, lastFetchTotalPagesByScope: {}, records: [] };
+}
+
+function historyFetchScopeKey(locale, actId) {
+  return `${String(locale ?? "")}:${normalizeHistoryActId(actId) ?? "latest"}`;
 }
 
 function historyRevision(profileId) {
@@ -1175,6 +1207,11 @@ function normalizeMatchHistoryStore(value) {
   return {
     version: 1,
     lastFetchedAt: Number(value?.lastFetchedAt ?? 0) || 0,
+    lastFetchTotalPagesByScope: Object.fromEntries(
+      Object.entries(value?.lastFetchTotalPagesByScope ?? {})
+        .filter(([, pages]) => Number.isInteger(Number(pages)) && Number(pages) > 0)
+        .map(([scope, pages]) => [String(scope), Number(pages)]),
+    ),
     records: [...deduplicated.values()]
       .sort((a, b) => b.uploadedAt - a.uploadedAt)
       .slice(0, MATCH_HISTORY_LIMIT),
@@ -1314,19 +1351,30 @@ function historyProfilePlayer(profileId, preferredPlayer = null) {
 function mergeMatchHistory(
   replays,
   profileId,
-  { persist = true, notify = true } = {},
+  { persist = true, notify = true, returnOutcome = false } = {},
 ) {
   const normalizedProfileId = normalizeHistoryProfileId(profileId);
-  if (!normalizedProfileId || !Array.isArray(replays)) return false;
+  if (!normalizedProfileId || !Array.isArray(replays)) {
+    return returnOutcome ? { ok: false, outcome: "invalid-input", changed: false } : false;
+  }
   const store = loadMatchHistoryStore(normalizedProfileId);
   const existing = new Map(
     store.records.map((record) => [record.replayId, record]),
   );
+  const conflicts = [];
   const normalizedIncoming = replays
     .map((replay) => {
       const replayId = String(replay?.replayId ?? "").trim();
       const previous = replayId ? existing.get(replayId) : null;
       const actProvenance = mergeHistoryActProvenance(previous, replay);
+      if (actProvenance.outcome === "conflict") {
+        conflicts.push({
+          replayId,
+          previousActId: actProvenance.previousActId,
+          incomingActId: actProvenance.incomingActId,
+        });
+        return null;
+      }
       return normalizeStoredHistoryRecord({
         ...previous,
         ...replay,
@@ -1343,11 +1391,17 @@ function mergeMatchHistory(
       });
     })
     .filter(Boolean);
+  if (conflicts.length > 0) {
+    return returnOutcome
+      ? { ok: false, outcome: "act-conflict", changed: false, conflicts }
+      : false;
+  }
   let changed = false;
   for (const replay of normalizedIncoming) {
     const replayId = replay.replayId;
     const previous = existing.get(replayId) ?? null;
     const actProvenance = mergeHistoryActProvenance(previous, replay);
+    if (actProvenance.outcome === "conflict") continue;
     const merged = {
       ...previous,
       ...replay,
@@ -1369,12 +1423,16 @@ function mergeMatchHistory(
     historyRetentionLimit(normalizedProfileId),
   );
   const retentionChanged = retained.length !== existing.size;
-  if (!changed && !retentionChanged) return false;
+  if (!changed && !retentionChanged) {
+    return returnOutcome ? { ok: true, outcome: "unchanged", changed: false } : false;
+  }
   store.records = retained;
   bumpHistoryRevision(normalizedProfileId);
   if (persist) persistMatchHistoryStore(normalizedProfileId, store);
   if (notify) sendHistoryState();
-  return true;
+  return returnOutcome
+    ? { ok: true, outcome: "accepted", changed: true }
+    : true;
 }
 
 // Derived opponent history is attached to the exact local replay record. It
@@ -6138,6 +6196,9 @@ async function fetchOpponentOfficialHistory({
     profileIdPresent: Boolean(normalizedProfileId),
   });
   const now = Date.now();
+  const selectedReplayId = String(selectedRecord?.replayId ?? "").trim();
+  const cutoff = Number(beforeTimestamp);
+  const hasCutoff = Number.isFinite(cutoff) && cutoff > 0;
   const cached = opponentOfficialHistoryCache.get(cacheKey);
   const history = cached?.history ?? {
     data: null,
@@ -6147,7 +6208,16 @@ async function fetchOpponentOfficialHistory({
     totalPages: null,
     retrievedAt: null,
     complete: false,
+    scopeProof: null,
     requestedActId: requestedAct,
+    scopeIdentity: {
+      profileId: normalizedProfileId,
+      requestedLocale,
+      requestedAct,
+      requiredReplayId: selectedReplayId,
+      beforeTimestamp: hasCutoff ? cutoff : 0,
+      generation,
+    },
   };
   const retrievedAt = history.retrievedAt ?? now;
   const save = () => setBoundedCacheEntry(
@@ -6156,8 +6226,9 @@ async function fetchOpponentOfficialHistory({
     { fetchedAt: now, history },
     OPPONENT_OFFICIAL_HISTORY_MAX_CACHE_ENTRIES,
   );
+  let profileRequest = null;
   if (!history.data) {
-    const profileData = await shareInFlightRequest(
+    const profileFlight = shareInFlightRequest(
       opponentOfficialHistoryInFlight,
       `${cacheKey}:profile`,
       () => fetchServiceJson(
@@ -6171,16 +6242,15 @@ async function fetchOpponentOfficialHistory({
         `${productionRole}.profile`,
       ),
     );
-    assertPrivateDataGeneration(generation);
-    if (requestedLocale !== serviceLocale()) throw new Error("HISTORY_LOCALE_CHANGED");
-    history.data = profileData;
-    history.retrievedAt = retrievedAt;
-    recordProductionReceipt(productionReceipt, `${productionRole}.profile.normalize`, {
-      status: profileData && typeof profileData === "object" && !Array.isArray(profileData) ? "ok" : "unavailable",
-      requiredPayload: profileData && typeof profileData === "object" && !Array.isArray(profileData) ? "profile-data" : "missing",
-    });
+    // Attach the rejection handler in the same turn as the shared request is
+    // created. The result is still handled as a typed failure below, but a
+    // fast profile rejection cannot become an unhandled rejection while the
+    // parallel Battle Log pages are being acquired.
+    profileRequest = profileFlight.then(
+      (data) => ({ ok: true, data }),
+      (error) => ({ ok: false, error }),
+    );
   }
-  const selectedReplayId = String(selectedRecord?.replayId ?? "").trim();
   let expectedTotalPages = Number.isInteger(Number(history.totalPages)) && Number(history.totalPages) > 0
     ? Number(history.totalPages)
     : null;
@@ -6191,15 +6261,13 @@ async function fetchOpponentOfficialHistory({
       expectedTotalPages,
       requestedActId: requestedAct,
       actIndependent,
-      requestScopeVerified: requestScopeProof === "verified-current-act",
+      requestScopeVerified: requestScopeProof,
     });
     if (!validation.ok) throw new Error(validation.reason);
     expectedTotalPages = validation.totalPages;
     return validation;
   };
   const safeMaxPages = OPPONENT_STATS_SAFE_MAX_PAGES;
-  const cutoff = Number(beforeTimestamp);
-  const hasCutoff = Number.isFinite(cutoff) && cutoff > 0;
   const opponentPotentialMrCharacterId = productionRole === "history.opponent"
     ? Number(selectedRecord?.opponentCharacterId)
     : null;
@@ -6221,87 +6289,195 @@ async function fetchOpponentOfficialHistory({
     }).length >= POTENTIAL_MR_MATCH_LIMIT;
   };
   let reachedTarget = targetReached();
-  for (let page = 1; page <= safeMaxPages; page += 1) {
+  const storePage = (page, pageResult) => {
     if (history.pages[page]) {
       validateHistoryPage(history.pages[page], page);
-    } else {
-      const pageResult = await shareInFlightRequest(
-        opponentOfficialHistoryInFlight,
-        `${cacheKey}:page:${page}`,
-        () => fetchRankedReplaysPage(
-          normalizedProfileId,
-          page,
-          "history",
-          "history",
-          requestedLocale,
-          actIndependent === true ? null : actId,
-          productionReceipt,
-          `${productionRole}.battlelog.page.${page}`,
-        ),
-      );
-      assertPrivateDataGeneration(generation);
-      if (requestedLocale !== serviceLocale()) throw new Error("HISTORY_LOCALE_CHANGED");
-      validateHistoryPage(pageResult, page);
-      history.pages[page] = {
-        rawCount: Number(pageResult?.rawCount) || 0,
-        normalizedCount: Number(pageResult?.normalizedCount) || 0,
-        hasReplayList: pageResult?.hasReplayList === true,
-        totalPages: expectedTotalPages,
-        responsePage: pageResult?.responsePage ?? null,
-        requestedActId: pageResult?.requestedActId ?? requestedAct,
-        responseActId: pageResult?.responseActId ?? null,
-        recordActId: pageResult?.recordActId ?? null,
-        recordActIds: Array.isArray(pageResult?.recordActIds) ? pageResult.recordActIds : [],
-        actScopeVerified: pageResult?.actScopeVerified === true,
-        requestScopeProof: requestScopeProof === "verified-current-act" ? requestScopeProof : null,
-        actIndependent: actIndependent === true,
-        actScopeReason: pageResult?.actScopeReason ?? null,
-        records: Array.isArray(pageResult?.replays) ? pageResult.replays : [],
-      };
-      recordProductionReceipt(productionReceipt, `${productionRole}.battlelog.page`, {
-        status: actIndependent === true || pageResult?.actScopeVerified === true ? "ok" : "unavailable",
-        page,
-        totalPages: expectedTotalPages,
-        rawCount: pageResult?.rawCount,
-        normalizedCount: pageResult?.normalizedCount,
-        requestedAct: requestedAct,
-        responseAct: pageResult?.responseActId,
-        actScopeVerified: pageResult?.actScopeVerified === true,
-        requiredPayload: pageResult?.hasReplayList === true ? "replay_list" : "missing",
-        reason: actIndependent === true ? undefined : pageResult?.actScopeReason,
-      });
-      const byReplayId = new Map(history.records.map((record) => [record.replayId, record]));
-      for (const record of history.pages[page].records) {
-        if (!record?.replayId) continue;
-        const previous = byReplayId.get(record.replayId);
-        if (previous && JSON.stringify(previous) !== JSON.stringify(record)) {
-          throw new Error("HISTORY_REPLAY_DUPLICATE_CONFLICT");
-        }
-        byReplayId.set(record.replayId, record);
-      }
-      history.records = [...byReplayId.values()];
-      history.rawCounts[page] = history.pages[page].rawCount;
-      history.totalPages = expectedTotalPages;
-      save();
+      return;
     }
+    validateHistoryPage(pageResult, page);
+    history.pages[page] = {
+      rawCount: Number(pageResult?.rawCount) || 0,
+      normalizedCount: Number(pageResult?.normalizedCount) || 0,
+      hasReplayList: pageResult?.hasReplayList === true,
+      totalPages: expectedTotalPages,
+      responsePage: pageResult?.responsePage ?? null,
+      requestedActId: pageResult?.requestedActId ?? requestedAct,
+      responseActId: pageResult?.responseActId ?? null,
+      recordActId: pageResult?.recordActId ?? null,
+      recordActIds: Array.isArray(pageResult?.recordActIds) ? pageResult.recordActIds : [],
+      actScopeVerified: pageResult?.actScopeVerified === true,
+      requestScopeProof: ["verified-current-act", "verified-request-context"].includes(requestScopeProof) ? requestScopeProof : null,
+      scopeProofCandidate: requestScopeProof === "explicit-season-request",
+      actIndependent: actIndependent === true,
+      actScopeReason: ["explicit-season-request", "verified-request-context"].includes(requestScopeProof) &&
+        (pageResult?.responseActId == null || Number(pageResult.responseActId) === requestedAct) &&
+        (Array.isArray(pageResult?.recordActIds) ? pageResult.recordActIds.every((value) => Number(value) === requestedAct) : true)
+        ? null
+        : pageResult?.actScopeReason ?? null,
+      records: Array.isArray(pageResult?.replays) ? pageResult.replays : [],
+    };
+    recordProductionReceipt(productionReceipt, `${productionRole}.battlelog.page`, {
+      status: actIndependent === true || pageResult?.actScopeVerified === true ? "ok" : "unavailable",
+      page,
+      totalPages: expectedTotalPages,
+      rawCount: pageResult?.rawCount,
+      normalizedCount: pageResult?.normalizedCount,
+      requestedAct: requestedAct,
+      responseAct: pageResult?.responseActId,
+      actScopeVerified: pageResult?.actScopeVerified === true,
+      requiredPayload: pageResult?.hasReplayList === true ? "replay_list" : "missing",
+      reason: actIndependent === true ? undefined : pageResult?.actScopeReason,
+    });
+    const byReplayId = new Map(history.records.map((record) => [record.replayId, record]));
+    for (const record of history.pages[page].records) {
+      if (!record?.replayId) continue;
+      const previous = byReplayId.get(record.replayId);
+      if (previous && JSON.stringify(previous) !== JSON.stringify(record)) {
+        throw new Error("HISTORY_REPLAY_DUPLICATE_CONFLICT");
+      }
+      byReplayId.set(record.replayId, record);
+    }
+    history.records = [...byReplayId.values()];
+    history.rawCounts[page] = history.pages[page].rawCount;
+    history.totalPages = expectedTotalPages;
+    save();
+  };
+  const fetchPage = (page) => shareInFlightRequest(
+    opponentOfficialHistoryInFlight,
+    `${cacheKey}:page:${page}`,
+    () => fetchRankedReplaysPage(
+      normalizedProfileId,
+      page,
+      "history",
+      "history",
+      requestedLocale,
+      actIndependent === true ? null : actId,
+      productionReceipt,
+      `${productionRole}.battlelog.page.${page}`,
+      requestScopeProof,
+    ),
+  ).then((result) => {
+    assertPrivateDataGeneration(generation);
+    if (requestedLocale !== serviceLocale()) throw new Error("HISTORY_LOCALE_CHANGED");
+    return result;
+  });
+
+  // Bootstrap page 1 before starting overlap so its total-page metadata can
+  // bound the parallel requests. Subsequent pages are fetched in bounded
+  // batches and merged in page order to preserve duplicate/conflict checks.
+  if (history.pages[1]) {
+    storePage(1, null);
+  } else {
+    storePage(1, await fetchPage(1));
+  }
+  let nextPage = 2;
+  while (!reachedTarget && nextPage <= safeMaxPages &&
+    (expectedTotalPages == null || nextPage <= expectedTotalPages)) {
+    const batch = [];
+    while (batch.length < MATCH_HISTORY_FETCH_CONCURRENCY &&
+      nextPage <= safeMaxPages &&
+      (expectedTotalPages == null || nextPage <= expectedTotalPages)) {
+      batch.push(nextPage);
+      nextPage += 1;
+    }
+    const results = await Promise.all(batch.map(async (page) => ({
+      page,
+      result: history.pages[page] ? null : await fetchPage(page),
+    })));
+    for (const { page, result } of results) storePage(page, result);
     reachedTarget = targetReached();
-    if (reachedTarget) break;
-    if (expectedTotalPages != null && page >= expectedTotalPages) break;
+  }
+  if (profileRequest) {
+    const profileResult = await profileRequest;
+    if (!profileResult?.ok) throw profileResult?.error ?? new Error("PROFILE_REQUEST_FAILED");
+    const profileData = profileResult.data;
+    assertPrivateDataGeneration(generation);
+    if (requestedLocale !== serviceLocale()) throw new Error("HISTORY_LOCALE_CHANGED");
+    history.data = profileData;
+    history.retrievedAt = retrievedAt;
+    recordProductionReceipt(productionReceipt, `${productionRole}.profile.normalize`, {
+      status: profileData && typeof profileData === "object" && !Array.isArray(profileData) ? "ok" : "unavailable",
+      requiredPayload: profileData && typeof profileData === "object" && !Array.isArray(profileData) ? "profile-data" : "missing",
+    });
   }
   history.totalPages = expectedTotalPages;
   const allPagesFetched = expectedTotalPages != null &&
     Object.keys(history.pages).length >= expectedTotalPages;
   if (!allPagesFetched && !reachedTarget) throw new Error("HISTORY_PAGE_SET_INCOMPLETE");
-  if (actIndependent !== true && (!selectedReplayId || !history.records.some((record) =>
+  const historyComplete = allPagesFetched || reachedTarget;
+  const pageProofCandidates = Object.values(history.pages);
+  const pageResponseActs = [...new Set(pageProofCandidates
+    .map((page) => Number(page?.responseActId))
+    .filter((value) => Number.isInteger(value) && value >= 0))];
+  const knownRecordActs = [...new Set(history.records
+    .filter((record) => isKnownHistoryActRecord(record))
+    .map((record) => Number(record.actId))
+    .filter((value) => Number.isInteger(value) && value >= 0))];
+  const unknownRecordCount = history.records.filter((record) => !isKnownHistoryActRecord(record)).length;
+  const mixedAct = pageResponseActs.length > 1 || knownRecordActs.length > 1;
+  const selectedReplayPresent = Boolean(selectedReplayId && history.records.some((record) =>
+    record.replayId === selectedReplayId,
+  ));
+  const explicitRequestProof = actIndependent !== true && requestedAct != null &&
+    ["explicit-season-request", "verified-request-context"].includes(requestScopeProof) &&
+    historyComplete && selectedReplayPresent && !mixedAct &&
+    pageProofCandidates.length > 0 &&
+    pageProofCandidates.every((page) =>
+      Number(page?.requestedActId) === requestedAct &&
+      (page?.responseActId == null || Number(page.responseActId) === requestedAct) &&
+      (Array.isArray(page?.recordActIds) ? page.recordActIds.every((value) => Number(value) === requestedAct) : true) &&
+      page?.actScopeReason == null &&
+      (page?.requestScopeProof === "verified-request-context" || requestScopeProof === "verified-current-act"),
+    );
+  if (actIndependent !== true && !explicitRequestProof && (!selectedReplayId || !history.records.some((record) =>
     record.replayId === selectedReplayId && Number(record.actId) === requestedAct,
   ))) {
+    recordProductionReceipt(productionReceipt, `${productionRole}.scope-proof`, {
+      status: "unavailable",
+      requestedAct,
+      selectedReplayPresent,
+      knownRecordCount: history.records.length - unknownRecordCount,
+      unknownRecordCount,
+      mixedAct,
+      complete: historyComplete,
+      scopeProof: "rejected",
+      reason: "HISTORY_ACT_METADATA_MISSING_OR_MISMATCH",
+    });
     throw new Error("HISTORY_SELECTED_REPLAY_SCOPE_MISSING");
   }
+  if (explicitRequestProof) {
+    history.records = stampScopedHistoryRecords(history.records, requestedAct).records;
+  }
   history.requestedActId = requestedAct;
-  history.actScopeVerified = actIndependent === true ? false : true;
+  history.actScopeVerified = actIndependent === true ? false : explicitRequestProof || history.records.some((record) =>
+    record.replayId === selectedReplayId && Number(record.actId) === requestedAct,
+  );
   history.roundScopeIndependent = actIndependent === true;
-  history.complete = allPagesFetched || reachedTarget;
+  history.complete = historyComplete;
+  history.scopeProof = explicitRequestProof
+    ? { method: "verified-request", requestedAct, selectedReplayPresent: true, complete: true, mixedAct: false }
+    : null;
+  history.scopeIdentity = {
+    profileId: normalizedProfileId,
+    requestedLocale,
+    requestedAct,
+    requiredReplayId: selectedReplayId,
+    beforeTimestamp: hasCutoff ? cutoff : 0,
+    generation,
+  };
   history.stopReason = reachedTarget ? "target20" : allPagesFetched ? "total_pages" : null;
+  recordProductionReceipt(productionReceipt, `${productionRole}.scope-proof`, {
+    status: history.actScopeVerified ? "ok" : "unavailable",
+    requestedAct,
+    responseAct: pageResponseActs.length === 1 ? pageResponseActs[0] : null,
+    selectedReplayPresent,
+    knownRecordCount: history.records.length - unknownRecordCount,
+    unknownRecordCount,
+    mixedAct,
+    complete: historyComplete,
+    scopeProof: explicitRequestProof ? "verified-request" : history.actScopeVerified ? "verified-record" : "rejected",
+    reason: history.actScopeVerified ? undefined : "HISTORY_ACT_METADATA_MISSING_OR_MISMATCH",
+  });
   save();
   const selected = actIndependent === true
     ? null
@@ -6512,6 +6688,41 @@ async function fetchHistoryOpponentContext({
     currentActId: currentActState.currentActId,
     currentActVerified: currentActState.currentActVerified,
   });
+  let requestContextProof = null;
+  if (normalizedRequestedActId != null && (
+    String(selectedActSelector ?? "latest").trim() !== "latest" || currentActState.currentActVerified !== true
+  )) {
+    const playProbe = await fetchOfficialCharacterNameRegistry({
+      profileId: ownerProfileId,
+      requestedLocale: serviceLocale(),
+      generation: privateDataGeneration,
+      actId: null,
+      productionReceipt,
+    });
+    const requestContext = buildOfficialHistoryRequestContext(playProbe?._play, normalizedRequestedActId);
+    const currentAct = normalizePositiveActId(requestContext.currentActId ?? playProbe?.act);
+    if (playProbe?.status === "ready" && requestContext.ok) {
+      requestContextProof = requestContext.method;
+      currentActState = {
+        ...currentActState,
+        currentActId: currentAct,
+        currentActVerified: true,
+        currentActStatus: "ready",
+        currentActSource: "official_profile_play",
+        currentActReason: null,
+      };
+    }
+    recordProductionReceipt(productionReceipt, "context.official-play-scope", {
+      status: requestContextProof ? "ok" : "unavailable",
+      requestedAct: normalizedRequestedActId,
+      responseAct: currentAct,
+      actScopeVerified: Boolean(requestContextProof),
+      requiredPayload: requestContextProof ? "current_season_id+season_ids" : "missing-or-mismatch",
+      reason: requestContextProof ? undefined : "ACT_SCOPE_MISSING",
+    });
+  } else if (normalizedRequestedActId != null && currentActState.currentActVerified === true) {
+    requestContextProof = "verified-current-act";
+  }
   if (
     selectorResolution.ok === true &&
     selectorResolution.selector === "latest" &&
@@ -6523,6 +6734,14 @@ async function fetchHistoryOpponentContext({
     // the selected replay or constructing the cache key.
     requestedActId = selectorResolution.actId;
     normalizedRequestedActId = selectorResolution.actId;
+  }
+  if (
+    requestContextProof == null &&
+    normalizedRequestedActId != null &&
+    currentActState.currentActVerified === true &&
+    currentActState.currentActId === normalizedRequestedActId
+  ) {
+    requestContextProof = "verified-current-act";
   }
   const requestedReplayId = String(replayId ?? selectedRecord?.replayId ?? "").trim();
   const ownerStore = ownerProfileId ? loadMatchHistoryStore(ownerProfileId) : null;
@@ -6577,6 +6796,13 @@ async function fetchHistoryOpponentContext({
     });
   }
 
+  const selectedActId = normalizeHistoryActId(requestedActId);
+  const latestRoundTrendActVerified = actSelectionSource !== "explicit"
+    && selectedActId != null
+    && currentActState.currentActVerified === true
+    && currentActState.currentActId === selectedActId
+    && requestContextProof != null;
+  const roundTrendActScoped = actSelectionSource === "explicit" || latestRoundTrendActVerified;
   const recordForActScope = actSelectionSource === "explicit"
     ? resolvedRecord
     : { ...resolvedRecord, actId: null };
@@ -6585,13 +6811,12 @@ async function fetchHistoryOpponentContext({
     // verified selector is authoritative; only an explicit historical choice
     // is allowed to validate against the stored record Act.
     selectedRecord: recordForActScope,
-    selectedActId: null,
-    actIndependent: true,
+    selectedActId: roundTrendActScoped ? selectedActId : null,
+    actIndependent: false,
   });
   // Act scope is required only for the optional round-trend acquisition.
   // Profile/PLAY comparison is based on the profile's historical data and
   // must remain available when round scope is missing or mismatched.
-  const selectedActId = normalizeHistoryActId(requestedActId);
   const scopedSelectedRecord = initialTrendContext.ok
     ? initialTrendContext.selectedRecord
     : { ...resolvedRecord, actId: selectedActId };
@@ -6602,7 +6827,7 @@ async function fetchHistoryOpponentContext({
     beforeTimestamp: Number(scopedSelectedRecord?.playedAt ?? scopedSelectedRecord?.uploadedAt) || null,
     limit: 20,
     matchTypes: ROUND_TREND_MATCH_TYPES,
-    actId: null,
+    actId: roundTrendActScoped ? selectedActId : null,
   };
   const generation = privateDataGeneration;
   const requestedLocale = serviceLocale();
@@ -6666,10 +6891,19 @@ async function fetchHistoryOpponentContext({
             verifiedFieldContract: PLAY_APPROVED_FIELD_CONTRACT,
           });
         }
-        // A persisted snapshot is authoritative even when it records a
-        // definitive insufficiency. Transient network/auth failures are not
-        // persisted, so only rows without any snapshot need battle-log I/O.
-        const hasPersistedSnapshot = Object.keys(storedSnapshots ?? {}).length > 0;
+        // A persisted snapshot is reusable only when its identity and
+        // algorithm are current for this exact historical row. Legacy,
+        // incomplete, or differently scoped snapshots must not hide a fresh
+        // complete history response.
+        const reusableSnapshots = reusableOpponentInsightSnapshots(storedSnapshots, {
+          selectedRecord: scopedSelectedRecord,
+          historyOwnerProfileId: ownerProfileId,
+          opponentUserCode: normalizedProfileId,
+          characterId: normalizedCharacterId,
+          actId: selectedActId,
+          scopeProof: actSelectionSource === "explicit" ? "verified-request" : null,
+        });
+        const hasInvalidPersistedSnapshot = Object.keys(storedSnapshots ?? {}).length > 0 && !reusableSnapshots;
         // Round trend is always acquired from an explicitly Act-scoped
         // battle-log set. A persisted insight snapshot is not a substitute:
         // it does not prove the selected match's historical Act.
@@ -6677,22 +6911,20 @@ async function fetchHistoryOpponentContext({
         let ownerHistory = null;
         let historyAcquireError = null;
         if (initialTrendContext.ok) {
+            const historicalActId = selectedActId;
+            const historicalActIndependent = historicalActId == null;
           try {
             ({ officialHistory, ownerHistory } = await acquireScopedOfficialHistories({
               cache: opponentOfficialHistoryCache,
               ownerProfileId,
               opponentProfileId: normalizedProfileId,
               requestedLocale,
-              selectedActId: null,
+              selectedActId: historicalActId,
               requiredReplayId: requestedReplayId,
               selectedRecord: scopedSelectedRecord,
               beforeTimestamp: trendScope.beforeTimestamp,
-              actIndependent: true,
-              requestScopeProof: actSelectionSource === "latest" &&
-                currentActState.currentActVerified === true &&
-              currentActState.currentActId === selectedActId
-                ? "verified-current-act"
-                : null,
+              actIndependent: historicalActIndependent,
+              requestScopeProof: requestContextProof,
               forceRefresh,
               cacheKeyForProfile: opponentOfficialHistoryCacheKey,
               acquireOfficialHistory: (params) => fetchOpponentOfficialHistory(params),
@@ -6733,6 +6965,8 @@ async function fetchHistoryOpponentContext({
           characterId: normalizedCharacterId,
           characterDisplayName: resolvedCharacterDisplayName,
           retrievedAt,
+          expectedActId: selectedActId,
+          verifiedActId: requestContextProof ? selectedActId : null,
         });
         const scopedAct = selectedActId == null
           ? null
@@ -6765,10 +6999,12 @@ async function fetchHistoryOpponentContext({
               retrievedAt,
               peakProfileData,
               peakActId: selectedActId,
+              expectedActId: selectedActId,
+              verifiedActId: requestContextProof ? selectedActId : null,
             })
           : baseContext;
-        let snapshots = storedSnapshots;
-        if (!hasPersistedSnapshot && officialHistory?.complete === true) {
+        let snapshots = reusableSnapshots;
+        if (!reusableSnapshots && officialHistory?.complete === true) {
           snapshots = buildHistoricalOpponentSnapshots({
             records: opponentRecords,
             selectedRecord: scopedSelectedRecord,
@@ -6779,6 +7015,7 @@ async function fetchHistoryOpponentContext({
             estimatePotentialMrFromMatches,
             potentialRatingValue,
             historyComplete: Boolean(officialHistory?.complete),
+            scopeProof: officialHistory?.scopeProof?.method ?? null,
             capturedAt: retrievedAt,
           });
           persistOpponentInsightSnapshots(
@@ -6787,6 +7024,7 @@ async function fetchHistoryOpponentContext({
             snapshots,
           );
         }
+        const snapshotScopeIncomplete = hasInvalidPersistedSnapshot && officialHistory?.complete !== true;
         const opponentInsight = opponentInsightFromSnapshots(snapshots);
         const ownerHistoryChanged = ownerHistory?.complete === true
           ? mergeMatchHistory(ownerRecords, ownerProfileId, { notify: false })
@@ -6794,8 +7032,8 @@ async function fetchHistoryOpponentContext({
         const trendContext = initialTrendContext.ok && !historyAcquireError
           ? buildScopedRoundTrendContext({
               selectedRecord: scopedSelectedRecord,
-              selectedActId: null,
-              actIndependent: true,
+              selectedActId: roundTrendActScoped ? selectedActId : null,
+              actIndependent: false,
               ownerRecords,
               opponentRecords,
               ownerComplete: ownerHistory?.complete === true,
@@ -6880,6 +7118,9 @@ async function fetchHistoryOpponentContext({
         });
         const enrichedContext = {
           ...context,
+          ...(snapshotScopeIncomplete && context.status === "ready"
+            ? { status: "partial", reason: "HISTORY_SCOPE_INCOMPLETE" }
+            : {}),
           // The profile PLAY payload is a current-profile companion and may
           // expose a different or legacy Act marker. The selected history
           // scope was verified above and is authoritative for this card.
@@ -6896,6 +7137,11 @@ async function fetchHistoryOpponentContext({
             },
           },
           opponentInsight,
+          opponentInsightSource: reusableSnapshots
+            ? "validated-snapshot"
+            : snapshots
+              ? "recomputed"
+              : "unavailable",
           playComparison,
           roundTrend,
           diagnostics: historyScopeDiagnostics({
@@ -7066,6 +7312,7 @@ async function fetchRankedReplaysPage(
   requestedActId = null,
   productionReceipt = null,
   productionStage = "history.battlelog",
+  requestContextProof = null,
 ) {
   const requestedLocale = LOCALE_KEYS.has(String(localeOverride))
     ? String(localeOverride)
@@ -7104,8 +7351,11 @@ async function fetchRankedReplaysPage(
     .map((replay) => normalizeReplay(replay, profileId, requestedLocale))
     .filter(Boolean);
   const recordActIds = normalizedRecordActIds(normalizedReplays);
+  const requestProofVerified = requestContextProof === "verified-request-context" || requestContextProof === "verified-current-act";
   const actScopeVerified = requestedAct != null &&
-    (responseActId === requestedAct || recordActIds.length === 1 && recordActIds[0] === requestedAct) &&
+    requestProofVerified &&
+    ((responseActId == null && recordActIds.length === 0) ||
+      responseActId === requestedAct || recordActIds.length === 1 && recordActIds[0] === requestedAct) &&
     (responseActId == null || responseActId === requestedAct) &&
     recordActIds.every((value) => value === requestedAct);
   const stamped = actScopeVerified
@@ -7118,6 +7368,7 @@ async function fetchRankedReplaysPage(
     totalPages: Number.isInteger(totalPages) && totalPages > 0 ? totalPages : null,
     responsePage: Number.isInteger(responsePage) && responsePage > 0 ? responsePage : null,
     requestedActId: requestedAct,
+    requestContextProof: requestProofVerified ? requestContextProof : null,
     responseActId,
     recordActId: recordActIds.length === 1 ? recordActIds[0] : null,
     recordActIds,
@@ -7135,26 +7386,145 @@ async function fetchRankedReplays(profileId) {
   return (await fetchRankedReplaysPage(profileId, 1)).replays;
 }
 
+async function fetchOfficialHistoryRequestContext({
+  profileId,
+  requestedLocale,
+  generation,
+  requestedActId = null,
+  productionReceipt = null,
+} = {}) {
+  const normalizedProfileId = normalizeHistoryProfileId(profileId);
+  const locale = String(requestedLocale ?? "").trim();
+  const requested = normalizeHistoryActId(requestedActId);
+  const cacheKey = normalizedProfileId && LOCALE_KEYS.has(locale)
+    ? `${normalizedProfileId}:${locale}`
+    : "";
+  if (!cacheKey) return { status: "unavailable", reason: "ACT_SCOPE_MISSING" };
+  const cached = officialHistoryContextCache.get(cacheKey);
+  if (
+    cached?.status === "ready" &&
+    isFreshOfficialActRegistry(cached.registry)
+  ) {
+    const context = buildOfficialHistoryRequestContext(cached.play, requested ?? cached.currentActId);
+    return context.ok
+      ? { ...cached, requestedActId: context.requestedActId, method: context.method }
+      : { status: "unavailable", reason: "ACT_SCOPE_MISSING" };
+  }
+  return shareInFlightRequest(officialHistoryContextInFlight, cacheKey, async () => {
+    const retrievedAt = Date.now();
+    try {
+      const initial = await fetchAuthenticatedPlayProfile({
+        profileId: normalizedProfileId,
+        generation,
+        requestedLocale: locale,
+        productionReceipt,
+        productionRole: "history.act-scope",
+      });
+      const play = initial?.payload?.props?.pageProps?.play;
+      const registry = buildOfficialActRegistry(play, { retrievedAt });
+      const currentActId = normalizeHistoryActId(play?.current_season_id);
+      const context = buildOfficialHistoryRequestContext(play, requested ?? currentActId);
+      if (!context.ok) {
+        return { status: "unavailable", reason: context.reason ?? "ACT_SCOPE_MISSING" };
+      }
+      const result = {
+        status: "ready",
+        ...context,
+        currentActId,
+        registry,
+        play,
+        retrievedAt,
+      };
+      officialHistoryContextCache.set(cacheKey, result);
+      return result;
+    } catch (error) {
+      return {
+        status: "unavailable",
+        reason: error instanceof Error ? error.message : "ACT_SCOPE_MISSING",
+      };
+    }
+  });
+}
+
+function reusableOpponentInsightSnapshots(
+  snapshots,
+  {
+    selectedRecord = null,
+    historyOwnerProfileId = null,
+    opponentUserCode = null,
+    characterId = null,
+    actId = null,
+    scopeProof = null,
+  } = {},
+) {
+  const normalized = snapshotObject(snapshots);
+  if (!normalized || !Object.keys(normalized).length) return null;
+  const selectedReplayId = String(selectedRecord?.replayId ?? "").trim();
+  const selectedCutoff = Number(selectedRecord?.playedAt ?? selectedRecord?.uploadedAt);
+  const owner = normalizeHistoryProfileId(historyOwnerProfileId);
+  const opponent = normalizeHistoryProfileId(opponentUserCode);
+  const targetCharacter = Number(characterId) > 0 ? Number(characterId) : null;
+  const targetAct = actId == null ? null : Number(actId);
+  const reusable = Object.entries(normalized).every(([type, snapshot]) =>
+    snapshot.ratingType === type &&
+    snapshot.status === "ready" &&
+    snapshot.complete === true &&
+    snapshot.algorithmVersion === OPPONENT_INSIGHT_ALGORITHM_VERSION &&
+    snapshot.scopeProof === scopeProof &&
+    snapshot.cutoffReplayId === selectedReplayId &&
+    Number(snapshot.cutoffPlayedAt) === selectedCutoff &&
+    snapshot.actId === targetAct &&
+    snapshot.historyOwnerProfileId === owner &&
+    snapshot.opponentUserCode === opponent &&
+    snapshot.characterId === targetCharacter,
+  );
+  return reusable ? normalized : null;
+}
+
+function validateFetchedHistoryPageResult(result, page, seenReplayIds = new Map()) {
+  if (result?.responsePage != null && result.responsePage !== page) {
+    throw new Error("HISTORY_PAGE_NUMBER_MISSING_OR_MISMATCH");
+  }
+  for (const replay of result?.replays ?? []) {
+    const replayId = String(replay?.replayId ?? "").trim();
+    if (!replayId) continue;
+    const previous = seenReplayIds.get(replayId);
+    if (previous) throw new Error("HISTORY_REPLAY_DUPLICATE_CONFLICT");
+    seenReplayIds.set(replayId, replay);
+  }
+  return result;
+}
+
 async function fetchMatchHistoryPages(
   profileId,
   onPage = null,
   localeOverride = null,
   shareKey = null,
   requestedActId = null,
+  knownTotalPages = null,
+  requestContextProof = null,
 ) {
+  const seenReplayIds = new Map();
   return fetchHistoryPagesConcurrently(
-    (page) => fetchRankedReplaysPage(
-      profileId,
-      page,
-      "history",
-      "history",
-      localeOverride,
-      requestedActId,
-    ),
+    async (page) => {
+      const result = await fetchRankedReplaysPage(
+        profileId,
+        page,
+        "history",
+        "history",
+        localeOverride,
+        requestedActId,
+        null,
+        "history.battlelog",
+        requestContextProof,
+      );
+      return validateFetchedHistoryPageResult(result, page, seenReplayIds);
+    },
     {
       maxPages: MATCH_HISTORY_MAX_PAGES,
       pageSize: MATCH_HISTORY_PAGE_SIZE,
       concurrency: MATCH_HISTORY_FETCH_CONCURRENCY,
+      knownTotalPages,
       onPage,
       shareKey,
     },
@@ -7181,10 +7551,14 @@ async function fetchLocalMatchHistory({ requestedActId = null } = {}) {
   const profileId = requestedProfileId;
   const fetchScopeToken = matchHistoryFetchScopeToken;
   const store = loadMatchHistoryStore(profileId);
+  const repairUnknownRecordCount = store.records.filter(
+    (record) => !isKnownHistoryActRecord(record),
+  ).length;
+  const repairNeeded = repairUnknownRecordCount > 0;
   const retryAfterMs = store.lastFetchedAt
     ? store.lastFetchedAt + MATCH_HISTORY_FETCH_COOLDOWN_MS - now
     : 0;
-  if (retryAfterMs > 0) {
+  if (retryAfterMs > 0 && !repairNeeded) {
     const error = new Error("HISTORY_COOLDOWN");
     error.retryAfterMs = retryAfterMs;
     throw error;
@@ -7210,6 +7584,22 @@ async function fetchLocalMatchHistory({ requestedActId = null } = {}) {
       // continues to use one page per poll, so enabling history does not
       // multiply polling traffic.
       const existing = loadMatchHistoryStore(player.profileId);
+      const historyContext = await fetchOfficialHistoryRequestContext({
+        profileId: player.profileId,
+        requestedLocale,
+        generation,
+        requestedActId: normalizedRequestedActId,
+      });
+      if (historyContext.status !== "ready") {
+        throw new Error("HISTORY_ACT_SCOPE_UNVERIFIED");
+      }
+      const historyRequestedActId = historyContext.requestedActId;
+      const historyRequestContextProof = historyContext.method;
+      const historyScopeKey = historyFetchScopeKey(requestedLocale, historyRequestedActId);
+      const knownTotalPages = existing.lastFetchedAt > 0 &&
+        now - existing.lastFetchedAt <= MATCH_HISTORY_TOTAL_PAGES_TTL_MS
+        ? existing.lastFetchTotalPagesByScope?.[historyScopeKey] ?? null
+        : null;
       const previousReplayIds = new Set(
         existing.records.map((record) => record.replayId),
       );
@@ -7255,8 +7645,12 @@ async function fetchLocalMatchHistory({ requestedActId = null } = {}) {
           sendHistoryFetchProgress();
         },
         requestedLocale,
-        `history:${normalizeHistoryProfileId(player.profileId)}:${requestedLocale}:${generation}:${fetchScopeToken}:${normalizedRequestedActId ?? "latest"}`,
-        normalizedRequestedActId,
+        `history:${normalizeHistoryProfileId(player.profileId)}:${requestedLocale}:${generation}:${fetchScopeToken}:${historyRequestedActId}`,
+        historyRequestedActId,
+        Number.isInteger(Number(knownTotalPages)) && knownTotalPages > 0
+          ? knownTotalPages
+          : null,
+        historyRequestContextProof,
       );
       const importReplays = Array.isArray(orderedReplays) && orderedReplays.length
         ? orderedReplays
@@ -7282,7 +7676,16 @@ async function fetchLocalMatchHistory({ requestedActId = null } = {}) {
       // Treat the profile refresh as part of committing a new-history batch.
       // Until it succeeds, neither the rows nor a complete status are public.
       assertHistoryFetchScope(player.profileId, fetchScopeToken);
-      mergeMatchHistory(importReplays, player.profileId, { persist: false, notify: false });
+      const mergeOutcome = mergeMatchHistory(importReplays, player.profileId, {
+        persist: false,
+        notify: false,
+        returnOutcome: true,
+      });
+      if (!mergeOutcome.ok) {
+        throw new Error(mergeOutcome.outcome === "act-conflict"
+          ? "HISTORY_ACT_CONFLICT"
+          : "HISTORY_MERGE_FAILED");
+      }
       importMerged = true;
       assertPrivateDataGeneration(generation);
       if (serviceLocale() !== requestedLocale) {
@@ -7290,6 +7693,12 @@ async function fetchLocalMatchHistory({ requestedActId = null } = {}) {
       }
       const fetchedStore = loadMatchHistoryStore(player.profileId);
       fetchedStore.lastFetchedAt = Date.now();
+      if (Number.isInteger(Number(orderedReplays?.totalPages)) && orderedReplays.totalPages > 0) {
+        fetchedStore.lastFetchTotalPagesByScope = {
+          ...(fetchedStore.lastFetchTotalPagesByScope ?? {}),
+          [historyScopeKey]: orderedReplays.totalPages,
+        };
+      }
       persistMatchHistoryStore(player.profileId, fetchedStore);
       if (newReplayCount > 0) {
         if (historyViewPlayer?.profileId === player.profileId) historyViewPlayer = player;
@@ -7303,6 +7712,9 @@ async function fetchLocalMatchHistory({ requestedActId = null } = {}) {
         pages: pagesWithData,
         maxPages: MATCH_HISTORY_MAX_PAGES,
         fetchedCount,
+        repairNeeded,
+        repairUnknownRecordCount,
+        mergeChanged: mergeOutcome.changed === true,
         completedAt: Date.now(),
       };
       matchHistoryFetchProgress = null;
@@ -7846,6 +8258,9 @@ function friendlyError(error) {
     SERVICE_AUTH_REQUIRED: "対象サイトへのログインが必要です",
     SERVICE_RATE_LIMITED: "対象サイトが混雑しているため、しばらく待ってから再試行します",
     HISTORY_COOLDOWN: "対戦履歴は一定時間ごとに一度だけ取得できます。しばらく待ってから再試行してください。",
+    HISTORY_ACT_SCOPE_UNVERIFIED: "公式プロフィールから現在のAct範囲を確認できないため、対戦履歴を安全に取得できませんでした。",
+    HISTORY_ACT_CONFLICT: "保存済み対戦履歴と取得結果のActが一致しないため、履歴を更新しませんでした。",
+    HISTORY_MERGE_FAILED: "対戦履歴の整合性を確認できないため、履歴を更新しませんでした。",
     SERVICE_BUILD_ID_NOT_FOUND:
       "対象サイトのページ構成を確認できませんでした",
     SERVICE_SELF_NOT_FOUND:
@@ -8284,6 +8699,25 @@ if (process.env.MATCH_OVERLAY_TEST_MODE === "1") {
     __testFetchOfficialCharacterNameRegistry: fetchOfficialCharacterNameRegistry,
     __testInvalidateVerifiedHistoryCurrentAct: invalidateVerifiedHistoryCurrentAct,
     __testPublicHistoryState: publicHistoryState,
+    __testNormalizeMatchHistoryStore: normalizeMatchHistoryStore,
+    __testMergeMatchHistory: mergeMatchHistory,
+    __testMergeMatchHistoryDetailed: (replays, profileId, options = {}) => mergeMatchHistory(
+      replays,
+      profileId,
+      { ...options, returnOutcome: true },
+    ),
+    __testValidateFetchedHistoryPageResult: validateFetchedHistoryPageResult,
+    __testReusableOpponentInsightSnapshots: reusableOpponentInsightSnapshots,
+    __testNormalizeOpponentProfileContext: normalizeOpponentProfileContext,
+    __testFetchRankedReplaysPage: fetchRankedReplaysPage,
+    __testFetchMatchHistoryPages: fetchMatchHistoryPages,
+    __testFetchLocalMatchHistory: fetchLocalMatchHistory,
+    __testFetchOfficialHistoryRequestContext: fetchOfficialHistoryRequestContext,
+    __testFetchOpponentOfficialHistory: fetchOpponentOfficialHistory,
+    __testHistoryStorePath: historyStorePath,
+    __testLoadMatchHistoryStore: loadMatchHistoryStore,
+    __testPersistMatchHistoryStore: persistMatchHistoryStore,
+    __testFlushHistoryPersistence: (profileId) => persistedDataWriter.flush(historyStorePath(profileId)),
     __testConfigureOpponentContext({
       ownerProfileId,
       currentActId = 13,

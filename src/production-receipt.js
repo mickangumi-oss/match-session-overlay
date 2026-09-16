@@ -1,15 +1,32 @@
 "use strict";
 
-const {
-  configuredQaReceiptDirectory,
-  createQaReceiptWriter,
-} = require("./qa-receipt-output");
-
 const PRODUCTION_RECEIPT_SCHEMA = "mso.production-receipt.v1";
 const ALLOWED_MATCH_MODES = Object.freeze(["ranked", "battleHub", "casual"]);
-const qaReceiptWriter = createQaReceiptWriter({
-  directory: configuredQaReceiptDirectory(),
-});
+const DIAGNOSTIC_RING_LIMIT = 128;
+const diagnosticRingBuffer = [];
+let productionReceiptRuntime = {
+  enabled: true,
+  runId: null,
+  writeCount: 0,
+  failedWriteCount: 0,
+  flushComplete: false,
+  overallOk: true,
+  code: "MEMORY_ONLY",
+};
+
+function configureProductionReceiptDirectory() {
+  diagnosticRingBuffer.length = 0;
+  productionReceiptRuntime = {
+    enabled: true,
+    runId: null,
+    writeCount: 0,
+    failedWriteCount: 0,
+    flushComplete: false,
+    overallOk: true,
+    code: "MEMORY_ONLY",
+  };
+  return Object.freeze({ ...productionReceiptRuntime, filesystemWrites: 0 });
+}
 const SAFE_EVENT_KEYS = new Set([
   "status",
   "classification",
@@ -46,6 +63,14 @@ const SAFE_EVENT_KEYS = new Set([
   "selectionSource",
   "outerMatchCount",
   "actScopeVerified",
+  "selectedReplayPresent",
+  "knownRecordCount",
+  "unknownRecordCount",
+  "mixedAct",
+  "scopeProof",
+  "complete",
+  "actIndependent",
+  "aggregation",
   "mode",
   "modeName",
   "selectedMode",
@@ -118,13 +143,14 @@ function safeValue(key, value) {
       key === "ipcSelectedActSelector" || key === "ipcActSelectionSource" ||
       key === "cacheHitScope" || key === "selectionSource" || key === "selectedMode" ||
       key === "sourceModes" || key === "partialMissingModes" || key === "reason" ||
+      key === "scopeProof" ||
       key === "profileScopeDigest" || key === "cacheScopeDigest" || key === "scopeSource" ||
       key === "selfStopReason" || key === "opponentStopReason") {
     return typeof value === "string" ? value.slice(0, 80) : null;
   }
   if (key === "httpStatus" || key === "page" || key === "totalPages" || key === "requestedAct" ||
       key === "responseAct" || key === "probedAct" || key === "resolvedAct" || key === "ownCharacterId" || key === "outerMatchCount" || key === "mode" || key === "rowCount" || key === "requiredFieldCount" ||
-      key === "normalizedCount" || key === "rawCount" || key === "targetMatches" || key === "targetRounds" ||
+      key === "normalizedCount" || key === "rawCount" || key === "knownRecordCount" || key === "unknownRecordCount" || key === "targetMatches" || key === "targetRounds" ||
       key === "outerRowCount" || key === "nestedRowCount" || key === "allBattleCount" ||
       key === "allWinCount" || key === "displayRowCount" || key === "ipcSelectedAct" ||
       key === "ipcCurrentAct" || key === "ipcSelectedRecordAct" || key === "targetMatches" ||
@@ -143,8 +169,13 @@ function safeValue(key, value) {
       key === "opponentBeforeCutoff" || key === "opponentAfterCutoff") {
     return finiteInteger(value);
   }
-  if (key === "actScopeVerified" || key === "allRowPresent" || key === "profileIdPresent" || key === "trueZero" || key === "networkAttempted" || key === "ipcSelectedRecordActPresent") {
+  if (key === "actScopeVerified" || key === "selectedReplayPresent" || key === "mixedAct" || key === "complete" || key === "actIndependent" || key === "allRowPresent" || key === "profileIdPresent" || key === "trueZero" || key === "networkAttempted" || key === "ipcSelectedRecordActPresent") {
     return value === true;
+  }
+  if (key === "aggregation") {
+    return ["all-ready", "history-ready", "peak-ready", "partial", "unavailable", "error"].includes(value)
+      ? value
+      : null;
   }
   if (key === "allWinRate") {
     return Number.isFinite(Number(value)) && Number(value) >= 0 && Number(value) <= 100
@@ -188,6 +219,13 @@ function recordProductionReceipt(receipt, stage, details = {}) {
   }
   receipt.events.push(event);
   if (receipt.events.length > 64) receipt.events.splice(0, receipt.events.length - 64);
+  const memoryEvent = { role: String(stage ?? "unknown").split(".")[0].slice(0, 16), stage: event.stage };
+  for (const [key, value] of Object.entries(event)) {
+    if (key === "stage") continue;
+    memoryEvent[key] = value;
+  }
+  diagnosticRingBuffer.push(Object.freeze(memoryEvent));
+  if (diagnosticRingBuffer.length > DIAGNOSTIC_RING_LIMIT) diagnosticRingBuffer.splice(0, diagnosticRingBuffer.length - DIAGNOSTIC_RING_LIMIT);
   return receipt;
 }
 
@@ -198,7 +236,14 @@ function finalizeProductionReceipt(receipt, { status = "partial", reason = "UNAV
     status: allowedStatuses.has(status) ? status : "partial",
     reason: typeof reason === "string" ? reason.slice(0, 80) : "UNAVAILABLE",
   };
-  qaReceiptWriter.write(receipt);
+  const diagnosticResult = Object.freeze({
+    ok: true,
+    finalization: "memory-only",
+    receiptWrite: "MEMORY_ONLY",
+    flush: "MEMORY_ONLY",
+    statusWrite: "MEMORY_ONLY",
+  });
+  Object.defineProperty(receipt, "diagnosticResult", { value: diagnosticResult, enumerable: false, configurable: true });
   return receipt;
 }
 
@@ -235,12 +280,22 @@ function classifyPayloadShape(payload) {
   return "invalid";
 }
 
+function getProductionDiagnosticSummary() {
+  return Object.freeze({
+    mode: "memory-only",
+    eventCount: diagnosticRingBuffer.length,
+    events: diagnosticRingBuffer.map((event) => Object.freeze({ ...event })),
+  });
+}
+
 module.exports = {
   ALLOWED_MATCH_MODES,
   PRODUCTION_RECEIPT_SCHEMA,
   classifyHttpResponse,
   classifyPayloadShape,
   createProductionReceipt,
+  configureProductionReceiptDirectory,
   finalizeProductionReceipt,
+  getProductionDiagnosticSummary,
   recordProductionReceipt,
 };

@@ -79,7 +79,8 @@ function verifyScopedHistoryPage({
 
   const hasExplicitEvidence = responseActId === requested.actId ||
     recordActIds.length === 1 && recordActIds[0] === requested.actId;
-  if (actIndependent !== true && !hasExplicitEvidence && pageResult?.actScopeVerified !== true && requestScopeVerified !== true) {
+  const explicitSeasonRequest = requestScopeVerified === "explicit-season-request" || requestScopeVerified === "verified-request-context";
+  if (actIndependent !== true && !hasExplicitEvidence && pageResult?.actScopeVerified !== true && requestScopeVerified !== true && !explicitSeasonRequest) {
     return {
       ok: false,
       reason: "HISTORY_ACT_METADATA_MISSING_OR_MISMATCH",
@@ -101,7 +102,12 @@ function verifyScopedHistoryPage({
         ? "response"
         : recordActIds.length === 1
           ? "records"
-          : "verified-request",
+          : requestScopeVerified === "verified-request-context"
+            ? "verified-request-context"
+            : explicitSeasonRequest
+            ? "verified-request-candidate"
+            : "verified-request",
+    scopeProofCandidate: explicitSeasonRequest && !hasExplicitEvidence,
   };
 }
 

@@ -13,13 +13,13 @@
 - 公式サイトへのログインと戦績取得に必要なインターネット接続
 - OBSで表示する場合のみ、OBS Studio（任意）
 
-公開版: v1.13.0
+公開版: v1.13.1（公開前確認中）
 
 ## ダウンロード
 
 [GitHub Releases](https://github.com/mickangumi-oss/match-session-overlay/releases)から正式版をダウンロードしてください。
 
-リリースページの「Assets」から`Match-Session-Overlay-1.13.0-Setup.exe`をダウンロードして実行してください。配布元を確認できないファイルは使用しないでください。
+リリースページの「Assets」から`Match-Session-Overlay-1.13.1-Setup.exe`をダウンロードして実行してください。配布元を確認できないファイルは使用しないでください。
 
 詳しい操作手順は[`docs/usage.md`](docs/usage.md)、表示レイアウトは[`docs/window-layout.md`](docs/window-layout.md)、対戦履歴は[`docs/match-history.md`](docs/match-history.md)、フォントは[`docs/font-settings.md`](docs/font-settings.md)をご覧ください。
 
@@ -27,7 +27,7 @@
 
 正式な配布インストーラーは、必ずこのリポジトリの公式GitHub Releaseから取得してください。公開時の検査結果とSHA-256はリリースノートに記載します。検査結果は公開時点のものであり、安全性を完全に保証するものではありません。
 
-`v1.13.0`の配布ファイル情報とSHA-256は[`v1.13.0リリースノート`](docs/release-notes/v1.13.0.md)をご覧ください。
+`v1.13.1`の配布ファイル情報とSHA-256は[`v1.13.1リリースノート`](docs/release-notes/v1.13.1.md)をご覧ください。
 
 ## 画面イメージ
 
@@ -62,6 +62,12 @@ CHARACTER RANK、現在のキャラクター、セッション戦績、FRIENDS�
 取得した対戦を絞り込み、勝敗、勝率、最大連勝、MR／LPの推移、直近7試合日分の勝敗グラフ、相手キャラクター別の成績を確認できます。
 
 ![合成データを表示した対戦履歴画面](docs/images/match-history-example.png)
+
+## v1.13.1の変更内容
+
+- 相手プロフィールの取得状況に応じて、確認中・一部取得・履歴不足・公式サイトのデータなし・一時的な制限などの状態を表示します。
+- 相手プロフィールを取得できない場合でも、利用可能な対戦傾向比較を表示します。
+- 対戦履歴の取得では、必要なページを最大3件ずつ並列に取得し、保存済みのページ情報を活用して待ち時間を抑えます。
 
 ## v1.13.0の変更内容
 
