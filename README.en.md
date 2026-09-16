@@ -13,7 +13,7 @@ Match Session Overlay is an unofficial Windows app that retrieves Street Fighter
 - An internet connection for signing in to the official website and retrieving match data
 - OBS Studio only if you want to display the overlay on stream (optional)
 
-Candidate release: v1.13.1 (pre-publication checks in progress)
+Public release: v1.13.1
 
 ## Download
 
