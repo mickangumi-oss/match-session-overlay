@@ -95,6 +95,8 @@ let officialOpponentCharacterStatsState = {
 let officialOpponentCharacterStatsRequestKey = "";
 let officialOpponentCharacterStatsRequestToken = 0;
 let officialOpponentCharacterStatsRetryAt = 0;
+let officialOpponentCharacterStatsDirty = false;
+let officialOpponentCharacterStatsHistoryKey = "";
 const OFFICIAL_OPPONENT_CHARACTER_STATS_RETRY_COOLDOWN_MS = 5 * 60 * 1000;
 let officialCharacterNamesState = {
   status: "idle",
@@ -2641,6 +2643,10 @@ function renderOpponentCharacterStats() {
 async function requestOfficialOpponentCharacterStats(state = historyState, { forceRefresh = false } = {}) {
   const key = officialOpponentCharacterStatsScopeKey(state);
   const sameScope = key === officialOpponentCharacterStatsRequestKey;
+  if (sameScope && officialOpponentCharacterStatsState.status === "loading") {
+    if (forceRefresh) officialOpponentCharacterStatsDirty = true;
+    return;
+  }
   const terminal = ["ready", "partial", "unavailable"].includes(
     officialOpponentCharacterStatsState.status,
   );
@@ -2655,6 +2661,7 @@ async function requestOfficialOpponentCharacterStats(state = historyState, { for
     return;
   }
   officialOpponentCharacterStatsRequestKey = key;
+  officialOpponentCharacterStatsDirty = false;
   officialOpponentCharacterStatsRetryAt = Date.now() +
     OFFICIAL_OPPONENT_CHARACTER_STATS_RETRY_COOLDOWN_MS;
   const requestToken = ++officialOpponentCharacterStatsRequestToken;
@@ -2706,6 +2713,34 @@ async function requestOfficialOpponentCharacterStats(state = historyState, { for
     };
   }
   renderOpponentCharacterStats();
+  if (officialOpponentCharacterStatsDirty && officialOpponentCharacterStatsRefreshReady(historyState) &&
+      key === officialOpponentCharacterStatsScopeKey(historyState)) {
+    void requestOfficialOpponentCharacterStats(historyState, { forceRefresh: true });
+  }
+}
+
+function officialOpponentCharacterStatsRefreshReady(state = historyState) {
+  // Wait while the latest Act proof is loading and while a history import is running.
+  return historyPanelOpen && !state?.fetching &&
+    (historyActUserSelected || verifiedCurrentHistoryActId(state) != null ||
+      state?.currentActStatus !== "loading");
+}
+
+function syncOfficialOpponentCharacterStatsWithHistory(_previousState, nextState) {
+  const scope = officialOpponentCharacterStatsScopeKey(nextState);
+  const records = Array.isArray(nextState?.records) ? nextState.records : [];
+  const latest = records.reduce((current, record) =>
+    Number(record?.uploadedAt ?? record?.playedAt ?? 0) > Number(current?.uploadedAt ?? current?.playedAt ?? 0)
+      ? record : current, null);
+  // Only a changed history can change the official totals; polls without new rows do not refresh.
+  const signature = JSON.stringify([scope, records.length, latest?.replayId ?? ""]);
+  if (officialOpponentCharacterStatsHistoryKey && signature !== officialOpponentCharacterStatsHistoryKey) {
+    officialOpponentCharacterStatsDirty = true;
+  }
+  officialOpponentCharacterStatsHistoryKey = signature;
+  if (officialOpponentCharacterStatsDirty && officialOpponentCharacterStatsRefreshReady(nextState)) {
+    void requestOfficialOpponentCharacterStats(nextState, { forceRefresh: true });
+  }
 }
 
 function renderHistoryState(nextState = historyState) {
@@ -2915,12 +2950,14 @@ function renderHistoryState(nextState = historyState) {
 }
 
 function scheduleHistoryRender(nextState = historyState, { resetPage = false } = {}) {
+  const previousState = historyState;
   const previousProfileId = historyStateProfileId(historyState);
   historyState = applyResolvedLatestActProof(
     preserveCommittedHistoryOnEmptyState(
       nextState || { records: [], canFetch: false, authenticated: false, cooldownSeconds: 0 },
     ) || { records: [], canFetch: false, authenticated: false, cooldownSeconds: 0 },
   );
+  syncOfficialOpponentCharacterStatsWithHistory(previousState, historyState);
   const nextProfileId = historyStateProfileId(historyState);
   if (previousProfileId !== nextProfileId) historyOpponentInsightCache.clear();
   pendingHistoryRenderState = historyState;
@@ -2952,7 +2989,9 @@ function setHistoryPanelOpen(open) {
   elements.historyPanel.setAttribute("aria-hidden", String(!historyPanelOpen));
   if (historyPanelOpen) {
     renderHistoryState();
-    void requestOfficialOpponentCharacterStats(historyState);
+    void requestOfficialOpponentCharacterStats(historyState, {
+      forceRefresh: officialOpponentCharacterStatsDirty,
+    });
   }
 }
 

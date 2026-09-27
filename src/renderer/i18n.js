@@ -1612,7 +1612,7 @@ Object.assign(PACKS["ar"], {
   "categoryAppSettings": "إعدادات التطبيق",
   "categoryNotifications": "الإخطارات",
   "categoryMaintenance": "الصيانة",
-  "mrRank": "رتبة CHARACTER",
+  "mrRank": "CHARACTER RANK",
   "playerStatus": "حالة اللاعب",
   "friends": "FRIENDS",
   "following": "FOLLOWING",
@@ -1998,7 +1998,7 @@ Object.assign(PACKS["ru"], {
   "categoryAppSettings": "Настройки приложения",
   "categoryNotifications": "Уведомления",
   "categoryMaintenance": "Техническое обслуживание",
-  "mrRank": "CHARACTER РАНГ",
+  "mrRank": "CHARACTER RANK",
   "playerStatus": "СТАТУС ИГРОКА",
   "friends": "FRIENDS",
   "following": "FOLLOWING",
@@ -2384,7 +2384,7 @@ Object.assign(PACKS["pl"], {
   "categoryAppSettings": "Ustawienia aplikacji",
   "categoryNotifications": "Powiadomienia",
   "categoryMaintenance": "Konserwacja",
-  "mrRank": "RANGA CHARACTER",
+  "mrRank": "CHARACTER RANK",
   "playerStatus": "STATUS GRACZA",
   "friends": "FRIENDS",
   "following": "FOLLOWING",
@@ -2770,7 +2770,7 @@ Object.assign(PACKS["pt-br"], {
   "categoryAppSettings": "Configurações do aplicativo",
   "categoryNotifications": "Notificações",
   "categoryMaintenance": "Manutenção",
-  "mrRank": "CLASSIFICAÇÃO CHARACTER",
+  "mrRank": "CHARACTER RANK",
   "playerStatus": "STATUS DO JOGADOR",
   "friends": "FRIENDS",
   "following": "FOLLOWING",
@@ -3157,7 +3157,7 @@ Object.assign(PACKS["zh-hant"], {
   "categoryAppSettings": "應用程式設定",
   "categoryNotifications": "通知",
   "categoryMaintenance": "維護",
-  "mrRank": "CHARACTER 排名",
+  "mrRank": "CHARACTER RANK",
   "playerStatus": "玩家狀態",
   "friends": "FRIENDS",
   "following": "FOLLOWING",
@@ -3544,7 +3544,7 @@ Object.assign(PACKS["zh-hans"], {
   "categoryAppSettings": "应用程序设置",
   "categoryNotifications": "通知",
   "categoryMaintenance": "维护",
-  "mrRank": "CHARACTER 排名",
+  "mrRank": "CHARACTER RANK",
   "playerStatus": "玩家状态",
   "friends": "FRIENDS",
   "following": "FOLLOWING",
@@ -3931,7 +3931,7 @@ Object.assign(PACKS["ko-kr"], {
   "categoryAppSettings": "앱 설정",
   "categoryNotifications": "알림",
   "categoryMaintenance": "유지보수",
-  "mrRank": "CHARACTER 순위",
+  "mrRank": "CHARACTER RANK",
   "playerStatus": "플레이어 상태",
   "friends": "FRIENDS",
   "following": "FOLLOWING",
@@ -4317,7 +4317,7 @@ Object.assign(PACKS["it"], {
   "categoryAppSettings": "Impostazioni dell'app",
   "categoryNotifications": "Notifiche",
   "categoryMaintenance": "Manutenzione",
-  "mrRank": "RANGO CHARACTER",
+  "mrRank": "CHARACTER RANK",
   "playerStatus": "STATO DEL GIOCATORE",
   "friends": "FRIENDS",
   "following": "FOLLOWING",
@@ -4705,7 +4705,7 @@ Object.assign(PACKS["fr"], {
   "categoryAppSettings": "Paramètres de l'application",
   "categoryNotifications": "Notifications",
   "categoryMaintenance": "Entretien",
-  "mrRank": "RANG CHARACTER",
+  "mrRank": "CHARACTER RANK",
   "playerStatus": "STATUT DU JOUEUR",
   "friends": "FRIENDS",
   "following": "FOLLOWING",
@@ -5083,7 +5083,7 @@ Object.assign(PACKS["es-us"], {
   "categoryAppSettings": "Configuración de la aplicación",
   "categoryNotifications": "Notificaciones",
   "categoryMaintenance": "Mantenimiento",
-  "mrRank": "RANGO CHARACTER",
+  "mrRank": "CHARACTER RANK",
   "playerStatus": "ESTADO DEL JUGADOR",
   "friends": "FRIENDS",
   "following": "FOLLOWING",
@@ -5477,7 +5477,7 @@ Object.assign(PACKS["es-es"], {
   "categoryAppSettings": "Configuración de la aplicación",
   "categoryNotifications": "Notificaciones",
   "categoryMaintenance": "Mantenimiento",
-  "mrRank": "RANGO CHARACTER",
+  "mrRank": "CHARACTER RANK",
   "playerStatus": "ESTADO DEL JUGADOR",
   "friends": "FRIENDS",
   "following": "FOLLOWING",
@@ -5863,7 +5863,7 @@ Object.assign(PACKS["de"], {
   "categoryAppSettings": "App-Einstellungen",
   "categoryNotifications": "Benachrichtigungen",
   "categoryMaintenance": "Wartung",
-  "mrRank": "CHARACTER RANG",
+  "mrRank": "CHARACTER RANK",
   "playerStatus": "SPIELERSTATUS",
   "friends": "FRIENDS",
   "following": "FOLLOWING",
@@ -5981,20 +5981,20 @@ for (const [locale, labels] of Object.entries(ORIENTATION_LABELS)) {
 }
 
 const UI_STATUS_TRANSLATIONS = {
-  "ja-jp": { statsTitle: "セッション戦績", mrRank: "キャラクターランク", friendOnlineSingle: "フレンドがオンライン", friendOnlineMultiple: "{count}人のフレンドがオンライン", friendOnlineOthers: "ほか{count}人がオンライン", statusInsufficient: "データ不足", statusInsufficientSample: "サンプル不足", statusUnknown: "不明", historyOpponentProfileActScopeMissing: "選択試合のActを確認できません" },
-  en: { statsTitle: "Session Stats", mrRank: "CHARACTER RANK", friendOnlineSingle: "Friend online", friendOnlineMultiple: "{count} friends online", friendOnlineOthers: "{count} more online", statusInsufficient: "Insufficient", statusInsufficientSample: "Insufficient sample", statusUnknown: "Unknown", historyOpponentProfileActScopeMissing: "The selected match's Act could not be verified" },
-  de: { statsTitle: "Sitzungsstatistik", mrRank: "CHARAKTER-RANG", friendOnlineSingle: "Freund online", friendOnlineMultiple: "{count} Freunde online", friendOnlineOthers: "{count} weitere online", statusInsufficient: "Unzureichend", statusInsufficientSample: "Zu wenige Daten", statusUnknown: "Unbekannt", historyOpponentProfileActScopeMissing: "Die Wettkampfsaison (Act) des ausgewählten Matches konnte nicht überprüft werden" },
-  "es-es": { statsTitle: "Estadísticas de sesión", mrRank: "RANGO DEL PERSONAJE", friendOnlineSingle: "Amigo conectado", friendOnlineMultiple: "{count} amigos conectados", friendOnlineOthers: "{count} más conectados", statusInsufficient: "Insuficiente", statusInsufficientSample: "Muestra insuficiente", statusUnknown: "Desconocido", historyOpponentProfileActScopeMissing: "No se pudo verificar la temporada competitiva (Act) del combate seleccionado" },
-  "es-us": { statsTitle: "Estadísticas de sesión", mrRank: "RANGO DEL PERSONAJE", friendOnlineSingle: "Amigo conectado", friendOnlineMultiple: "{count} amigos conectados", friendOnlineOthers: "{count} más conectados", statusInsufficient: "Insuficiente", statusInsufficientSample: "Muestra insuficiente", statusUnknown: "Desconocido", historyOpponentProfileActScopeMissing: "No se pudo verificar la temporada competitiva (Act) del combate seleccionado" },
-  fr: { statsTitle: "Statistiques de session", mrRank: "RANG DU PERSONNAGE", friendOnlineSingle: "Ami en ligne", friendOnlineMultiple: "{count} amis en ligne", friendOnlineOthers: "{count} autres en ligne", statusInsufficient: "Insuffisant", statusInsufficientSample: "Échantillon insuffisant", statusUnknown: "Inconnu", historyOpponentProfileActScopeMissing: "La saison compétitive (Act) du match sélectionné n’a pas pu être vérifiée" },
-  it: { statsTitle: "Statistiche sessione", mrRank: "RANGO DEL PERSONAGGIO", friendOnlineSingle: "Amico online", friendOnlineMultiple: "{count} amici online", friendOnlineOthers: "altri {count} online", statusInsufficient: "Insufficiente", statusInsufficientSample: "Campione insufficiente", statusUnknown: "Sconosciuto", historyOpponentProfileActScopeMissing: "Non è stato possibile verificare la stagione competitiva (Act) dello scontro selezionato" },
-  "ko-kr": { statsTitle: "세션 통계", mrRank: "캐릭터 랭크", friendOnlineSingle: "친구 온라인", friendOnlineMultiple: "친구 {count}명 온라인", friendOnlineOthers: "외 {count}명 온라인", statusInsufficient: "부족", statusInsufficientSample: "표본 부족", statusUnknown: "알 수 없음", historyOpponentProfileActScopeMissing: "선택한 대전의 경쟁 시즌(Act)을 확인할 수 없습니다" },
-  "zh-hans": { statsTitle: "对局统计", mrRank: "角色排名", friendOnlineSingle: "好友在线", friendOnlineMultiple: "{count} 位好友在线", friendOnlineOthers: "另有 {count} 位在线", statusInsufficient: "数据不足", statusInsufficientSample: "样本不足", statusUnknown: "未知", historyOpponentProfileActScopeMissing: "无法验证所选对战的竞技赛季（Act）" },
-  "zh-hant": { statsTitle: "對戰統計", mrRank: "角色排名", friendOnlineSingle: "好友上線", friendOnlineMultiple: "{count} 位好友上線", friendOnlineOthers: "另有 {count} 位上線", statusInsufficient: "資料不足", statusInsufficientSample: "樣本不足", statusUnknown: "未知", historyOpponentProfileActScopeMissing: "無法驗證所選對戰的競技賽季（Act）" },
-  "pt-br": { statsTitle: "Estatísticas da sessão", mrRank: "CLASSIFICAÇÃO DO PERSONAGEM", friendOnlineSingle: "Amigo online", friendOnlineMultiple: "{count} amigos online", friendOnlineOthers: "mais {count} online", statusInsufficient: "Insuficiente", statusInsufficientSample: "Amostra insuficiente", statusUnknown: "Desconhecido", historyOpponentProfileActScopeMissing: "Não foi possível verificar a temporada competitiva (Act) da partida selecionada" },
-  pl: { statsTitle: "Statystyki sesji", mrRank: "RANGA POSTACI", friendOnlineSingle: "Znajomy online", friendOnlineMultiple: "{count} znajomych online", friendOnlineOthers: "jeszcze {count} online", statusInsufficient: "Niewystarczające", statusInsufficientSample: "Za mała próbka", statusUnknown: "Nieznane", historyOpponentProfileActScopeMissing: "Nie można zweryfikować sezonu rywalizacji (Act) wybranego meczu" },
-  ru: { statsTitle: "Статистика сессии", mrRank: "РАНГ ПЕРСОНАЖА", friendOnlineSingle: "Друг в сети", friendOnlineMultiple: "{count} друзей в сети", friendOnlineOthers: "Еще {count} в сети", statusInsufficient: "Недостаточно данных", statusInsufficientSample: "Недостаточная выборка", statusUnknown: "Неизвестно", historyOpponentProfileActScopeMissing: "Не удалось проверить соревновательный сезон (Act) выбранного матча" },
-  ar: { statsTitle: "إحصاءات الجلسة", mrRank: "رتبة الشخصية", friendOnlineSingle: "صديق متصل", friendOnlineMultiple: "{count} من الأصدقاء متصلون", friendOnlineOthers: "{count} آخرون متصلون", statusInsufficient: "غير كافٍ", statusInsufficientSample: "عينة غير كافية", statusUnknown: "غير معروف", historyOpponentProfileActScopeMissing: "تعذر التحقق من الموسم التنافسي (Act) للمباراة المحددة" },
+  "ja-jp": { statsTitle: "セッション戦績", friendOnlineSingle: "フレンドがオンライン", friendOnlineMultiple: "{count}人のフレンドがオンライン", friendOnlineOthers: "ほか{count}人がオンライン", statusInsufficient: "データ不足", statusInsufficientSample: "サンプル不足", statusUnknown: "不明", historyOpponentProfileActScopeMissing: "選択試合のActを確認できません" },
+  en: { statsTitle: "Session Stats", friendOnlineSingle: "Friend online", friendOnlineMultiple: "{count} friends online", friendOnlineOthers: "{count} more online", statusInsufficient: "Insufficient", statusInsufficientSample: "Insufficient sample", statusUnknown: "Unknown", historyOpponentProfileActScopeMissing: "The selected match's Act could not be verified" },
+  de: { statsTitle: "Sitzungsstatistik", friendOnlineSingle: "Freund online", friendOnlineMultiple: "{count} Freunde online", friendOnlineOthers: "{count} weitere online", statusInsufficient: "Unzureichend", statusInsufficientSample: "Zu wenige Daten", statusUnknown: "Unbekannt", historyOpponentProfileActScopeMissing: "Die Wettkampfsaison (Act) des ausgewählten Matches konnte nicht überprüft werden" },
+  "es-es": { statsTitle: "Estadísticas de sesión", friendOnlineSingle: "Amigo conectado", friendOnlineMultiple: "{count} amigos conectados", friendOnlineOthers: "{count} más conectados", statusInsufficient: "Insuficiente", statusInsufficientSample: "Muestra insuficiente", statusUnknown: "Desconocido", historyOpponentProfileActScopeMissing: "No se pudo verificar la temporada competitiva (Act) del combate seleccionado" },
+  "es-us": { statsTitle: "Estadísticas de sesión", friendOnlineSingle: "Amigo conectado", friendOnlineMultiple: "{count} amigos conectados", friendOnlineOthers: "{count} más conectados", statusInsufficient: "Insuficiente", statusInsufficientSample: "Muestra insuficiente", statusUnknown: "Desconocido", historyOpponentProfileActScopeMissing: "No se pudo verificar la temporada competitiva (Act) del combate seleccionado" },
+  fr: { statsTitle: "Statistiques de session", friendOnlineSingle: "Ami en ligne", friendOnlineMultiple: "{count} amis en ligne", friendOnlineOthers: "{count} autres en ligne", statusInsufficient: "Insuffisant", statusInsufficientSample: "Échantillon insuffisant", statusUnknown: "Inconnu", historyOpponentProfileActScopeMissing: "La saison compétitive (Act) du match sélectionné n’a pas pu être vérifiée" },
+  it: { statsTitle: "Statistiche sessione", friendOnlineSingle: "Amico online", friendOnlineMultiple: "{count} amici online", friendOnlineOthers: "altri {count} online", statusInsufficient: "Insufficiente", statusInsufficientSample: "Campione insufficiente", statusUnknown: "Sconosciuto", historyOpponentProfileActScopeMissing: "Non è stato possibile verificare la stagione competitiva (Act) dello scontro selezionato" },
+  "ko-kr": { statsTitle: "세션 통계", friendOnlineSingle: "친구 온라인", friendOnlineMultiple: "친구 {count}명 온라인", friendOnlineOthers: "외 {count}명 온라인", statusInsufficient: "부족", statusInsufficientSample: "표본 부족", statusUnknown: "알 수 없음", historyOpponentProfileActScopeMissing: "선택한 대전의 경쟁 시즌(Act)을 확인할 수 없습니다" },
+  "zh-hans": { statsTitle: "对局统计", friendOnlineSingle: "好友在线", friendOnlineMultiple: "{count} 位好友在线", friendOnlineOthers: "另有 {count} 位在线", statusInsufficient: "数据不足", statusInsufficientSample: "样本不足", statusUnknown: "未知", historyOpponentProfileActScopeMissing: "无法验证所选对战的竞技赛季（Act）" },
+  "zh-hant": { statsTitle: "對戰統計", friendOnlineSingle: "好友上線", friendOnlineMultiple: "{count} 位好友上線", friendOnlineOthers: "另有 {count} 位上線", statusInsufficient: "資料不足", statusInsufficientSample: "樣本不足", statusUnknown: "未知", historyOpponentProfileActScopeMissing: "無法驗證所選對戰的競技賽季（Act）" },
+  "pt-br": { statsTitle: "Estatísticas da sessão", friendOnlineSingle: "Amigo online", friendOnlineMultiple: "{count} amigos online", friendOnlineOthers: "mais {count} online", statusInsufficient: "Insuficiente", statusInsufficientSample: "Amostra insuficiente", statusUnknown: "Desconhecido", historyOpponentProfileActScopeMissing: "Não foi possível verificar a temporada competitiva (Act) da partida selecionada" },
+  pl: { statsTitle: "Statystyki sesji", friendOnlineSingle: "Znajomy online", friendOnlineMultiple: "{count} znajomych online", friendOnlineOthers: "jeszcze {count} online", statusInsufficient: "Niewystarczające", statusInsufficientSample: "Za mała próbka", statusUnknown: "Nieznane", historyOpponentProfileActScopeMissing: "Nie można zweryfikować sezonu rywalizacji (Act) wybranego meczu" },
+  ru: { statsTitle: "Статистика сессии", friendOnlineSingle: "Друг в сети", friendOnlineMultiple: "{count} друзей в сети", friendOnlineOthers: "Еще {count} в сети", statusInsufficient: "Недостаточно данных", statusInsufficientSample: "Недостаточная выборка", statusUnknown: "Неизвестно", historyOpponentProfileActScopeMissing: "Не удалось проверить соревновательный сезон (Act) выбранного матча" },
+  ar: { statsTitle: "إحصاءات الجلسة", friendOnlineSingle: "صديق متصل", friendOnlineMultiple: "{count} من الأصدقاء متصلون", friendOnlineOthers: "{count} آخرون متصلون", statusInsufficient: "غير كافٍ", statusInsufficientSample: "عينة غير كافية", statusUnknown: "غير معروف", historyOpponentProfileActScopeMissing: "تعذر التحقق من الموسم التنافسي (Act) للمباراة المحددة" },
 };
 const HISTORY_SCOPE_TRANSLATIONS = {
   "de": {
@@ -6153,40 +6153,40 @@ Object.assign(PACKS["ja-jp"], {
   battleHub: "Battle Hub",
 });
 Object.assign(PACKS["de"], {
-  mrRank: "CHARAKTER-RANG", orientationWindowOnly: "Nur im Fenstermodus verfügbar", sessionPeakRating: "SESSION-HÖCHSTWERT MR / LP", characterFilter: "CHARAKTER", opponentCharacterStats: "GEGNER-CHARAKTERSTATISTIK", myCharacter: "MEIN CHARAKTER", opponentCharacter: "GEGNER-CHARAKTER", historyOpponentMatchCharacter: "CHARAKTER IM MATCH", historyOpponentPotentialMr: "CHARAKTER-POTENTIAL MR", historyOpponentPotentialLp: "CHARAKTER-POTENTIAL LP", historyOpponentOtherPeak: "AKTUELLER HÖCHSTWERT EINES ANDEREN CHARAKTERS MR", matchCharacter: "MATCH-CHARAKTER", otherCharacterPeak: "HÖCHSTWERT EINES ANDEREN CHARAKTERS", mrTrend: "MR-TREND", battleHub: "Battle Hub",
+  orientationWindowOnly: "Nur im Fenstermodus verfügbar", sessionPeakRating: "SESSION-HÖCHSTWERT MR / LP", characterFilter: "CHARAKTER", opponentCharacterStats: "GEGNER-CHARAKTERSTATISTIK", myCharacter: "MEIN CHARAKTER", opponentCharacter: "GEGNER-CHARAKTER", historyOpponentMatchCharacter: "CHARAKTER IM MATCH", historyOpponentPotentialMr: "CHARAKTER-POTENTIAL MR", historyOpponentPotentialLp: "CHARAKTER-POTENTIAL LP", historyOpponentOtherPeak: "AKTUELLER HÖCHSTWERT EINES ANDEREN CHARAKTERS MR", matchCharacter: "MATCH-CHARAKTER", otherCharacterPeak: "HÖCHSTWERT EINES ANDEREN CHARAKTERS", mrTrend: "MR-TREND", battleHub: "Battle Hub",
 });
 Object.assign(PACKS["es-es"], {
-  mrRank: "RANGO DEL PERSONAJE", orientationWindowOnly: "Disponible solo en el modo de ventana", sessionPeakRating: "PICO DE SESIÓN MR / LP", characterFilter: "PERSONAJE", opponentCharacterStats: "ESTADÍSTICAS DEL PERSONAJE DEL OPONENTE", myCharacter: "MI PERSONAJE", opponentCharacter: "PERSONAJE DEL OPONENTE", historyOpponentMatchCharacter: "PERSONAJE DEL COMBATE", historyOpponentPotentialMr: "POTENCIAL DEL PERSONAJE MR", historyOpponentPotentialLp: "POTENCIAL DEL PERSONAJE LP", historyOpponentOtherPeak: "PICO ACTUAL DE OTRO PERSONAJE MR", matchCharacter: "PERSONAJE DEL COMBATE", otherCharacterPeak: "PICO DE OTRO PERSONAJE", mrTrend: "TENDENCIA DE MR", battleHub: "Battle Hub",
+  orientationWindowOnly: "Disponible solo en el modo de ventana", sessionPeakRating: "PICO DE SESIÓN MR / LP", characterFilter: "PERSONAJE", opponentCharacterStats: "ESTADÍSTICAS DEL PERSONAJE DEL OPONENTE", myCharacter: "MI PERSONAJE", opponentCharacter: "PERSONAJE DEL OPONENTE", historyOpponentMatchCharacter: "PERSONAJE DEL COMBATE", historyOpponentPotentialMr: "POTENCIAL DEL PERSONAJE MR", historyOpponentPotentialLp: "POTENCIAL DEL PERSONAJE LP", historyOpponentOtherPeak: "PICO ACTUAL DE OTRO PERSONAJE MR", matchCharacter: "PERSONAJE DEL COMBATE", otherCharacterPeak: "PICO DE OTRO PERSONAJE", mrTrend: "TENDENCIA DE MR", battleHub: "Battle Hub",
 });
 Object.assign(PACKS["es-us"], {
-  mrRank: "RANGO DEL PERSONAJE", orientationWindowOnly: "Disponible solo en el modo de ventana", sessionPeakRating: "PICO DE SESIÓN MR / LP", characterFilter: "PERSONAJE", opponentCharacterStats: "ESTADÍSTICAS DEL PERSONAJE DEL OPONENTE", myCharacter: "MI PERSONAJE", opponentCharacter: "PERSONAJE DEL OPONENTE", historyOpponentMatchCharacter: "PERSONAJE DEL COMBATE", historyOpponentPotentialMr: "POTENCIAL DEL PERSONAJE MR", historyOpponentPotentialLp: "POTENCIAL DEL PERSONAJE LP", historyOpponentOtherPeak: "PICO ACTUAL DE OTRO PERSONAJE MR", matchCharacter: "PERSONAJE DEL COMBATE", otherCharacterPeak: "PICO DE OTRO PERSONAJE", mrTrend: "TENDENCIA DE MR", battleHub: "Battle Hub",
+  orientationWindowOnly: "Disponible solo en el modo de ventana", sessionPeakRating: "PICO DE SESIÓN MR / LP", characterFilter: "PERSONAJE", opponentCharacterStats: "ESTADÍSTICAS DEL PERSONAJE DEL OPONENTE", myCharacter: "MI PERSONAJE", opponentCharacter: "PERSONAJE DEL OPONENTE", historyOpponentMatchCharacter: "PERSONAJE DEL COMBATE", historyOpponentPotentialMr: "POTENCIAL DEL PERSONAJE MR", historyOpponentPotentialLp: "POTENCIAL DEL PERSONAJE LP", historyOpponentOtherPeak: "PICO ACTUAL DE OTRO PERSONAJE MR", matchCharacter: "PERSONAJE DEL COMBATE", otherCharacterPeak: "PICO DE OTRO PERSONAJE", mrTrend: "TENDENCIA DE MR", battleHub: "Battle Hub",
 });
 Object.assign(PACKS["fr"], {
-  mrRank: "RANG DU PERSONNAGE", orientationWindowOnly: "Disponible uniquement en mode fenêtre", sessionPeakRating: "MEILLEUR SCORE DE SESSION MR / LP", characterFilter: "PERSONNAGE", opponentCharacterStats: "STATISTIQUES DU PERSONNAGE ADVERSE", myCharacter: "MON PERSONNAGE", opponentCharacter: "PERSONNAGE ADVERSE", historyOpponentMatchCharacter: "PERSONNAGE DU MATCH", historyOpponentPotentialMr: "POTENTIEL DU PERSONNAGE MR", historyOpponentPotentialLp: "POTENTIEL DU PERSONNAGE LP", historyOpponentOtherPeak: "MEILLEUR MR ACTUEL D’UN AUTRE PERSONNAGE", matchCharacter: "PERSONNAGE DU MATCH", otherCharacterPeak: "MEILLEUR SCORE D’UN AUTRE PERSONNAGE", mrTrend: "TENDANCE MR", battleHub: "Battle Hub",
+  orientationWindowOnly: "Disponible uniquement en mode fenêtre", sessionPeakRating: "MEILLEUR SCORE DE SESSION MR / LP", characterFilter: "PERSONNAGE", opponentCharacterStats: "STATISTIQUES DU PERSONNAGE ADVERSE", myCharacter: "MON PERSONNAGE", opponentCharacter: "PERSONNAGE ADVERSE", historyOpponentMatchCharacter: "PERSONNAGE DU MATCH", historyOpponentPotentialMr: "POTENTIEL DU PERSONNAGE MR", historyOpponentPotentialLp: "POTENTIEL DU PERSONNAGE LP", historyOpponentOtherPeak: "MEILLEUR MR ACTUEL D’UN AUTRE PERSONNAGE", matchCharacter: "PERSONNAGE DU MATCH", otherCharacterPeak: "MEILLEUR SCORE D’UN AUTRE PERSONNAGE", mrTrend: "TENDANCE MR", battleHub: "Battle Hub",
 });
 Object.assign(PACKS["it"], {
-  mrRank: "RANGO DEL PERSONAGGIO", orientationWindowOnly: "Disponibile solo in modalità finestra", sessionPeakRating: "PICCO DELLA SESSIONE MR / LP", characterFilter: "PERSONAGGIO", opponentCharacterStats: "STATISTICHE DEL PERSONAGGIO AVVERSARIO", myCharacter: "IL MIO PERSONAGGIO", opponentCharacter: "PERSONAGGIO AVVERSARIO", historyOpponentMatchCharacter: "PERSONAGGIO DEL MATCH", historyOpponentPotentialMr: "POTENZIALE DEL PERSONAGGIO MR", historyOpponentPotentialLp: "POTENZIALE DEL PERSONAGGIO LP", historyOpponentOtherPeak: "PICCO ATTUALE DI UN ALTRO PERSONAGGIO MR", matchCharacter: "PERSONAGGIO DEL MATCH", otherCharacterPeak: "PICCO DI UN ALTRO PERSONAGGIO", mrTrend: "TENDENZA MR", battleHub: "Battle Hub",
+  orientationWindowOnly: "Disponibile solo in modalità finestra", sessionPeakRating: "PICCO DELLA SESSIONE MR / LP", characterFilter: "PERSONAGGIO", opponentCharacterStats: "STATISTICHE DEL PERSONAGGIO AVVERSARIO", myCharacter: "IL MIO PERSONAGGIO", opponentCharacter: "PERSONAGGIO AVVERSARIO", historyOpponentMatchCharacter: "PERSONAGGIO DEL MATCH", historyOpponentPotentialMr: "POTENZIALE DEL PERSONAGGIO MR", historyOpponentPotentialLp: "POTENZIALE DEL PERSONAGGIO LP", historyOpponentOtherPeak: "PICCO ATTUALE DI UN ALTRO PERSONAGGIO MR", matchCharacter: "PERSONAGGIO DEL MATCH", otherCharacterPeak: "PICCO DI UN ALTRO PERSONAGGIO", mrTrend: "TENDENZA MR", battleHub: "Battle Hub",
 });
 Object.assign(PACKS["ko-kr"], {
-  mrRank: "캐릭터 등급", orientationWindowOnly: "창 모드에서만 사용 가능", sessionPeakRating: "세션 최고 MR / LP", characterFilter: "캐릭터", opponentCharacterStats: "상대 캐릭터 통계", myCharacter: "내 캐릭터", opponentCharacter: "상대 캐릭터", historyOpponentMatchCharacter: "대전 캐릭터", historyOpponentPotentialMr: "캐릭터 잠재 MR", historyOpponentPotentialLp: "캐릭터 잠재 LP", historyOpponentOtherPeak: "다른 캐릭터의 현재 최고 MR", matchCharacter: "대전 캐릭터", otherCharacterPeak: "다른 캐릭터 최고치", mrTrend: "MR 추이", battleHub: "Battle Hub",
+  orientationWindowOnly: "창 모드에서만 사용 가능", sessionPeakRating: "세션 최고 MR / LP", characterFilter: "캐릭터", opponentCharacterStats: "상대 캐릭터 통계", myCharacter: "내 캐릭터", opponentCharacter: "상대 캐릭터", historyOpponentMatchCharacter: "대전 캐릭터", historyOpponentPotentialMr: "캐릭터 잠재 MR", historyOpponentPotentialLp: "캐릭터 잠재 LP", historyOpponentOtherPeak: "다른 캐릭터의 현재 최고 MR", matchCharacter: "대전 캐릭터", otherCharacterPeak: "다른 캐릭터 최고치", mrTrend: "MR 추이", battleHub: "Battle Hub",
 });
 Object.assign(PACKS["zh-hans"], {
-  mrRank: "角色排名", orientationWindowOnly: "仅窗口模式可用", sessionPeakRating: "本次会话最高 MR / LP", characterFilter: "角色", opponentCharacterStats: "对手角色统计", myCharacter: "我的角色", opponentCharacter: "对手角色", historyOpponentMatchCharacter: "对战角色", historyOpponentPotentialMr: "角色潜力 MR", historyOpponentPotentialLp: "角色潜力 LP", historyOpponentOtherPeak: "当前其他角色最高 MR", matchCharacter: "对战角色", otherCharacterPeak: "其他角色最高 MR", mrTrend: "MR 趋势", battleHub: "Battle Hub",
+  orientationWindowOnly: "仅窗口模式可用", sessionPeakRating: "本次会话最高 MR / LP", characterFilter: "角色", opponentCharacterStats: "对手角色统计", myCharacter: "我的角色", opponentCharacter: "对手角色", historyOpponentMatchCharacter: "对战角色", historyOpponentPotentialMr: "角色潜力 MR", historyOpponentPotentialLp: "角色潜力 LP", historyOpponentOtherPeak: "当前其他角色最高 MR", matchCharacter: "对战角色", otherCharacterPeak: "其他角色最高 MR", mrTrend: "MR 趋势", battleHub: "Battle Hub",
 });
 Object.assign(PACKS["zh-hant"], {
-  mrRank: "角色排名", orientationWindowOnly: "僅視窗模式可用", sessionPeakRating: "本次工作階段最高 MR / LP", characterFilter: "角色", opponentCharacterStats: "對手角色統計", myCharacter: "我的角色", opponentCharacter: "對手角色", historyOpponentMatchCharacter: "對戰角色", historyOpponentPotentialMr: "角色潛力 MR", historyOpponentPotentialLp: "角色潛力 LP", historyOpponentOtherPeak: "目前其他角色最高 MR", matchCharacter: "對戰角色", otherCharacterPeak: "其他角色最高 MR", mrTrend: "MR 趨勢", battleHub: "Battle Hub",
+  orientationWindowOnly: "僅視窗模式可用", sessionPeakRating: "本次工作階段最高 MR / LP", characterFilter: "角色", opponentCharacterStats: "對手角色統計", myCharacter: "我的角色", opponentCharacter: "對手角色", historyOpponentMatchCharacter: "對戰角色", historyOpponentPotentialMr: "角色潛力 MR", historyOpponentPotentialLp: "角色潛力 LP", historyOpponentOtherPeak: "目前其他角色最高 MR", matchCharacter: "對戰角色", otherCharacterPeak: "其他角色最高 MR", mrTrend: "MR 趨勢", battleHub: "Battle Hub",
 });
 Object.assign(PACKS["pt-br"], {
-  mrRank: "CLASSIFICAÇÃO DO PERSONAGEM", orientationWindowOnly: "Disponível apenas no modo janela", sessionPeakRating: "PICO DA SESSÃO MR / LP", characterFilter: "PERSONAGEM", opponentCharacterStats: "ESTATÍSTICAS DO PERSONAGEM DO OPONENTE", myCharacter: "MEU PERSONAGEM", opponentCharacter: "PERSONAGEM DO OPONENTE", historyOpponentMatchCharacter: "PERSONAGEM DA PARTIDA", historyOpponentPotentialMr: "POTENCIAL DO PERSONAGEM MR", historyOpponentPotentialLp: "POTENCIAL DO PERSONAGEM LP", historyOpponentOtherPeak: "PICO ATUAL DE OUTRO PERSONAGEM MR", matchCharacter: "PERSONAGEM DA PARTIDA", otherCharacterPeak: "PICO DE OUTRO PERSONAGEM", mrTrend: "TENDÊNCIA DE MR", battleHub: "Battle Hub",
+  orientationWindowOnly: "Disponível apenas no modo janela", sessionPeakRating: "PICO DA SESSÃO MR / LP", characterFilter: "PERSONAGEM", opponentCharacterStats: "ESTATÍSTICAS DO PERSONAGEM DO OPONENTE", myCharacter: "MEU PERSONAGEM", opponentCharacter: "PERSONAGEM DO OPONENTE", historyOpponentMatchCharacter: "PERSONAGEM DA PARTIDA", historyOpponentPotentialMr: "POTENCIAL DO PERSONAGEM MR", historyOpponentPotentialLp: "POTENCIAL DO PERSONAGEM LP", historyOpponentOtherPeak: "PICO ATUAL DE OUTRO PERSONAGEM MR", matchCharacter: "PERSONAGEM DA PARTIDA", otherCharacterPeak: "PICO DE OUTRO PERSONAGEM", mrTrend: "TENDÊNCIA DE MR", battleHub: "Battle Hub",
 });
 Object.assign(PACKS["pl"], {
-  mrRank: "RANGA POSTACI", orientationWindowOnly: "Dostępne tylko w trybie okna", sessionPeakRating: "SZCZYT SESJI MR / LP", characterFilter: "POSTAĆ", opponentCharacterStats: "STATYSTYKI POSTACI PRZECIWNIKA", myCharacter: "MOJA POSTAĆ", opponentCharacter: "POSTAĆ PRZECIWNIKA", historyOpponentMatchCharacter: "POSTAĆ W MECZU", historyOpponentPotentialMr: "POTENCJAŁ POSTACI MR", historyOpponentPotentialLp: "POTENCJAŁ POSTACI LP", historyOpponentOtherPeak: "AKTUALNY SZCZYT INNEJ POSTACI MR", matchCharacter: "POSTAĆ W MECZU", otherCharacterPeak: "SZCZYT INNEJ POSTACI", mrTrend: "TREND MR", battleHub: "Battle Hub",
+  orientationWindowOnly: "Dostępne tylko w trybie okna", sessionPeakRating: "SZCZYT SESJI MR / LP", characterFilter: "POSTAĆ", opponentCharacterStats: "STATYSTYKI POSTACI PRZECIWNIKA", myCharacter: "MOJA POSTAĆ", opponentCharacter: "POSTAĆ PRZECIWNIKA", historyOpponentMatchCharacter: "POSTAĆ W MECZU", historyOpponentPotentialMr: "POTENCJAŁ POSTACI MR", historyOpponentPotentialLp: "POTENCJAŁ POSTACI LP", historyOpponentOtherPeak: "AKTUALNY SZCZYT INNEJ POSTACI MR", matchCharacter: "POSTAĆ W MECZU", otherCharacterPeak: "SZCZYT INNEJ POSTACI", mrTrend: "TREND MR", battleHub: "Battle Hub",
 });
 Object.assign(PACKS["ru"], {
-  mrRank: "РАНГ ПЕРСОНАЖА", orientationWindowOnly: "Доступно только в оконном режиме", sessionPeakRating: "ПИК СЕССИИ MR / LP", characterFilter: "ПЕРСОНАЖ", opponentCharacterStats: "СТАТИСТИКА ПЕРСОНАЖА СОПЕРНИКА", myCharacter: "МОЙ ПЕРСОНАЖ", opponentCharacter: "ПЕРСОНАЖ СОПЕРНИКА", historyOpponentMatchCharacter: "ПЕРСОНАЖ В МАТЧЕ", historyOpponentPotentialMr: "ПОТЕНЦИАЛ ПЕРСОНАЖА MR", historyOpponentPotentialLp: "ПОТЕНЦИАЛ ПЕРСОНАЖА LP", historyOpponentOtherPeak: "ТЕКУЩИЙ ПИК ДРУГОГО ПЕРСОНАЖА MR", matchCharacter: "ПЕРСОНАЖ В МАТЧЕ", otherCharacterPeak: "ПИК ДРУГОГО ПЕРСОНАЖА", mrTrend: "ТРЕНД MR", battleHub: "Battle Hub",
+  orientationWindowOnly: "Доступно только в оконном режиме", sessionPeakRating: "ПИК СЕССИИ MR / LP", characterFilter: "ПЕРСОНАЖ", opponentCharacterStats: "СТАТИСТИКА ПЕРСОНАЖА СОПЕРНИКА", myCharacter: "МОЙ ПЕРСОНАЖ", opponentCharacter: "ПЕРСОНАЖ СОПЕРНИКА", historyOpponentMatchCharacter: "ПЕРСОНАЖ В МАТЧЕ", historyOpponentPotentialMr: "ПОТЕНЦИАЛ ПЕРСОНАЖА MR", historyOpponentPotentialLp: "ПОТЕНЦИАЛ ПЕРСОНАЖА LP", historyOpponentOtherPeak: "ТЕКУЩИЙ ПИК ДРУГОГО ПЕРСОНАЖА MR", matchCharacter: "ПЕРСОНАЖ В МАТЧЕ", otherCharacterPeak: "ПИК ДРУГОГО ПЕРСОНАЖА", mrTrend: "ТРЕНД MR", battleHub: "Battle Hub",
 });
 Object.assign(PACKS["ar"], {
-  mrRank: "رتبة الشخصية", orientationWindowOnly: "متاح في وضع النافذة فقط", sessionPeakRating: "أعلى نتيجة للجلسة MR / LP", characterFilter: "الشخصية", opponentCharacterStats: "إحصاءات شخصية الخصم", myCharacter: "شخصيتي", opponentCharacter: "شخصية الخصم", historyOpponentMatchCharacter: "شخصية المباراة", historyOpponentPotentialMr: "إمكانات الشخصية MR", historyOpponentPotentialLp: "إمكانات الشخصية LP", historyOpponentOtherPeak: "أعلى MR حالي لشخصية أخرى", matchCharacter: "شخصية المباراة", otherCharacterPeak: "أعلى مستوى لشخصية أخرى", mrTrend: "اتجاه MR", battleHub: "Battle Hub",
+  orientationWindowOnly: "متاح في وضع النافذة فقط", sessionPeakRating: "أعلى نتيجة للجلسة MR / LP", characterFilter: "الشخصية", opponentCharacterStats: "إحصاءات شخصية الخصم", myCharacter: "شخصيتي", opponentCharacter: "شخصية الخصم", historyOpponentMatchCharacter: "شخصية المباراة", historyOpponentPotentialMr: "إمكانات الشخصية MR", historyOpponentPotentialLp: "إمكانات الشخصية LP", historyOpponentOtherPeak: "أعلى MR حالي لشخصية أخرى", matchCharacter: "شخصية المباراة", otherCharacterPeak: "أعلى مستوى لشخصية أخرى", mrTrend: "اتجاه MR", battleHub: "Battle Hub",
 });
 Object.assign(PACKS["de"], {
   friendOnlineNotifications: "BENACHRICHTIGUNGEN BEI ONLINE-STATUS VON FREUNDEN",
