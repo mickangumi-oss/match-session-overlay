@@ -44,6 +44,7 @@ const {
   normalizeStoredHistoryAct,
   readHistoryActProvenance,
 } = require("./history-act-provenance");
+const { bracketNewHistoryRows } = require("./history-act-bracket");
 const { buildServiceDataUrl, buildServiceHomeUrl } = require("./service-url");
 const {
   MAX_CONSECUTIVE_FAILURES,
@@ -78,7 +79,7 @@ const {
 } = require("./history-current-rating");
 const {
   estimatePotentialMrFromMatches,
-  POTENTIAL_MR_MATCH_LIMIT,
+
   potentialRatingValue,
 } = require("./potential-rating");
 const {
@@ -146,7 +147,7 @@ const {
   buildHistoricalOpponentSnapshots,
   mergeSnapshotObject,
   OPPONENT_INSIGHT_ALGORITHM_VERSION,
-  potentialMrHistoryCandidates,
+
   snapshotObject,
 } = require("./opponent-insight");
 const {
@@ -155,6 +156,7 @@ const {
 } = require("./opponent-play-metrics");
 const {
   opponentProfileFailureReason,
+  profileContextWithHistoryFailure,
   playComparisonReason,
 } = require("./opponent-profile-retrieval-status");
   const {
@@ -220,6 +222,7 @@ const {
 const {
   buildOfficialActRegistry,
   buildOfficialHistoryRequestContext,
+
   isFreshOfficialActRegistry,
 } = require("./official-act-registry");
 const {
@@ -519,6 +522,7 @@ let verifiedHistoryCurrentAct = {
   actId: null,
   source: null,
   reason: "ACT_SCOPE_MISSING",
+  verifiedAt: null,
 };
 let officialActRegistryState = {
   status: "unavailable",
@@ -728,6 +732,7 @@ function invalidateVerifiedHistoryCurrentAct() {
     actId: null,
     source: null,
     reason: "ACT_SCOPE_MISSING",
+    verifiedAt: null,
   };
   officialActRegistryState = {
     status: "unavailable",
@@ -766,6 +771,34 @@ function currentVerifiedHistoryActState(profileId) {
   };
 }
 
+function historyActBracketSnapshot(profileId) {
+  const state = currentVerifiedHistoryActState(profileId);
+  return state.currentActVerified
+    ? { actId: state.currentActId, verifiedAt: verifiedHistoryCurrentAct.verifiedAt,
+      profileId: verifiedHistoryCurrentAct.profileId, locale: verifiedHistoryCurrentAct.locale,
+      generation: verifiedHistoryCurrentAct.generation,
+      scopeToken: verifiedHistoryCurrentAct.scopeToken }
+    : null;
+}
+
+async function verifyHistoryCurrentActNow(profileId, generation, locale, scopeToken) {
+  try {
+    const result = await fetchAuthenticatedPlayProfile({
+      profileId, generation, requestedLocale: locale, productionRole: "history.act",
+    });
+    if (!isCurrentHistoryActRequest({ profileId, locale, generation, scopeToken })) return null;
+    const registry = buildOfficialActRegistry(result?.payload?.props?.pageProps?.play, {
+      retrievedAt: result?.retrievedAt,
+    });
+    if (registry.status !== "ready") return null;
+    publishVerifiedHistoryCurrentAct({ profileId, locale, generation, scopeToken,
+      result: { status: "ready", act: registry.currentActId,
+        source: "official_profile_play", actRegistry: registry } });
+    return { actId: registry.currentActId, verifiedAt: registry.retrievedAt,
+      profileId: normalizeHistoryProfileId(profileId), locale, generation, scopeToken };
+  } catch { return null; }
+}
+
 function publishVerifiedHistoryCurrentAct({
   profileId,
   locale,
@@ -794,6 +827,8 @@ function publishVerifiedHistoryCurrentAct({
     actId: normalized.actId,
     source: normalized.source,
     reason: normalized.reason,
+    verifiedAt: normalized.actId != null && result?.actRegistry?.status === "ready"
+      ? Number(result.actRegistry.retrievedAt) : null,
   };
   if (mainWindow && !mainWindow.isDestroyed()) sendHistoryState();
 }
@@ -1009,6 +1044,7 @@ function normalizeStoredHistoryRecord(value) {
     playedAt: finiteOrNull(value.playedAt) ?? uploadedAt,
     matchType,
     ...actProvenance,
+    actIdSource: actProvenance.actIdKnown ? String(value.actIdSource ?? "").slice(0, 80) || null : null,
     battleTypeName: String(value.battleTypeName ?? "").slice(0, 80),
     result: ["win", "loss", "draw", "unknown"].includes(value.result)
       ? value.result
@@ -1522,7 +1558,12 @@ function publicHistoryState(
       .filter((value) => Number.isInteger(value) && value >= 0),
   )].sort((left, right) => right - left);
   const verifiedCurrentAct = currentVerifiedHistoryActState(normalizedProfileId);
-  const officialActOptions = isFreshOfficialActRegistry(officialActRegistryState)
+  const officialActRegistryFresh = isFreshOfficialActRegistry(
+    officialActRegistryState,
+    verifiedCurrentAct.currentActVerified ? verifiedCurrentAct.currentActId : null,
+  );
+  const officialActOptions = officialActRegistryFresh
+
     ? buildOfficialActOptions(verifiedCurrentAct.currentActId, officialActRegistryState)
     : [];
   const authenticated = Boolean(authenticatedProfileId);
@@ -1534,11 +1575,15 @@ function publicHistoryState(
     records: store.records,
     count: store.records.length,
     profileId: normalizedProfileId,
+    locale: serviceLocale(),
+    generation: privateDataGeneration,
+    scopeToken: matchHistoryFetchScopeToken,
     // These are the official selector options, not assignments of Acts to
     // stored records. A record remains unscoped until its replay payload
     // contains explicit Act evidence.
     acts: [...actsById.values()].sort((left, right) => right.id - left.id),
-    actRegistry: isFreshOfficialActRegistry(officialActRegistryState)
+    actRegistry: officialActRegistryFresh
+
       ? officialActRegistryState
       : null,
     ...verifiedCurrentAct,
@@ -1627,6 +1672,9 @@ function sendHistoryFetchProgress() {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send("history:progress", {
       profileId: state.profileId,
+      locale: state.locale,
+      generation: state.generation,
+      scopeToken: state.scopeToken,
       fetching: state.fetching,
       fetchPage: state.fetchPage,
       fetchCompletedPages: state.fetchCompletedPages,
@@ -1706,6 +1754,10 @@ async function runHistoryViewPoll(sessionId) {
   try {
     const store = loadMatchHistoryStore(profileId);
     const previousReplayIds = new Set(store.records.map((record) => record.replayId));
+    const previousAct = historyActBracketSnapshot(profileId);
+    const actScopeToken = verifiedHistoryCurrentActScope;
+    const generation = privateDataGeneration;
+    const locale = serviceLocale();
     const replays = await fetchRankedReplays(profileId);
     if (
       !historyViewPollingActive ||
@@ -1742,7 +1794,13 @@ async function runHistoryViewPoll(sessionId) {
     }
     // Do not persist or notify about newly discovered rows until the official
     // profile snapshot has been refreshed and verified for the latest row.
-    mergeMatchHistory(replays, profileId, { notify: false });
+    const bracketedReplays = await bracketNewHistoryRows({ replays, previousReplayIds,
+      previousVerification: previousAct,
+      verifyCurrentAct: () => verifyHistoryCurrentActNow(profileId, generation, locale, actScopeToken) });
+    if (sessionId !== historyViewSessionId || !historyViewPollingActive ||
+      historyViewPlayer?.profileId !== profileId ||
+      !isCurrentHistoryActRequest({ profileId, locale, generation, scopeToken: actScopeToken })) return;
+    mergeMatchHistory(bracketedReplays, profileId, { notify: false });
     const fetchedStore = loadMatchHistoryStore(profileId);
     fetchedStore.lastFetchedAt = Date.now();
     persistMatchHistoryStore(profileId, fetchedStore);
@@ -1866,6 +1924,7 @@ function publicMedianRating(sourceState) {
   }
   let values = series.values.slice(-MEDIAN_RATING_SAMPLE_LIMIT);
   if (values.length < 2) {
+
     const history = Array.isArray(sourceState?.stats?.ranked?.ratingHistory)
       ? sourceState.stats.ranked.ratingHistory
       : [];
@@ -1880,8 +1939,11 @@ function publicMedianRating(sourceState) {
     // Preserve the public field names for renderer/OBS compatibility. LP keeps
     // its existing robust smoothing; MR is derived from opponent/result pairs.
     medianRating: potentialRatingValue(values, ratingType),
+
     medianRatingType: ratingType,
-    medianRatingSampleCount: values.length,
+    medianRatingSampleCount: ratingType === "MR"
+      ? estimatePotentialMrFromMatches(series.potentialRecords ?? series.records, { characterId }).sampleCount
+      : values.length,
   };
 }
 
@@ -1921,6 +1983,7 @@ function rankedHistorySeries(profileId, characterId, ratingType, preferredPlayer
     records: derived.records,
     rawRecords,
     values: derived.values,
+    potentialRecords: rawRecords,
   };
   historyDerivedCache.set(normalizedProfileId, { key: cacheKey, value });
   return value;
@@ -4869,6 +4932,11 @@ async function checkAuthentication() {
         generation,
       }),
     ];
+    if (activeHistoryProfileId() === normalizeHistoryProfileId(nextProfileId) &&
+      !historyActBracketSnapshot(nextProfileId)) {
+      postAuthenticationTasks.push(verifyHistoryCurrentActNow(nextProfileId, generation,
+        serviceLocale(), verifiedHistoryCurrentActScope));
+    }
     if (displaySettings.friendOnlineNotificationsEnabled) {
       postAuthenticationTasks.push(
         refreshAllFriendsForNotifications(1, { seedPage: result.friendPage }),
@@ -5027,21 +5095,26 @@ function historyScopeDiagnostics({
   requestActId = null,
   ownerHistory = null,
   opponentHistory = null,
+  ownerHistoryStatus = null,
+  opponentHistoryStatus = null,
+  ownerHistoryError = null,
+  opponentHistoryError = null,
   finalScopeReason = null,
   productionReceipt = null,
 } = {}) {
-  const summarize = (history) => {
+  const summarize = (history, status, error) => {
     const pages = history && typeof history.pages === "object" ? history.pages : {};
     const pageValues = Object.values(pages);
     return {
       complete: history?.complete === true,
+      status: status ?? (history?.complete === true ? "ready" : "unavailable"),
       totalPages: Number.isInteger(Number(history?.totalPages)) && Number(history.totalPages) > 0
         ? Number(history.totalPages)
         : null,
       fetchedPages: pageValues.length,
       replayListPages: pageValues.filter((page) => page?.hasReplayList === true).length,
       recordCount: Array.isArray(history?.records) ? history.records.length : 0,
-      reason: history?.complete === true ? null : "HISTORY_SCOPE_INCOMPLETE",
+      reason: error?.message ?? (history?.complete === true ? null : "HISTORY_SCOPE_INCOMPLETE"),
     };
   };
   return {
@@ -5052,8 +5125,8 @@ function historyScopeDiagnostics({
     },
     ipcAct: normalizeHistoryActId(ipcActId),
     requestAct: normalizeHistoryActId(requestActId),
-    owner: summarize(ownerHistory),
-    opponent: summarize(opponentHistory),
+    owner: summarize(ownerHistory, ownerHistoryStatus, ownerHistoryError),
+    opponent: summarize(opponentHistory, opponentHistoryStatus, opponentHistoryError),
     finalScopeReason: finalScopeReason ?? null,
     productionReceipt,
   };
@@ -5117,6 +5190,7 @@ function opponentInsightFromSnapshots(snapshots) {
   ) ?? normalized.MR ?? normalized.LP ?? null;
   const insight = {
     matches: first ? first.wins + first.losses + first.draws : 0,
+    selectedCutoffPresent: Boolean(first?.cutoffReplayId && first?.cutoffPlayedAt),
     wins: first?.wins ?? 0,
     losses: first?.losses ?? 0,
     draws: first?.draws ?? 0,
@@ -5126,7 +5200,9 @@ function opponentInsightFromSnapshots(snapshots) {
     const snapshot = normalized[type];
     insight.ratings[type] = {
       values: [],
-      potential: snapshot?.status === "ready" && snapshot.complete === true
+      potential: snapshot?.status === "ready" &&
+        snapshot.complete === true &&
+        snapshot.algorithmVersion === OPPONENT_INSIGHT_ALGORITHM_VERSION
         ? snapshot.potential
         : null,
       currentValue: snapshot?.matchTimeRating ?? null,
@@ -5855,7 +5931,9 @@ async function fetchOfficialOpponentCharacterStats({
   const normalizedMatchMode = matchMode === "all" || Object.hasOwn(OFFICIAL_MATCH_MODE_IDS, matchMode)
     ? matchMode
     : "all";
-  const allCharactersScope = normalizedMatchMode === "all" && ownScope == null;
+  // A mode filter and the own-character filter are independent dimensions.
+  // Ranked/Casual/Battle Hub may also be requested for all own characters.
+  const allCharactersScope = ownScope == null;
   const productionReceipt = createProductionReceipt({
     operation: "official-opponent-character-stats",
     locale: requestedLocale,
@@ -6177,6 +6255,7 @@ async function fetchOpponentOfficialHistory({
   actId = null,
   actIndependent = false,
   beforeTimestamp = null,
+  requiredHistoryMatches = 20,
   requestScopeProof = null,
   productionReceipt = null,
   productionRole = "history",
@@ -6268,25 +6347,15 @@ async function fetchOpponentOfficialHistory({
     return validation;
   };
   const safeMaxPages = OPPONENT_STATS_SAFE_MAX_PAGES;
-  const opponentPotentialMrCharacterId = productionRole === "history.opponent"
-    ? Number(selectedRecord?.opponentCharacterId)
-    : null;
+  const targetCount = Number.isFinite(Number(requiredHistoryMatches))
+    ? Math.max(1, Math.min(safeMaxPages * MATCH_HISTORY_PAGE_SIZE, Math.floor(Number(requiredHistoryMatches))))
+    : 20;
   const targetReached = () => {
     if (!hasCutoff) return false;
-    const roundTargetReached = buildRoundTrend(history.records, {
-      beforeTimestamp: cutoff,
-      matchTypes: ROUND_TREND_MATCH_TYPES,
-      limit: 20,
+    if (targetCount <= 20) return buildRoundTrend(history.records, {
+      beforeTimestamp: cutoff, matchTypes: ROUND_TREND_MATCH_TYPES, limit: 20,
     }).matchCount >= 20;
-    if (!roundTargetReached) return false;
-    if (productionRole !== "history.opponent" || !Number.isFinite(opponentPotentialMrCharacterId)) {
-      return true;
-    }
-    return potentialMrHistoryCandidates(history.records, {
-      characterId: opponentPotentialMrCharacterId,
-      beforeTimestamp: cutoff,
-      actId,
-    }).length >= POTENTIAL_MR_MATCH_LIMIT;
+    return history.records.length >= targetCount;
   };
   let reachedTarget = targetReached();
   const storePage = (page, pageResult) => {
@@ -6443,7 +6512,21 @@ async function fetchOpponentOfficialHistory({
       scopeProof: "rejected",
       reason: "HISTORY_ACT_METADATA_MISSING_OR_MISMATCH",
     });
-    throw new Error("HISTORY_SELECTED_REPLAY_SCOPE_MISSING");
+    const selectedAt = Number(selectedRecord?.playedAt ?? selectedRecord?.uploadedAt);
+    const fetchedTimes = history.records
+      .map((record) => Number(record?.playedAt ?? record?.uploadedAt))
+      .filter((value) => Number.isFinite(value) && value > 0);
+    const opponentOutOfRange = productionRole === "history.opponent" &&
+      historyComplete && history.records.length >= 100 && fetchedTimes.length === history.records.length &&
+      Number.isFinite(selectedAt) && selectedAt > 0 && selectedAt < Math.min(...fetchedTimes);
+    throw new Error(!selectedReplayPresent
+      ? productionRole === "history.owner"
+        ? "OWNER_OFFICIAL_SELECTED_REPLAY_MISSING"
+        : opponentOutOfRange
+          ? "OPPONENT_OFFICIAL_SELECTED_REPLAY_OUT_OF_RANGE"
+          : "OPPONENT_OFFICIAL_SELECTED_REPLAY_MISSING"
+      : "ACT_SCOPE_MISSING");
+
   }
   if (explicitRequestProof) {
     history.records = stampScopedHistoryRecords(history.records, requestedAct).records;
@@ -6465,7 +6548,7 @@ async function fetchOpponentOfficialHistory({
     beforeTimestamp: hasCutoff ? cutoff : 0,
     generation,
   };
-  history.stopReason = reachedTarget ? "target20" : allPagesFetched ? "total_pages" : null;
+  history.stopReason = reachedTarget ? `target${targetCount}` : allPagesFetched ? "total_pages" : null;
   recordProductionReceipt(productionReceipt, `${productionRole}.scope-proof`, {
     status: history.actScopeVerified ? "ok" : "unavailable",
     requestedAct,
@@ -6478,6 +6561,7 @@ async function fetchOpponentOfficialHistory({
     scopeProof: explicitRequestProof ? "verified-request" : history.actScopeVerified ? "verified-record" : "rejected",
     reason: history.actScopeVerified ? undefined : "HISTORY_ACT_METADATA_MISSING_OR_MISMATCH",
   });
+
   save();
   const selected = actIndependent === true
     ? null
@@ -6489,7 +6573,9 @@ async function fetchOpponentOfficialHistory({
     targetMatches: selected ? 1 : 0,
     targetRounds: selected ? Math.max(Array.isArray(selfRounds) ? selfRounds.length : 0, Array.isArray(opponentRounds) ? opponentRounds.length : 0) : 0,
     requiredPayload: actIndependent === true ? "cutoff-round-trend" : selected ? "selected-replay-round-results" : "missing",
-    reason: actIndependent === true || selected ? undefined : "HISTORY_SELECTED_REPLAY_SCOPE_MISSING",
+    reason: actIndependent === true || selected ? undefined : productionRole === "history.owner"
+      ? "OWNER_OFFICIAL_SELECTED_REPLAY_MISSING"
+      : "OPPONENT_OFFICIAL_SELECTED_REPLAY_MISSING",
   });
   return history;
 }
@@ -6530,20 +6616,6 @@ async function backfillHistoryCharacterLabelsForLocale(
     historyLabelBackfillCompleted.add(cacheKey);
     return false;
   }
-  // Existing locale labels may have come from an older artifact or a
-  // different locale field. Remove them before the authoritative refetch so
-  // a failed request cannot leave a stale English/Japanese value marked valid.
-  let cleared = false;
-  for (const record of store.records) {
-    if (record?.characterNamesByLocale?.[requestedLocale]) {
-      const next = { ...record.characterNamesByLocale };
-      delete next[requestedLocale];
-      record.characterNamesByLocale = next;
-      if (!Object.keys(next).length) delete record.characterNamesByLocale;
-      cleared = true;
-    }
-  }
-  if (cleared) persistMatchHistoryStore(normalizedProfileId, store);
   const existing = historyLabelBackfillInFlight.get(cacheKey);
   if (existing) return existing;
   const request = (async () => {
@@ -6754,7 +6826,8 @@ async function fetchHistoryOpponentContext({
       profileId: ownerProfileId,
       actId: requestedActId,
       status: "empty",
-      reason: "HISTORY_SELECTED_REPLAY_MISSING",
+      reason: "OWNER_LOCAL_SELECTED_REPLAY_MISSING",
+
       diagnostics: historyScopeDiagnostics({
         currentActState,
         selectorRaw,
@@ -6904,17 +6977,29 @@ async function fetchHistoryOpponentContext({
           scopeProof: actSelectionSource === "explicit" ? "verified-request" : null,
         });
         const hasInvalidPersistedSnapshot = Object.keys(storedSnapshots ?? {}).length > 0 && !reusableSnapshots;
+
         // Round trend is always acquired from an explicitly Act-scoped
         // battle-log set. A persisted insight snapshot is not a substitute:
         // it does not prove the selected match's historical Act.
         let officialHistory = null;
         let ownerHistory = null;
+        let officialHistoryStatus = "unavailable";
+        let ownerHistoryStatus = "unavailable";
+        let officialHistoryError = null;
+        let ownerHistoryError = null;
         let historyAcquireError = null;
         if (initialTrendContext.ok) {
             const historicalActId = selectedActId;
             const historicalActIndependent = historicalActId == null;
           try {
-            ({ officialHistory, ownerHistory } = await acquireScopedOfficialHistories({
+            ({
+              officialHistory,
+              ownerHistory,
+              officialHistoryStatus,
+              ownerHistoryStatus,
+              officialHistoryError,
+              ownerHistoryError,
+            } = await acquireScopedOfficialHistories({
               cache: opponentOfficialHistoryCache,
               ownerProfileId,
               opponentProfileId: normalizedProfileId,
@@ -6923,8 +7008,10 @@ async function fetchHistoryOpponentContext({
               requiredReplayId: requestedReplayId,
               selectedRecord: scopedSelectedRecord,
               beforeTimestamp: trendScope.beforeTimestamp,
+              requiredHistoryMatches: 100,
               actIndependent: historicalActIndependent,
               requestScopeProof: requestContextProof,
+
               forceRefresh,
               cacheKeyForProfile: opponentOfficialHistoryCacheKey,
               acquireOfficialHistory: (params) => fetchOpponentOfficialHistory(params),
@@ -6932,8 +7019,21 @@ async function fetchHistoryOpponentContext({
               assertGeneration: assertPrivateDataGeneration,
               productionReceipt,
             }));
+            historyAcquireError = officialHistoryError ?? ownerHistoryError;
+            recordProductionReceipt(productionReceipt, "context.round-acquire", {
+              status: officialHistoryStatus === "ready" && ownerHistoryStatus === "ready" ? "ok" : "partial",
+              requestedAct: selectedActId,
+              opponentStatus: officialHistoryStatus,
+              opponentReason: officialHistoryError?.message ?? null,
+              ownerStatus: ownerHistoryStatus,
+              ownerReason: ownerHistoryError?.message ?? null,
+            });
           } catch (error) {
             historyAcquireError = error;
+            officialHistoryError = error;
+            ownerHistoryError = error;
+            officialHistoryStatus = "partial";
+            ownerHistoryStatus = "partial";
             recordProductionReceipt(productionReceipt, "context.round-acquire", {
               status: "unavailable",
               requestedAct: selectedActId,
@@ -6946,6 +7046,8 @@ async function fetchHistoryOpponentContext({
           }
         } else {
           historyAcquireError = new Error(initialTrendContext.reason ?? "ROUND_SCOPE_UNAVAILABLE");
+          officialHistoryError = historyAcquireError;
+          ownerHistoryError = historyAcquireError;
         }
         const data = officialHistory?.data ?? await fetchServiceJson(
           `profile/${encodeURIComponent(normalizedProfileId)}.json`,
@@ -6957,6 +7059,26 @@ async function fetchHistoryOpponentContext({
         );
         const opponentRecords = officialHistory?.records ?? [];
         const ownerRecords = ownerHistory?.records ?? [];
+        const hasRoundCoverageBeforeCutoff = (records) => {
+          const cutoff = Number(trendScope.beforeTimestamp);
+          if (!Number.isFinite(cutoff) || cutoff <= 0) return false;
+          return records.every((record) => {
+            const timestamp = Number(record?.playedAt ?? record?.uploadedAt);
+            if (!Number.isFinite(timestamp) || timestamp <= 0) return false;
+            if (timestamp >= cutoff) return true;
+            const hasRoundSide = (side) => Array.isArray(side?.values) || Array.isArray(side?.battles);
+            return hasRoundSide(record?.roundResults?.self) || hasRoundSide(record?.roundResults?.opponent);
+          });
+        };
+        if (ownerHistoryStatus === "ready" && !hasRoundCoverageBeforeCutoff(ownerRecords)) {
+          ownerHistoryStatus = "partial";
+          ownerHistoryError = new Error("HISTORY_SCOPE_INCOMPLETE");
+        }
+        if (officialHistoryStatus === "ready" && !hasRoundCoverageBeforeCutoff(opponentRecords)) {
+          officialHistoryStatus = "partial";
+          officialHistoryError = new Error("HISTORY_SCOPE_INCOMPLETE");
+        }
+        historyAcquireError = officialHistoryError ?? ownerHistoryError ?? historyAcquireError;
         if (!data) throw new Error("PROFILE_REFERENCE_EMPTY");
         assertPrivateDataGeneration(generation);
         if (requestedLocale !== serviceLocale()) throw new Error("HISTORY_LOCALE_CHANGED");
@@ -6975,6 +7097,7 @@ async function fetchHistoryOpponentContext({
               label: `ACT ${selectedActId}`,
             };
         let peakProfileData = null;
+        let peakProfileError = null;
         if (selectedActId != null) {
           try {
             peakProfileData = await fetchOpponentPeakProfile({
@@ -6983,10 +7106,11 @@ async function fetchHistoryOpponentContext({
               generation,
               requestedLocale,
             });
-          } catch {
+          } catch (error) {
+            peakProfileError = error;
             // Peak MR is an optional companion request. Keep the already
-            // normalized profile context (and its strict dash fallback) when
-            // the official peak endpoint is unavailable.
+            // normalized profile context when the official peak endpoint is
+            // unavailable; the renderer still receives an explicit reason.
           }
         }
         assertPrivateDataGeneration(generation);
@@ -7003,8 +7127,14 @@ async function fetchHistoryOpponentContext({
               verifiedActId: requestContextProof ? selectedActId : null,
             })
           : baseContext;
+        const otherCharacterReason = context.status === "ready" && !context.otherCharacter
+          ? peakProfileError
+            ? "OTHER_CHARACTER_PEAK_REQUEST_FAILED"
+            : "OTHER_CHARACTER_PEAK_NO_DATA"
+          : null;
         let snapshots = reusableSnapshots;
         if (!reusableSnapshots && officialHistory?.complete === true) {
+
           snapshots = buildHistoricalOpponentSnapshots({
             records: opponentRecords,
             selectedRecord: scopedSelectedRecord,
@@ -7012,6 +7142,7 @@ async function fetchHistoryOpponentContext({
             opponentUserCode: normalizedProfileId,
             characterId: normalizedCharacterId,
             actId: selectedActId,
+
             estimatePotentialMrFromMatches,
             potentialRatingValue,
             historyComplete: Boolean(officialHistory?.complete),
@@ -7026,18 +7157,19 @@ async function fetchHistoryOpponentContext({
         }
         const snapshotScopeIncomplete = hasInvalidPersistedSnapshot && officialHistory?.complete !== true;
         const opponentInsight = opponentInsightFromSnapshots(snapshots);
-        const ownerHistoryChanged = ownerHistory?.complete === true
+        const ownerHistoryChanged = ownerHistoryStatus === "ready" && ownerHistory?.complete === true
           ? mergeMatchHistory(ownerRecords, ownerProfileId, { notify: false })
           : false;
-        const trendContext = initialTrendContext.ok && !historyAcquireError
+        const trendContext = initialTrendContext.ok
           ? buildScopedRoundTrendContext({
               selectedRecord: scopedSelectedRecord,
               selectedActId: roundTrendActScoped ? selectedActId : null,
               actIndependent: false,
               ownerRecords,
               opponentRecords,
-              ownerComplete: ownerHistory?.complete === true,
-              opponentComplete: officialHistory?.complete === true,
+              ownerComplete: ownerHistoryStatus === "ready" && ownerHistory?.complete === true,
+              opponentComplete: officialHistoryStatus === "ready" && officialHistory?.complete === true,
+              opponentReason: officialHistoryError?.message ?? null,
             })
           : null;
         const roundTrend = trendContext?.ok
@@ -7051,6 +7183,9 @@ async function fetchHistoryOpponentContext({
                   : historyAcquireError?.message ?? "ACT_SCOPE_MISSING",
               },
             );
+        const historyFailureReason = historyAcquireError
+          ? opponentProfileFailureReason(historyAcquireError)
+          : null;
         const roundStatus = roundTrend?.status === "ready"
           ? "ready"
           : roundTrend?.status === "insufficient_sample"
@@ -7118,9 +7253,10 @@ async function fetchHistoryOpponentContext({
         });
         const enrichedContext = {
           ...context,
-          ...(snapshotScopeIncomplete && context.status === "ready"
-            ? { status: "partial", reason: "HISTORY_SCOPE_INCOMPLETE" }
-            : {}),
+          ...profileContextWithHistoryFailure(context, historyFailureReason,
+            snapshotScopeIncomplete || otherCharacterReason
+              ? otherCharacterReason ?? "HISTORY_SCOPE_INCOMPLETE" : null),
+
           // The profile PLAY payload is a current-profile companion and may
           // expose a different or legacy Act marker. The selected history
           // scope was verified above and is authoritative for this card.
@@ -7152,7 +7288,11 @@ async function fetchHistoryOpponentContext({
             requestActId: selectedActId,
             ownerHistory,
             opponentHistory: officialHistory,
-            finalScopeReason: roundStatus === "ready" ? null : roundTrend?.reason,
+            ownerHistoryStatus,
+            opponentHistoryStatus: officialHistoryStatus,
+            ownerHistoryError,
+            opponentHistoryError: officialHistoryError,
+            finalScopeReason: historyFailureReason ?? (roundStatus === "ready" ? null : roundTrend?.reason),
             productionReceipt,
           }),
         };
@@ -7176,6 +7316,10 @@ async function fetchHistoryOpponentContext({
               "HISTORY_SCOPE_INCOMPLETE",
               "HISTORY_DUPLICATE_CONFLICT",
               "HISTORY_SELECTED_REPLAY_MISSING",
+              "OWNER_LOCAL_SELECTED_REPLAY_MISSING",
+              "OWNER_OFFICIAL_SELECTED_REPLAY_MISSING",
+              "OPPONENT_OFFICIAL_SELECTED_REPLAY_MISSING",
+              "OPPONENT_OFFICIAL_SELECTED_REPLAY_OUT_OF_RANGE",
             ].includes(failureReason)
             ? "partial"
             : "error";
@@ -7403,7 +7547,7 @@ async function fetchOfficialHistoryRequestContext({
   const cached = officialHistoryContextCache.get(cacheKey);
   if (
     cached?.status === "ready" &&
-    isFreshOfficialActRegistry(cached.registry)
+    isFreshOfficialActRegistry(cached.registry, cached.currentActId)
   ) {
     const context = buildOfficialHistoryRequestContext(cached.play, requested ?? cached.currentActId);
     return context.ok
@@ -7603,6 +7747,9 @@ async function fetchLocalMatchHistory({ requestedActId = null } = {}) {
       const previousReplayIds = new Set(
         existing.records.map((record) => record.replayId),
       );
+      const previousAct = historyActBracketSnapshot(player.profileId);
+      const actScopeToken = verifiedHistoryCurrentActScope;
+      const originalReplayIds = new Set(previousReplayIds);
       matchHistoryFetchSummary = null;
       matchHistoryFetchProgress = {
         profileId: player.profileId,
@@ -7676,7 +7823,17 @@ async function fetchLocalMatchHistory({ requestedActId = null } = {}) {
       // Treat the profile refresh as part of committing a new-history batch.
       // Until it succeeds, neither the rows nor a complete status are public.
       assertHistoryFetchScope(player.profileId, fetchScopeToken);
-      const mergeOutcome = mergeMatchHistory(importReplays, player.profileId, {
+      const bracketedReplays = await bracketNewHistoryRows({
+        replays: importReplays,
+        previousReplayIds: originalReplayIds,
+        previousVerification: previousAct,
+        verifyCurrentAct: () => verifyHistoryCurrentActNow(
+          player.profileId, generation, requestedLocale, actScopeToken,
+        ),
+      });
+      assertPrivateDataGeneration(generation);
+      assertHistoryFetchScope(player.profileId, fetchScopeToken);
+      const mergeOutcome = mergeMatchHistory(bracketedReplays, player.profileId, {
         persist: false,
         notify: false,
         returnOutcome: true,
@@ -7686,6 +7843,7 @@ async function fetchLocalMatchHistory({ requestedActId = null } = {}) {
           ? "HISTORY_ACT_CONFLICT"
           : "HISTORY_MERGE_FAILED");
       }
+
       importMerged = true;
       assertPrivateDataGeneration(generation);
       if (serviceLocale() !== requestedLocale) {
@@ -7737,17 +7895,19 @@ async function fetchLocalMatchHistory({ requestedActId = null } = {}) {
       ]);
       return publicHistoryState(player.profileId);
     } catch (error) {
+      if (generation !== privateDataGeneration) publishHistoryState = false;
       // Keep any pages that completed before the failure available after a
       // restart as well as in the current in-memory view. Private-data
       // clearing is the one boundary where no partial write is allowed.
       if (
         !privateDataClearing &&
+        generation === privateDataGeneration &&
         historyFetchScopeIsCurrent(summaryProfileId, fetchScopeToken) &&
         completedPages > 0 &&
         error?.message !== "PRIVATE_DATA_CLEARED" &&
         summaryProfileId
       ) {
-        if (!importMerged && newReplayCount === 0 && completedReplays.length) {
+        if (!importMerged && completedReplays.length) {
           mergeMatchHistory(completedReplays, summaryProfileId, {
             persist: false,
             notify: false,
@@ -7761,6 +7921,7 @@ async function fetchLocalMatchHistory({ requestedActId = null } = {}) {
       }
       if (
         !fetchTerminalStateSent &&
+        generation === privateDataGeneration &&
         !["PRIVATE_DATA_CLEARED", "HISTORY_LOCALE_CHANGED", "HISTORY_TARGET_CHANGED"].includes(error?.message) &&
         summaryProfileId
       ) {
@@ -7817,6 +7978,7 @@ async function selectHistoryProfile(userCode) {
   const ownPlayer =
     authenticatedPlayer ?? trackerState.player ?? (await checkAuthentication()).player;
   assertPrivateDataGeneration(generation);
+  assertHistoryProfileSelectionScope(selectionScopeToken);
   if (!ownPlayer?.profileId) throw new Error("SERVICE_SELF_NOT_FOUND");
   let nextHistoryViewPlayer = null;
   if (normalizedCode === normalizeHistoryProfileId(ownPlayer.profileId)) {
@@ -7830,6 +7992,7 @@ async function selectHistoryProfile(userCode) {
     } else {
       const player = await searchPlayer(normalizedCode);
       assertPrivateDataGeneration(generation);
+      assertHistoryProfileSelectionScope(selectionScopeToken);
       historyProfileLookupCache.set(cacheKey, {
         fetchedAt: Date.now(),
         player,
@@ -7841,14 +8004,22 @@ async function selectHistoryProfile(userCode) {
     // changes, and locale changes still use their force-refresh paths.
     nextHistoryViewPlayer = await refreshProfilePlayer(nextHistoryViewPlayer);
     assertPrivateDataGeneration(generation);
+    assertHistoryProfileSelectionScope(selectionScopeToken);
   }
   assertPrivateDataGeneration(generation);
+  assertHistoryProfileSelectionScope(selectionScopeToken);
   stopHistoryViewPolling();
   matchHistoryFetchSummary = null;
   historyViewPlayer = nextHistoryViewPlayer;
   const selectedProfileId = normalizeHistoryProfileId(
     historyViewPlayer?.profileId ?? ownPlayer.profileId,
   );
+  if (selectedProfileId === normalizeHistoryProfileId(ownPlayer.profileId)) {
+    await verifyHistoryCurrentActNow(selectedProfileId, generation, serviceLocale(),
+      verifiedHistoryCurrentActScope);
+    assertPrivateDataGeneration(generation);
+    assertHistoryProfileSelectionScope(selectionScopeToken);
+  }
   let localeBackfillProfileId = null;
   let localeBackfillLocale = null;
   if (selectedProfileId) {
@@ -7890,6 +8061,12 @@ async function selectHistoryProfile(userCode) {
   };
 }
 
+function assertHistoryProfileSelectionScope(selectionScopeToken) {
+  if (selectionScopeToken !== matchHistoryFetchScopeToken) {
+    throw new Error("HISTORY_TARGET_CHANGED");
+  }
+}
+
 async function clearHistoryProfileSelection() {
   ensureUpdateAllowed();
   invalidateVerifiedHistoryCurrentAct();
@@ -7905,6 +8082,11 @@ async function clearHistoryProfileSelection() {
 
 async function startTrackingInternal(player) {
   player = await refreshProfilePlayer(player);
+  if (normalizeHistoryProfileId(player.profileId) === activeHistoryProfileId() &&
+    !historyActBracketSnapshot(player.profileId)) {
+    await verifyHistoryCurrentActNow(player.profileId, privateDataGeneration,
+      serviceLocale(), verifiedHistoryCurrentActScope);
+  }
   const resumable =
     !trackerState.active &&
     ["idle", "manual", "restart"].includes(trackerState.stopReason) &&
@@ -8101,11 +8283,25 @@ async function refreshTracking(sessionId = trackingSessionId) {
   }
   const previousReplayIds = new Set(trackerState.seenReplayIds);
   const previousCharacterId = trackerState.characterId;
+  const profileId = trackerState.player.profileId;
+  const storedReplayIds = new Set(loadMatchHistoryStore(profileId).records.map((row) => row.replayId));
+  const previousAct = historyActBracketSnapshot(profileId);
+  const actScopeToken = verifiedHistoryCurrentActScope;
+  const generation = privateDataGeneration;
+  const locale = serviceLocale();
   const replays = await fetchRankedReplays(trackerState.player.profileId);
   if (sessionId !== trackingSessionId || !trackerState.active) {
     return publicTrackerState();
   }
-  mergeMatchHistory(replays, trackerState.player.profileId);
+  const bracketedReplays = await bracketNewHistoryRows({ replays, previousReplayIds: storedReplayIds,
+    previousVerification: previousAct,
+    verifyCurrentAct: () => verifyHistoryCurrentActNow(profileId, generation, locale, actScopeToken) });
+  if (sessionId !== trackingSessionId || !trackerState.active ||
+    trackerState.player?.profileId !== profileId ||
+    !isCurrentHistoryActRequest({ profileId, locale, generation, scopeToken: actScopeToken })) {
+    return publicTrackerState();
+  }
+  mergeMatchHistory(bracketedReplays, profileId);
   const hasNewReplay = replays.some(
     (replay) =>
       replay.replayId &&
@@ -8718,6 +8914,7 @@ if (process.env.MATCH_OVERLAY_TEST_MODE === "1") {
     __testLoadMatchHistoryStore: loadMatchHistoryStore,
     __testPersistMatchHistoryStore: persistMatchHistoryStore,
     __testFlushHistoryPersistence: (profileId) => persistedDataWriter.flush(historyStorePath(profileId)),
+
     __testConfigureOpponentContext({
       ownerProfileId,
       currentActId = 13,

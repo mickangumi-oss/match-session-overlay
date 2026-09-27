@@ -7,16 +7,21 @@ const names = document.getElementById("friendToastNames");
 const others = document.getElementById("friendToastOthers");
 
 function copyFor(locale, count, remaining) {
-  if (locale === "ja-jp") {
-    return {
-      title: count === 1 ? "フレンドがオンライン" : `${count}人のフレンドがオンライン`,
-      others: `ほか${remaining}人がオンライン`,
-    };
-  }
+  const translate = (key, fallback) => window.matchOverlayI18n?.t?.(key, locale) ?? fallback;
+  const titleKey = count === 1 ? "friendOnlineSingle" : "friendOnlineMultiple";
   return {
-    title: count === 1 ? "FRIEND ONLINE" : `${count} FRIENDS ONLINE`,
-    others: `${remaining} MORE ONLINE`,
+    title: translate(titleKey, count === 1 ? "FRIEND ONLINE" : "{count} FRIENDS ONLINE")
+      .replace("{count}", String(count)),
+    others: translate("friendOnlineOthers", "{count} MORE ONLINE")
+      .replace("{count}", String(remaining)),
   };
+}
+
+function htmlLanguage(locale) {
+  return ({
+    "ja-jp": "ja-JP", "es-es": "es-ES", "es-us": "es-US", "ko-kr": "ko-KR",
+    "zh-hans": "zh-Hans", "zh-hant": "zh-Hant", "pt-br": "pt-BR",
+  })[locale] || locale;
 }
 
 function render(payload = {}) {
@@ -25,13 +30,16 @@ function render(payload = {}) {
     : [];
   const count = Math.max(visibleNames.length, Math.trunc(Number(payload.count) || 0));
   const remaining = Math.max(0, count - visibleNames.length);
-  const copy = copyFor(String(payload.locale || "en"), count, remaining);
+  const localeApi = window.matchOverlayI18n;
+  const locale = String(payload.locale || localeApi?.getLocale?.() || "en");
+  localeApi?.applyTranslations?.(document, locale);
+  const copy = copyFor(locale, count, remaining);
   const backgroundOpacity = Math.min(
     1,
     Math.max(0, Number(payload.backgroundOpacity ?? 0.94)),
   );
   background.style.opacity = String(backgroundOpacity);
-  document.documentElement.lang = payload.locale === "ja-jp" ? "ja" : "en";
+  document.documentElement.lang = htmlLanguage(locale);
   title.textContent = copy.title;
   names.replaceChildren(...visibleNames.map((name) => {
     const row = document.createElement("div");

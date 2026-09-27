@@ -117,11 +117,17 @@ function stampScopedHistoryRecords(records, requestedActId) {
   return {
     ok: true,
     reason: null,
-    records: (Array.isArray(records) ? records : []).map((record) => ({
-      ...record,
-      actId: normalizeHistoryActId(record?.actId) ?? requested.actId,
-      actIdKnown: true,
-    })),
+    records: (Array.isArray(records) ? records : []).map((record) => {
+      const recordActId = normalizeHistoryActId(record?.actId);
+      return {
+        ...record,
+        actId: recordActId ?? requested.actId,
+        actIdKnown: true,
+        actIdSource: recordActId == null
+          ? "official-requested-act"
+          : record.actIdSource ?? "official-record-act",
+      };
+    }),
   };
 }
 
@@ -133,6 +139,7 @@ function buildScopedRoundTrendContext({
   opponentRecords = [],
   ownerComplete = false,
   opponentComplete = false,
+  opponentReason = null,
 } = {}) {
   const requested = normalizeRequestedActId(selectedActId);
   const baseScope = {
@@ -166,13 +173,15 @@ function buildScopedRoundTrendContext({
   });
   const opponentTrend = annotateRoundTrendAcquisition(buildRoundTrend(opponentRecords, baseScope), {
     complete: opponentComplete,
+    reason: opponentReason,
   });
+  const roundTrend = combineRoundTrends(selfTrend, opponentTrend, { limit: 20 });
   return {
     ok: true,
     reason: null,
     selectedActId: requested.ok ? requested.actId : null,
     selectedRecord: scopedSelectedRecord,
-    roundTrend: combineRoundTrends(selfTrend, opponentTrend, { limit: 20 }),
+    roundTrend: { ...roundTrend, opponentReason },
   };
 }
 

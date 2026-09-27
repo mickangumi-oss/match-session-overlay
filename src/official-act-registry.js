@@ -3,8 +3,9 @@
 const MAX_ACT_ID = 100;
 
 function normalizeActId(value) {
-  const id = Number(value);
-  return Number.isInteger(id) && id >= 0 && id <= MAX_ACT_ID ? id : null;
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= MAX_ACT_ID
+    ? value
+    : null;
 }
 
 function normalizeActDate(value) {
@@ -78,9 +79,17 @@ function buildOfficialActRegistry(
   };
 }
 
-function isFreshOfficialActRegistry(registry, now = Date.now(), ttlMs = 5 * 60 * 1000) {
+function isFreshOfficialActRegistry(registry, verifiedCurrentActId, now = Date.now(), ttlMs = 5 * 60 * 1000) {
+  const validShape = Array.isArray(registry?.acts) && registry.acts.length > 0 &&
+    registry.acts.every((act) => Number.isInteger(act?.id) && act.id >= 0) &&
+    registry.acts.some((act) => act.id === registry.currentActId) &&
+    registry.proof?.endpoint === "profile/{sid}/play" &&
+    registry.proof?.payload === "props.pageProps.play.season_ids" &&
+    registry.proof?.currentActPayload === "props.pageProps.play.current_season_id";
   return registry?.status === "ready" &&
-    Array.isArray(registry.acts) &&
+    validShape &&
+    Number.isInteger(verifiedCurrentActId) && verifiedCurrentActId > 0 &&
+    registry.currentActId === verifiedCurrentActId &&
     Number.isFinite(Number(registry.retrievedAt)) &&
     Number(now) - Number(registry.retrievedAt) >= 0 &&
     Number(now) - Number(registry.retrievedAt) < ttlMs;

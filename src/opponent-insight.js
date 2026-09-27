@@ -10,6 +10,10 @@ const INSIGHT_MATCH_LIMIT = 20;
 const POTENTIAL_MR_MATCH_LIMIT = 100;
 const LEGACY_ALGORITHM_VERSION = "legacy-unknown";
 const OPPONENT_INSIGHT_ALGORITHM_VERSION = "historical-before-match-v4";
+const potentialScope = typeof module === "object" && module.exports
+  ? require("./potential-rating-scope")
+  : globalThis.matchPotentialRatingScope;
+
 
 function potentialMrHistoryCandidates(
   records,
@@ -20,9 +24,9 @@ function potentialMrHistoryCandidates(
   const hasActFilter = actId != null;
   const targetActId = Number(actId);
   return (Array.isArray(records) ? records : [])
-    .filter((record) => record?.matchType === "ranked")
-    .filter((record) => record?.result === "win" || record?.result === "loss")
-    .filter((record) => targetCharacterId == null || finitePositive(record?.characterId) === targetCharacterId)
+    .filter((record) => potentialScope.isPotentialMatchRecord(record, targetCharacterId))
+    .filter((record) => timestampOf(record) != null)
+
     .filter((record) => {
       if (!hasActFilter) return true;
       const recordActId = Number(record?.actId);
@@ -155,6 +159,7 @@ function buildHistoricalOpponentSnapshots({
   opponentUserCode,
   characterId,
   actId = null,
+
   estimatePotentialMrFromMatches,
   potentialRatingValue,
   limit = INSIGHT_MATCH_LIMIT,
@@ -272,6 +277,7 @@ function buildHistoricalOpponentSnapshots({
             bound: null,
           };
       potential = ratingEstimate?.value ?? null;
+
       if (!validRating(potential, type)) {
         status = "insufficient";
         reason = "potential-out-of-range";
@@ -283,6 +289,7 @@ function buildHistoricalOpponentSnapshots({
           reason = "sample-insufficient";
           potential = null;
         }
+
       }
     }
     return [type, {
@@ -291,6 +298,7 @@ function buildHistoricalOpponentSnapshots({
       ratingType: ratingTypeKnown ? type : null,
       matchTimeRating: endpoint,
       sampleCount: type === "MR" ? estimate?.sampleCount ?? 0 : values.length,
+
       wins,
       losses,
       draws,
@@ -323,7 +331,9 @@ function recentRecords(records, characterId, limit = 20, actId = null) {
 
 function buildOpponentOfficialInsight({ records, characterId, actId = null, player, deriveHistoryRatingSeries, estimatePotentialMrFromMatches, potentialRatingValue, limit = 20 } = {}) {
   const selected = recentRecords(records, characterId, limit, actId);
-  const selectedMr = recentRecords(records, characterId, POTENTIAL_MR_MATCH_LIMIT, actId);
+  const selectedMr = potentialMrHistoryCandidates(records, { characterId, actId })
+    .slice(-POTENTIAL_MR_MATCH_LIMIT);
+
   const result = { matches: selected.length, wins: 0, losses: 0, draws: 0, record: [], ratings: {} };
   for (const record of selected) {
     if (record?.result === "win") result.wins += 1;
@@ -342,6 +352,7 @@ function buildOpponentOfficialInsight({ records, characterId, actId = null, play
       values,
       potential: type === "MR"
         ? potentialEstimate?.value ?? null
+
         : values.length >= 2 && typeof potentialRatingValue === "function"
           ? potentialRatingValue(values.slice(-INSIGHT_MATCH_LIMIT), type)
         : null,
@@ -363,6 +374,7 @@ function selectOtherCharacterPeakMr(profileCharacterRatings, targetCharacterId) 
 
 return {
   INSIGHT_MATCH_LIMIT,
+  POTENTIAL_MR_MATCH_LIMIT,
   OPPONENT_INSIGHT_ALGORITHM_VERSION,
   buildOpponentOfficialInsight,
   buildHistoricalOpponentSnapshots,

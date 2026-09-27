@@ -17,9 +17,24 @@ function opponentProfileFailureReason(error) {
     return "ACT_SCOPE_MISSING";
   }
   if (code === "HISTORY_SELECTED_REPLAY_SCOPE_MISSING") return "HISTORY_SELECTED_REPLAY_MISSING";
-  if (code === "HISTORY_PAGE_SET_INCOMPLETE") return "HISTORY_SCOPE_INCOMPLETE";
+  if (code === "OPPONENT_OFFICIAL_SELECTED_REPLAY_OUT_OF_RANGE" ||
+      code === "OPPONENT_OFFICIAL_SELECTED_REPLAY_MISSING" ||
+      code === "OWNER_OFFICIAL_SELECTED_REPLAY_MISSING" ||
+      code === "OWNER_LOCAL_SELECTED_REPLAY_MISSING") return code;
+  if (code === "HISTORY_PAGE_SET_INCOMPLETE" || code === "HISTORY_SCOPE_INCOMPLETE") {
+    return "HISTORY_SCOPE_INCOMPLETE";
+  }
   if (code === "HISTORY_REPLAY_DUPLICATE_CONFLICT") return "HISTORY_DUPLICATE_CONFLICT";
   return "OPPONENT_PROFILE_REQUEST_FAILED";
+}
+
+function profileContextWithHistoryFailure(context, historyFailureReason, fallbackReason) {
+  const outOfRange = historyFailureReason === "OPPONENT_OFFICIAL_SELECTED_REPLAY_OUT_OF_RANGE";
+  if (context?.status !== "ready" && !(outOfRange && context?.reason === "ACT_SCOPE_MISSING")) {
+    return context;
+  }
+  if (!historyFailureReason && !fallbackReason) return context;
+  return { ...context, status: "partial", reason: historyFailureReason ?? fallbackReason };
 }
 
 function playProfileFailureReason(result) {
@@ -66,6 +81,7 @@ function playComparisonReason(comparison, selfResult, opponentResult) {
 
 module.exports = {
   opponentProfileFailureReason,
+  profileContextWithHistoryFailure,
   playComparisonReason,
   playProfileFailureReason,
 };

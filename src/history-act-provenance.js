@@ -52,7 +52,12 @@ function normalizeStoredHistoryAct(value) {
 function mergeHistoryActProvenance(previous, incoming) {
   const next = normalizeStoredHistoryAct(incoming);
   const prior = normalizeStoredHistoryAct(previous);
+  const priorSource = prior.actIdKnown ? previous?.actIdSource ?? null : null;
+  const nextSource = next.actIdKnown ? incoming?.actIdSource ?? null : null;
   if (next.actIdKnown && prior.actIdKnown && next.actId !== prior.actId) {
+    if (priorSource === "current-act-bracketed" && nextSource && nextSource !== "current-act-bracketed") {
+      return { ...next, actIdSource: nextSource, outcome: "accepted" };
+    }
     return {
       actId: prior.actId,
       actIdKnown: true,
@@ -61,8 +66,8 @@ function mergeHistoryActProvenance(previous, incoming) {
       incomingActId: next.actId,
     };
   }
-  if (next.actIdKnown) return { ...next, outcome: "accepted" };
-  if (prior.actIdKnown) return prior;
+  if (next.actIdKnown) return { ...next, actIdSource: nextSource ?? (next.actId === prior.actId ? priorSource : null), outcome: "accepted" };
+  if (prior.actIdKnown) return { ...prior, actIdSource: priorSource, outcome: "accepted" };
   return { actId: null, actIdKnown: false, outcome: "unknown" };
 }
 

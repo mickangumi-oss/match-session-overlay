@@ -1277,7 +1277,7 @@ body.update-required .cockpit .hud-panel .update-row * {
 .history-fetch-progress.active { opacity: 1; }
 .history-fetch-progress > div { width: 0; height: 100%; background: linear-gradient(90deg, #75a4ff, #c280ff); box-shadow: 0 0 8px rgba(125, 160, 255, .55); transition: width 160ms ease; }
 .history-acquisition .button { min-width: 190px; min-height: 38px; }
-.history-fetch-state { color: #43d8ff; font-size: 11px; }
+.history-fetch-state { color: #43d8ff; font-size: 11px; overflow-wrap: anywhere; }
 .history-fetch-state.loading {
   color: var(--lime);
   font-weight: 800;
@@ -1419,6 +1419,8 @@ body.update-required .cockpit .hud-panel .update-row * {
 .history-table-card,
 .history-opponent-stats { min-width: 0; overflow: hidden; border: 2px solid rgba(113, 128, 200, .68); border-radius: 8px; background: rgba(7, 10, 25, .96); box-shadow: inset 0 0 0 1px rgba(9, 13, 31, .9), inset 0 0 24px rgba(111, 126, 224, .07); }
 .history-content header { display: flex; justify-content: space-between; padding: 10px 12px; border-bottom: 1px solid rgba(67, 216, 255, 0.25); }
+.history-result-card > header, .history-table-card > header, .history-opponent-stats-header { flex-wrap: wrap; gap: 4px 8px; }
+.history-result-card > header > span, .history-table-card > header > span, .history-opponent-stats-header > span { min-width: 0; overflow-wrap: anywhere; }
 .history-chart-wrap { position: relative; min-height: 210px; padding: 10px; }
 .history-chart-wrap canvas { display: block; width: 100%; height: 210px; }
 .history-chart-wrap p { position: absolute; inset: 0; display: grid; place-items: center; margin: 0; color: rgba(247, 248, 255, .66); font-size: 12px; }

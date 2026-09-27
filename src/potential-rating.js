@@ -12,6 +12,10 @@ const INITIAL_SAMPLE_LIMIT = 5;
 const POTENTIAL_MR_MATCH_LIMIT = 100;
 const POTENTIAL_MR_MIN_SAMPLES = 2;
 const POTENTIAL_MR_SEARCH_PADDING = 600;
+const potentialScope = typeof module === "object" && module.exports
+  ? require("./potential-rating-scope")
+  : globalThis.matchPotentialRatingScope;
+
 
 function finiteValues(values) {
   return (Array.isArray(values) ? values : [])
@@ -78,15 +82,24 @@ function potentialMrMatchWindow(
   const matchLimit = Number.isFinite(requestedLimit)
     ? Math.max(0, Math.min(POTENTIAL_MR_MATCH_LIMIT, Math.floor(requestedLimit)))
     : POTENTIAL_MR_MATCH_LIMIT;
+  // Array#slice(-0) returns the whole array. Keep the public zero-limit
+  // contract explicit so a caller asking for no samples gets no samples.
+  if (matchLimit === 0) return [];
+
   const targetCharacterId = Number(characterId);
   const hasCharacterFilter = Number.isFinite(targetCharacterId) && targetCharacterId > 0;
   const hasActFilter = actId != null;
   const targetActId = Number(actId);
   const hasValidActFilter = Number.isInteger(targetActId) && targetActId >= 0;
+  // The time window is fixed before invalid opponent MR rows are removed.
+  // This deliberately does not refill the window from older matches.
   const window = (Array.isArray(records) ? records : [])
-    .filter((record) => record?.matchType === "ranked")
-    .filter((record) => !hasCharacterFilter || Number(record?.characterId) === targetCharacterId)
-    .filter((record) => record?.result === "win" || record?.result === "loss")
+    .filter((record) => potentialScope.isPotentialMatchRecord(
+      record,
+      hasCharacterFilter ? targetCharacterId : null,
+    ))
+    .filter((record) => recordTimestamp(record) > 0)
+
     .filter((record) => {
       if (!hasActFilter) return true;
       if (!hasValidActFilter) return false;
@@ -99,11 +112,8 @@ function potentialMrMatchWindow(
     .slice(-matchLimit);
   return window.filter((record) => {
     const opponentMr = Number(record?.opponentMr);
-    return (
-      (record?.result === "win" || record?.result === "loss") &&
-      Number.isFinite(opponentMr) &&
-      opponentMr > 0
-    );
+    return Number.isFinite(opponentMr) && opponentMr > 0;
+
   });
 }
 
@@ -146,8 +156,15 @@ function estimatePotentialMrFromMatches(records, options = {}) {
   return { ...result, value: Math.round((lower + upper) / 2) };
 }
 
-function potentialRatingValue(values, ratingType) {
-  return ratingType === "LP" ? robustLpEstimate(values) : robustMrEstimate(values);
+function potentialRatingValue(values, ratingType, options = {}) {
+  if (ratingType === "LP") return robustLpEstimate(values);
+  const records = Array.isArray(options.records)
+    ? options.records
+    : Array.isArray(values) && values.some((value) => value && typeof value === "object")
+      ? values
+      : [];
+  return estimatePotentialMrFromMatches(records, options).value;
+
 }
 
 return {

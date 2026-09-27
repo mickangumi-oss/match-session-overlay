@@ -5,6 +5,10 @@
 })(typeof globalThis === "object" ? globalThis : this, function createHistoryCurrentRating() {
   "use strict";
 
+  const potentialScope = typeof module === "object" && module.exports
+    ? require("./potential-rating-scope")
+    : globalThis.matchPotentialRatingScope;
+
   function positiveNumber(value) {
     const number = Number(value);
     return Number.isFinite(number) && number > 0 ? number : null;
@@ -63,9 +67,11 @@
     const ordered = (Array.isArray(records) ? records : [])
       .filter(
         (record) =>
-          record?.matchType === "ranked" &&
-          (expectedCharacterId == null ||
-            positiveNumber(record?.characterId) === expectedCharacterId) &&
+          (normalizedType === "MR"
+            ? potentialScope.isPotentialMatchRecord(record, expectedCharacterId)
+            : record?.matchType === "ranked" &&
+              (expectedCharacterId == null ||
+                positiveNumber(record?.characterId) === expectedCharacterId)) &&
           recordRating(record, normalizedType) != null &&
           (normalizedType !== "LP" || recordRating(record, normalizedType) > 0),
       )

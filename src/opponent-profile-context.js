@@ -240,9 +240,12 @@ function collectOfficialPeakMrCandidates(value, actKey) {
   if (!response || typeof response !== "object" || !actKey) return [];
   const responseAct = firstOwn(response, ["current_season_id", "currentSeasonId"]);
   if (responseAct != null && String(responseAct) !== String(actKey)) return [];
-  const entries = Array.isArray(response.character_league_infos)
-    ? response.character_league_infos.slice(0, MAX_PROFILE_ARRAY_ENTRIES)
-    : [];
+  const rawEntries = firstOwn(response, ["character_league_infos", "characterLeagueInfos"]);
+  const entries = Array.isArray(rawEntries)
+    ? rawEntries.slice(0, MAX_PROFILE_ARRAY_ENTRIES)
+    : rawEntries && typeof rawEntries === "object"
+      ? Object.values(rawEntries).slice(0, MAX_PROFILE_ARRAY_ENTRIES)
+      : [];
   return entries
     .filter((entry) => entry && typeof entry === "object" && !Array.isArray(entry))
     .map((entry) => {
