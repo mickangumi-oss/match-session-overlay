@@ -1107,6 +1107,47 @@ const PACKS = {
   ar: AR,
 };
 
+const OPPONENT_CONTEXT_PROGRESS_LABELS = {
+  "ja-jp": "試合の詳細: {total}段階中{completed}段階完了",
+  en: "Match details: {completed} of {total} stages",
+  de: "Matchdetails: {completed} von {total} Schritten",
+  "es-es": "Detalles del combate: {completed} de {total} etapas",
+  "es-us": "Detalles del combate: {completed} de {total} etapas",
+  fr: "Détails du match : {completed} étapes sur {total}",
+  it: "Dettagli partita: {completed} fasi su {total}",
+  "ko-kr": "대전 상세: {total}단계 중 {completed}단계 완료",
+  "zh-hans": "对战详情：已完成 {total} 个阶段中的 {completed} 个",
+  "zh-hant": "對戰詳情：已完成 {total} 個階段中的 {completed} 個",
+  "pt-br": "Detalhes da partida: {completed} de {total} etapas",
+  pl: "Szczegóły meczu: {completed} z {total} etapów",
+  ru: "Детали матча: {completed} из {total} этапов",
+  ar: "تفاصيل المباراة: {completed} من {total} مراحل",
+};
+for (const [locale, label] of Object.entries(OPPONENT_CONTEXT_PROGRESS_LABELS)) {
+  PACKS[locale].historyOpponentContextProgress = label;
+}
+
+const HISTORY_FETCH_COOLDOWN_LABELS = {
+  "ja-jp": ["次回取得まであと{seconds}秒", "次回の取得を待っています"],
+  en: ["Next import available in {seconds} seconds", "Waiting for next import"],
+  de: ["Nächster Import in {seconds} Sekunden", "Warten auf den nächsten Import"],
+  "es-es": ["Próxima importación en {seconds} segundos", "Esperando la próxima importación"],
+  "es-us": ["Próxima importación en {seconds} segundos", "Esperando la próxima importación"],
+  fr: ["Prochain import dans {seconds} secondes", "En attente du prochain import"],
+  it: ["Prossima importazione tra {seconds} secondi", "In attesa della prossima importazione"],
+  "ko-kr": ["다음 가져오기까지 {seconds}초", "다음 가져오기를 기다리는 중"],
+  "zh-hans": ["距下次导入还有{seconds}秒", "等待下次导入"],
+  "zh-hant": ["距下次匯入還有{seconds}秒", "等待下次匯入"],
+  "pt-br": ["Próxima importação em {seconds} segundos", "Aguardando a próxima importação"],
+  pl: ["Następny import za {seconds} sekund", "Oczekiwanie na następny import"],
+  ru: ["Следующий импорт через {seconds} секунд", "Ожидание следующего импорта"],
+  ar: ["الاستيراد التالي خلال {seconds} ثانية", "في انتظار الاستيراد التالي"],
+};
+for (const [locale, [ariaLabel, waitingLabel]] of Object.entries(HISTORY_FETCH_COOLDOWN_LABELS)) {
+  PACKS[locale].historyFetchCooldownAria = ariaLabel;
+  PACKS[locale].historyFetchWaiting = waitingLabel;
+}
+
 const INITIAL_LANGUAGE_LABELS = {
   "ja-jp": { initialLanguageKicker: "ようこそ", initialLanguageDescription: "アプリで使用する言語を選択してください。", initialLanguageStart: "開始", initialLanguageNote: "あとからオプションで変更できます。" },
   en: { initialLanguageKicker: "WELCOME", initialLanguageDescription: "Choose the language used in the app.", initialLanguageStart: "Start", initialLanguageNote: "You can change this later in Options." },
@@ -6309,6 +6350,25 @@ const HISTORY_DETAIL_LABELS = {
 };
 for (const [locale, labels] of Object.entries(HISTORY_DETAIL_LABELS)) {
   Object.assign(PACKS[locale], labels);
+}
+const HISTORY_SWITCHING_LABELS = {
+  "ja-jp": "切り替え中…",
+  en: "Switching…",
+  de: "Wechsel läuft…",
+  "es-es": "Cambiando…",
+  "es-us": "Cambiando…",
+  fr: "Changement en cours…",
+  it: "Cambio in corso…",
+  "ko-kr": "전환 중…",
+  "zh-hans": "正在切换…",
+  "zh-hant": "正在切換…",
+  "pt-br": "Alternando…",
+  pl: "Przełączanie…",
+  ru: "Переключение…",
+  ar: "جارٍ التبديل…",
+};
+for (const [locale, label] of Object.entries(HISTORY_SWITCHING_LABELS)) {
+  PACKS[locale].historySwitching = label;
 }
 
 let activeLocale = "ja-jp";

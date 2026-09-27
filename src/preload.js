@@ -45,6 +45,7 @@ contextBridge.exposeInMainWorld("matchOverlay", {
       currentActStatus: payload?.currentActStatus,
       selectedRecord: payload?.selectedRecord,
       forceRefresh: payload?.forceRefresh === true,
+      progressToken: payload?.progressToken,
     }),
   getSocialState: () => ipcRenderer.invoke("social:state"),
   refreshSocial: (kind) => ipcRenderer.invoke("social:refresh", { kind }),
@@ -91,6 +92,11 @@ contextBridge.exposeInMainWorld("matchOverlay", {
     const listener = (_event, state) => callback(state);
     ipcRenderer.on("history:progress", listener);
     return () => ipcRenderer.removeListener("history:progress", listener);
+  },
+  onHistoryOpponentContextProgress: (callback) => {
+    const listener = (_event, progress) => callback(progress);
+    ipcRenderer.on("history:opponent-context-progress", listener);
+    return () => ipcRenderer.removeListener("history:opponent-context-progress", listener);
   },
   onHistoryOpponentCharacterStatsProgress: (callback) => {
     const listener = (_event, state) => callback(state);

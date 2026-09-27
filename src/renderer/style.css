@@ -1275,6 +1275,8 @@ body.update-required .cockpit .hud-panel .update-row * {
 .history-acquisition-copy strong { color: #9bb7ff; font-size: 11px; letter-spacing: .08em; }
 .history-fetch-progress { height: 4px; overflow: hidden; border-radius: 999px; background: rgba(111, 128, 200, .2); opacity: .35; }
 .history-fetch-progress.active { opacity: 1; }
+.history-acquisition #fetchHistoryButton.cooldown-gauge { background: linear-gradient(90deg, rgba(117, 164, 255, .65) var(--cooldown-progress), rgba(111, 128, 200, .2) var(--cooldown-progress)); }
+.history-fetch-progress[hidden] { display: none; }
 .history-fetch-progress > div { width: 0; height: 100%; background: linear-gradient(90deg, #75a4ff, #c280ff); box-shadow: 0 0 8px rgba(125, 160, 255, .55); transition: width 160ms ease; }
 .history-acquisition .button { min-width: 190px; min-height: 38px; }
 .history-fetch-state { color: #43d8ff; font-size: 11px; overflow-wrap: anywhere; }
@@ -1386,6 +1388,9 @@ body.update-required .cockpit .hud-panel .update-row * {
 .history-opponent-profile > header { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 12px; border-bottom: 1px solid rgba(67, 216, 255, .25); color: rgba(247, 248, 255, .72); font-size: 11px; letter-spacing: .08em; }
 .history-opponent-profile-state { min-height: 0; padding: 6px 12px 0; color: rgba(247, 248, 255, .58); font-size: 10px; }
 .history-opponent-profile-state.loading { color: #c6ff75; }
+.history-opponent-context-progress { height: 4px; margin: 6px 12px; overflow: hidden; border-radius: 999px; background: rgba(111, 128, 200, .2); }
+.history-opponent-context-progress[hidden] { display: none; }
+.history-opponent-context-progress > div { height: 100%; width: 0; background: linear-gradient(90deg, #75a4ff, #c280ff); transition: width 160ms ease; }
 .history-opponent-profile-state.error { color: #e99aab; }
 .history-opponent-profile-state.empty { color: rgba(247, 248, 255, .52); }
 .history-opponent-profile-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; padding: 10px 12px 12px; }

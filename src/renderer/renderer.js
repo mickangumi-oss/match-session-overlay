@@ -273,6 +273,8 @@ const elements = Object.fromEntries(
     "historyPotentialSample",
     "historyOpponentProfile",
     "historyOpponentProfileState",
+    "historyOpponentContextProgress",
+    "historyOpponentContextProgressBar",
     "historyOpponentProfileGrid",
     "historySelectedRoundResults",
     "historySelectedRoundResultsBody",
@@ -965,13 +967,14 @@ function appendHistoryCell(
     button.dataset.historyOpponentCode = String(opponentUserCode);
     button.textContent = value;
     button.title = `${value} · ${t("historyViewOpponent", "View this player's history")}`;
+    button.disabled = Boolean(historyTargetSelectionInFlight);
     const activate = (event) => {
       event.preventDefault();
       event.stopPropagation();
       activateHistoryOpponent(null, opponentUserCode);
     };
     cell.addEventListener("click", (event) => {
-      if (event.target === cell) activate(event);
+      if (event.target === cell && !historyTargetSelectionInFlight) activate(event);
     });
     button.addEventListener("click", activate);
     cell.append(button);
@@ -1109,6 +1112,15 @@ function historyOpponentRecordText(insight, missingReason = null) {
 }
 
 function renderHistoryOpponentProfile(record = historyOpponentProfileState.record) {
+  if (elements.historyOpponentContextProgress) {
+    const loading = historyOpponentProfileState.status === "loading" && Boolean(record);
+    const completed = Math.max(0, Math.min(100, Number(historyOpponentProfileState.progressCompleted) || 0));
+    elements.historyOpponentContextProgress.hidden = !loading;
+    elements.historyOpponentContextProgress.setAttribute("aria-valuenow", String(completed));
+    elements.historyOpponentContextProgress.setAttribute("aria-label", t("historyOpponentContextProgress", "Match details: {completed} of {total} stages")
+      .replace("{completed}", String(completed)).replace("{total}", "100"));
+    elements.historyOpponentContextProgressBar.style.width = `${completed}%`;
+  }
   const card = elements.historyOpponentProfile;
   if (!card) return;
   const hasRecord = Boolean(record);
@@ -1124,7 +1136,10 @@ function renderHistoryOpponentProfile(record = historyOpponentProfileState.recor
   const selectedLocale = localeApi?.getLocale?.() || document.documentElement.lang || "";
   const labelConflict = [record.characterId, record.opponentCharacterId]
     .some((id) => localeApi?.hasCharacterNameConflict?.(selectedLocale, id) === true);
-  const status = labelConflict && baseStatus === "ready" ? "partial" : baseStatus;
+  const settledStatus = historyOpponentProfileState.context?.status;
+  const status = labelConflict && baseStatus === "ready" ? "partial"
+    : baseStatus === "loading" && ["ready", "partial", "error", "empty"].includes(settledStatus)
+      ? settledStatus : baseStatus;
   const profileReasonText = {
     ALL_HISTORY_SCOPE: "historyOpponentProfileAllHistoryScope",
     PROFILE_REFERENCE_MISSING: "historyOpponentProfileReferenceMissing",
@@ -1151,37 +1166,41 @@ function renderHistoryOpponentProfile(record = historyOpponentProfileState.recor
     HISTORY_DUPLICATE_CONFLICT: "historyOpponentProfileHistoryConflict",
   };
   const hasVerifiedActRange = contextHasVerifiedActRange(context);
-  const profileReason = hasVerifiedActRange &&
-    ["ACT_SCOPE_MISSING", "PROFILE_ACT_MISSING"].includes(context?.reason)
-    ? null
-    : context?.reason ?? historyOpponentProfileState.reason ?? null;
+  const suppressedActReason = hasVerifiedActRange &&
+    ["ACT_SCOPE_MISSING", "PROFILE_ACT_MISSING"].includes(context?.reason);
+  const profileReason = (suppressedActReason ? null : context?.reason) ??
+    (suppressedActReason ? null : historyOpponentProfileState.reason) ??
+    (status === "partial" ? context?.otherCharacterReason : null) ?? null;
   const persistedInsight = historyInsightFromRecord(record);
   const insightReason = Object.values(persistedInsight?.ratings ?? {})
     .map((rating) => String(rating?.reason ?? "").trim())
     .find(Boolean) ?? null;
+  const displayStatus = status === "loading" &&
+    (historyOpponentMissingValueKey(profileReason) || persistedInsight?.selectedCutoffPresent === true)
+    ? "partial" : status;
 
-  const stateText = status === "loading"
+  const stateText = displayStatus === "loading"
     ? t("historyOpponentProfileLoading", "Loading official profile reference…")
-    : (status === "error" || status === "empty" || status === "partial")
+    : (displayStatus === "error" || displayStatus === "empty" || displayStatus === "partial")
       ? t(
-          profileReasonText[profileReason] || (status === "error"
+          profileReasonText[profileReason] || (displayStatus === "error"
             ? "historyOpponentProfileUnavailable"
-            : status === "partial"
+            : displayStatus === "partial"
               ? "historyOpponentProfilePartial"
               : "historyOpponentProfileEmpty"),
-          status === "error"
+          displayStatus === "error"
             ? "Official opponent profile could not be retrieved"
-            : status === "partial"
+            : displayStatus === "partial"
               ? "The opponent profile is only partially available"
               : "No official opponent profile data is available",
         )
-      : status === "ready" && insightReason === "sample-insufficient"
+      : displayStatus === "ready" && insightReason === "sample-insufficient"
         ? t("historyOpponentProfileHistoryInsufficient", "公式プロフィールの履歴が不足しています")
 
       : "";
   if (elements.historyOpponentProfileState) {
     elements.historyOpponentProfileState.textContent = stateText;
-    elements.historyOpponentProfileState.className = `history-opponent-profile-state ${status}`;
+    elements.historyOpponentProfileState.className = `history-opponent-profile-state ${displayStatus}`;
   }
 
   registerScopedContextCharacterLabels(context);
@@ -1204,24 +1223,28 @@ function renderHistoryOpponentProfile(record = historyOpponentProfileState.recor
     ? t(missingValueKey, "No history data is available for this match")
     : null;
   const opponentMissingValueReason = insight?.selectedCutoffPresent === true ? null : missingValueReason;
+  const missingCardValue = opponentMissingValueReason ? "—" : null;
 
   if (elements.historyOpponentRecord) {
-    elements.historyOpponentRecord.textContent = historyOpponentRecordText(insight, opponentMissingValueReason);
+    elements.historyOpponentRecord.textContent = historyOpponentRecordText(insight, missingCardValue);
+    elements.historyOpponentRecord.title = opponentMissingValueReason ?? "";
   }
 
   const potentialMr = insight?.ratings?.MR?.potential;
   const potentialLp = insight?.ratings?.LP?.potential;
   if (elements.historyOpponentPotentialMr) {
-    elements.historyOpponentPotentialMr.textContent = (potentialMr == null && opponentMissingValueReason) || formatOpponentProfileRating(
+    elements.historyOpponentPotentialMr.textContent = (potentialMr == null && missingCardValue) || formatOpponentProfileRating(
       potentialMr,
       "MR",
     );
+    elements.historyOpponentPotentialMr.title = potentialMr == null ? opponentMissingValueReason ?? "" : "";
   }
   if (elements.historyOpponentPotentialLp) {
-    elements.historyOpponentPotentialLp.textContent = (potentialLp == null && opponentMissingValueReason) || formatOpponentProfileRating(
+    elements.historyOpponentPotentialLp.textContent = (potentialLp == null && missingCardValue) || formatOpponentProfileRating(
       potentialLp,
       "LP",
     );
+    elements.historyOpponentPotentialLp.title = potentialLp == null ? opponentMissingValueReason ?? "" : "";
   }
 
   const other = context?.otherCharacter ?? null;
@@ -1829,6 +1852,7 @@ function selectHistoryRecord(record, { forceRefresh = false } = {}) {
     requestScope,
     requestStartedDuringFetch: Boolean(historyState.fetching),
     context: staleContext,
+    progressCompleted: 0,
 
     reason: null,
   };
@@ -1861,6 +1885,7 @@ function selectHistoryRecord(record, { forceRefresh = false } = {}) {
     currentActStatus: historyState?.currentActStatus ?? officialCharacterNamesState.status,
     selectedRecord: nextRecord,
     forceRefresh,
+    progressToken: requestToken,
   }).then((result) => {
     if (retrySelectedHistoryOpponentContextForScopeChange(nextRecord, requestToken, requestScope)) return;
     if (!result?.ok) throw new Error(result?.error || "PROFILE_REFERENCE_FAILED");
@@ -1873,6 +1898,7 @@ function selectHistoryRecord(record, { forceRefresh = false } = {}) {
       ...historyOpponentProfileState,
       status: refreshedContext?.status || result.data?.status || "empty",
       context: refreshedContext,
+      progressCompleted: 100,
 
       reason: result.data?.reason ?? null,
     };
@@ -2077,6 +2103,25 @@ function renderHistoryFetchStatus() {
   elements.fetchHistoryButton.textContent = historyState.fetching
     ? t("historyFetching", "Loading…")
     : t("fetchHistory", "Import 100 matches");
+  const cooldownDuration = Number(historyState.cooldownDurationSeconds) || 0;
+  const showCooldown = !historyState.fetching && !canFetch &&
+    Boolean(historyState.authenticated) && cooldown > 0 && cooldownDuration > 0;
+  const cooldownProgress = showCooldown
+    ? Math.max(0, Math.min(100, (1 - cooldown / cooldownDuration) * 100)) : 0;
+  elements.fetchHistoryButton.classList?.toggle("cooldown-gauge", showCooldown);
+  elements.fetchHistoryButton.style?.setProperty?.("--cooldown-progress", `${cooldownProgress}%`);
+  if (showCooldown) {
+    elements.fetchHistoryButton.setAttribute?.("role", "progressbar");
+    elements.fetchHistoryButton.setAttribute?.("aria-valuemin", "0");
+    elements.fetchHistoryButton.setAttribute?.("aria-valuemax", "100");
+    elements.fetchHistoryButton.setAttribute?.("aria-valuenow", String(Math.round(cooldownProgress)));
+    elements.fetchHistoryButton.setAttribute?.("aria-label", t("historyFetchCooldownAria", "Next import available in {seconds} seconds")
+      .replace("{seconds}", String(cooldown)));
+  } else {
+    for (const attribute of ["role", "aria-valuemin", "aria-valuemax", "aria-valuenow", "aria-label"]) {
+      elements.fetchHistoryButton.removeAttribute?.(attribute);
+    }
+  }
   elements.historyFetchState.classList.toggle("loading", Boolean(historyState.fetching));
   elements.historyFetchState.classList.toggle(
     "complete",
@@ -2100,7 +2145,12 @@ function renderHistoryFetchStatus() {
     ? (Math.min(maxPages, completedPages) / maxPages) * 100
     : 0;
   const fetchProgress = historyState.fetching ? Math.min(100, pageProgress) : 0;
-  elements.historyFetchProgress?.classList.toggle("active", Boolean(historyState.fetching));
+  if (elements.historyFetchProgress) {
+    const progress = elements.historyFetchProgress;
+    progress.classList.toggle("active", Boolean(historyState.fetching));
+    progress.hidden = !historyState.fetching;
+    progress.setAttribute("aria-hidden", String(!historyState.fetching));
+  }
   if (elements.historyFetchProgressBar) {
     elements.historyFetchProgressBar.style.width = `${fetchProgress}%`;
   }
@@ -2146,8 +2196,7 @@ function renderHistoryFetchStatus() {
           ? t("historyFetchUnavailable", "Log in to import match history")
           : canFetch
             ? t("historyFetchReady", "Ready (one request per 10 minutes)")
-            : t("historyFetchCooldown", "Available again in {seconds}s")
-              .replace("{seconds}", String(cooldown));
+            : t("historyFetchWaiting", "Waiting for next import");
   if (historyState.fetching || fetchSummary?.status === "complete" || fetchSummary?.status === "error") {
     elements.historyFetchState.textContent += ` · ${t("historyFetchAllModesScope", "this fetch · all modes")}`;
   }
@@ -2683,7 +2732,6 @@ function renderHistoryState(nextState = historyState) {
     officialOpponentCharacterStatsRequestKey = "";
     officialOpponentCharacterStatsRetryAt = 0;
   }
-  void requestOfficialOpponentCharacterStats(historyState);
   void requestOfficialCharacterNames(historyState);
   const allRecords = Array.isArray(historyState.records) ? historyState.records : [];
   const nextCharacterLabelScope = officialCharacterNameScopeKey(historyState);
@@ -2747,7 +2795,9 @@ function renderHistoryState(nextState = historyState) {
   }
   if (elements.historyTargetStatus) {
     const player = historyState.player;
-    elements.historyTargetStatus.textContent = !player
+    elements.historyTargetStatus.textContent = historyTargetSelectionInFlight
+      ? t("historySwitching", "Switching…")
+      : !player
       ? t("historyFetchUnavailable", "Log in to select a player")
       : historyState.viewingOther
         ? `${t("historyViewing", "Viewing")}: ${player.name} (${player.userCode})`
@@ -2900,7 +2950,10 @@ function setHistoryPanelOpen(open) {
   historyPanelOpen = Boolean(open);
   elements.historyPanel.classList.toggle("hidden", !historyPanelOpen);
   elements.historyPanel.setAttribute("aria-hidden", String(!historyPanelOpen));
-  if (historyPanelOpen) renderHistoryState();
+  if (historyPanelOpen) {
+    renderHistoryState();
+    void requestOfficialOpponentCharacterStats(historyState);
+  }
 }
 
 const FONT_PRESETS = [
@@ -4213,6 +4266,17 @@ function autoFetchHistoryIfReady(state = historyState) {
   return request;
 }
 
+function renderHistoryTargetSwitchPending() {
+  const pending = Boolean(historyTargetSelectionInFlight);
+  if (elements.selectHistoryTargetButton) elements.selectHistoryTargetButton.disabled = pending;
+  for (const link of globalThis.document?.querySelectorAll?.(".history-opponent-link") ?? []) link.disabled = pending;
+  if (pending && elements.historyTargetStatus) {
+    elements.historyTargetStatus.textContent = t("historySwitching", "Switching…");
+  } else if (!pending) {
+    renderHistoryState();
+  }
+}
+
 async function selectHistoryTarget(
   userCode,
   { autoFetch = true, preserveSelectedRecord = false } = {},
@@ -4249,6 +4313,9 @@ async function selectHistoryTarget(
       historyAutoFetchReadinessKey = "";
       historyPage = 0;
       scheduleHistoryRender(result.history, { resetPage: true });
+      if (typeof historyPanelOpen !== "undefined" && historyPanelOpen) {
+        void requestOfficialOpponentCharacterStats(historyState);
+      }
       let currentHistory = result.history;
       if (
         autoFetch &&
@@ -4281,12 +4348,13 @@ async function selectHistoryTarget(
     } finally {
       if (historyTargetSelectionInFlight?.promise === request) {
         historyTargetSelectionInFlight = null;
-        elements.selectHistoryTargetButton.disabled = false;
+        renderHistoryTargetSwitchPending();
         recheckHistoryReadiness(historyState);
       }
     }
   })();
   historyTargetSelectionInFlight = { key: requestKey, promise: request };
+  renderHistoryTargetSwitchPending();
   return request;
 }
 
@@ -4298,6 +4366,7 @@ async function activateHistoryRecord(record) {
 }
 
 function activateHistoryOpponent(record, opponentUserCode) {
+  if (historyTargetSelectionInFlight) return;
   const normalizedCode = String(opponentUserCode ?? record?.opponentUserCode ?? "").trim();
   if (!/^\d{4,12}$/.test(normalizedCode)) {
     if (record) void activateHistoryRecord(record);
@@ -4415,6 +4484,7 @@ async function clearHistoryTargetSelection() {
   historyTargetInputTimer = null;
   pendingHistoryTargetCode = "";
   historyTargetSelectionInFlight = null;
+  renderHistoryTargetSwitchPending();
   elements.clearHistoryTargetButton.disabled = true;
   selectHistoryRecord(null);
   try {
@@ -4425,6 +4495,9 @@ async function clearHistoryTargetSelection() {
     const currentHistory = await unwrap(api.clearHistoryProfile());
     if (clearGeneration !== historyTargetSelectionGeneration) return null;
     scheduleHistoryRender(currentHistory, { resetPage: true });
+    if (typeof historyPanelOpen !== "undefined" && historyPanelOpen) {
+      void requestOfficialOpponentCharacterStats(historyState);
+    }
     void autoFetchHistoryIfReady(currentHistory);
     showNotice(t("historyViewingSelf", "Viewing your player"), "success");
     return currentHistory;
@@ -4445,6 +4518,9 @@ for (const input of [
   input?.addEventListener("change", () => {
     historyPage = 0;
     renderHistoryState();
+    if (input === elements.historyMatchType || input === elements.historyCharacter) {
+      void requestOfficialOpponentCharacterStats(historyState);
+    }
   });
 }
 elements.historyAct?.addEventListener("change", () => {
@@ -4463,6 +4539,7 @@ elements.historyAct?.addEventListener("change", () => {
   if (elements.historyDateTo) elements.historyDateTo.value = "";
   renderHistoryState();
   void fetchHistoryForSelectedActIfNeeded(selectedAct);
+  void requestOfficialOpponentCharacterStats(historyState);
   if (historyOpponentProfileState.record) {
     selectHistoryRecord(historyOpponentProfileState.record);
   }
@@ -4525,12 +4602,8 @@ elements.fetchHistoryButton?.addEventListener("click", async () => {
   elements.fetchHistoryButton.disabled = true;
   try {
     historyAutoFetchAttemptedScope = historyAutoFetchScopeKey(historyState);
-    officialOpponentCharacterStatsRequestToken += 1;
-    officialOpponentCharacterStatsRequestKey = "";
-    officialOpponentCharacterStatsRetryAt = 0;
     historyPage = 0;
     scheduleHistoryRender(await unwrap(api.fetchHistory()), { resetPage: true });
-    void requestOfficialOpponentCharacterStats(historyState, { forceRefresh: true });
     showNotice(t("historyFetched", "Match history imported locally"), "success");
   } catch (error) {
     showNotice(error.message, "error");
@@ -5228,6 +5301,15 @@ api.onHistoryProgress?.((progress) => {
   }
   historyState = { ...historyState, ...progress };
   renderHistoryFetchStatus();
+});
+api.onHistoryOpponentContextProgress?.((progress) => {
+  if (progress?.progressToken !== historyOpponentProfileRequestToken ||
+      historyOpponentProfileState.status !== "loading") return;
+  historyOpponentProfileState.progressCompleted = Math.max(
+    Number(historyOpponentProfileState.progressCompleted) || 0,
+    Math.min(100, Number(progress.completed) || 0),
+  );
+  renderHistoryOpponentProfile(historyOpponentProfileState.record);
 });
 api.onHistoryOpponentCharacterStatsProgress?.((progress) => {
   if (

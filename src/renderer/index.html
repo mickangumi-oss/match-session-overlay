@@ -426,7 +426,7 @@
             <div class="history-acquisition-copy">
               <strong id="historyAcquisitionTitle" data-i18n="historyStatus">MATCH HISTORY STATUS</strong>
               <span class="history-fetch-state" id="historyFetchState" aria-live="polite"></span>
-              <div class="history-fetch-progress" id="historyFetchProgress" aria-hidden="true"><div id="historyFetchProgressBar"></div></div>
+              <div class="history-fetch-progress" id="historyFetchProgress" aria-hidden="true" hidden><div id="historyFetchProgressBar"></div></div>
             </div>
             <button class="button secondary" id="fetchHistoryButton" data-i18n="fetchHistory">100件を取得</button>
           </section>
@@ -474,6 +474,7 @@
             <div class="history-opponent-profile-actions"><button class="button secondary matchup-open-button" id="openMatchupButton" type="button" data-i18n="openMatchup">データ比較</button><button class="button secondary" id="closeHistoryOpponentProfileButton" type="button" data-i18n="close">CLOSE</button></div>
           </header>
           <div class="history-opponent-profile-state" id="historyOpponentProfileState"></div>
+          <div class="history-opponent-context-progress" id="historyOpponentContextProgress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" hidden><div id="historyOpponentContextProgressBar"></div></div>
           <div class="history-opponent-profile-grid" id="historyOpponentProfileGrid">
             <div class="history-opponent-profile-field">
               <span data-i18n="historyOpponentMatchCharacter">対戦時のキャラクター</span>

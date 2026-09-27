@@ -108,6 +108,7 @@ async function acquireScopedOfficialHistories({
   generation,
   assertGeneration = () => {},
   productionReceipt = null,
+  onPageProgress = null,
 } = {}) {
   if (typeof acquireOfficialHistory !== "function") {
     throw new Error("HISTORY_ACQUIRE_HANDLER_MISSING");
@@ -157,11 +158,15 @@ async function acquireScopedOfficialHistories({
       cacheKeyForProfile: cacheKey,
       }),
   );
+  globalThis.__msoTimingLog?.record("history.opponent.cache", Number(forceRefresh !== true && cacheReplayStates[0] === "present"));
+  globalThis.__msoTimingLog?.record("history.self.cache", Number(forceRefresh !== true && cacheReplayStates[1] === "present"));
   if (forceRefresh !== true && cacheReplayStates.every((state) => state === "present")) {
     assertGeneration(generation);
     const cachedHistory = (profileId) => cache.get(cacheKey(profileId))?.history;
     const officialHistory = cachedHistory(opponentProfileId);
     const ownerHistory = cachedHistory(ownerProfileId);
+    globalThis.__msoTimingLog?.record("history.opponent.done", officialHistory?.records?.length ?? 0);
+    globalThis.__msoTimingLog?.record("history.self.done", ownerHistory?.records?.length ?? 0);
     return {
       officialHistory,
       ownerHistory,
@@ -201,6 +206,7 @@ async function acquireScopedOfficialHistories({
           generation,
           productionReceipt,
           productionRole: role,
+          onPageProgress: (done, total) => onPageProgress?.(role, done, total),
         });
         assertGeneration(generation);
         const scopedReplayPresent = explicitActRequest
@@ -260,6 +266,8 @@ async function acquireScopedOfficialHistories({
     throw error;
   }
   const [opponentResult, ownerResult] = roleResults;
+  globalThis.__msoTimingLog?.record("history.opponent.done", opponentResult.history?.records?.length ?? 0);
+  globalThis.__msoTimingLog?.record("history.self.done", ownerResult.history?.records?.length ?? 0);
   return {
     officialHistory: opponentResult.history ?? null,
     ownerHistory: ownerResult.history ?? null,

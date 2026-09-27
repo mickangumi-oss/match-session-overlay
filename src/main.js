@@ -7,6 +7,7 @@ const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 const { execFile, spawn } = require("node:child_process");
 const { promisify } = require("node:util");
+const { createTimingLog } = require("./timing-log");
 const {
   app,
   BrowserWindow,
@@ -20,6 +21,8 @@ const {
   session,
   Tray,
 } = require("electron");
+// Set MSO_TIMING_LOG=1 before launching an unpackaged dev app to print JSON snapshots to its console.
+globalThis.__msoTimingLog = createTimingLog({ enabled: process.env.MSO_TIMING_LOG === "1", dev: !app.isPackaged });
 const {
   SERVICE_ORIGIN,
   applyNewReplays,
@@ -1611,6 +1614,7 @@ function publicHistoryState(
     fetchedCount: fetchProgress?.fetchedCount ?? 0,
     fetchSummary,
     cooldownSeconds: Math.max(0, Math.ceil((nextAllowedAt - Date.now()) / 1000)),
+    cooldownDurationSeconds: MATCH_HISTORY_FETCH_COOLDOWN_MS / 1000,
     polling: Boolean(historyViewPlayer && historyViewPollingActive),
     pollNextAt: historyViewPlayer ? historyViewNextPollAt : null,
     pollIntervalSeconds: historyViewPlayer
@@ -6259,6 +6263,7 @@ async function fetchOpponentOfficialHistory({
   requestScopeProof = null,
   productionReceipt = null,
   productionRole = "history",
+  onPageProgress = null,
 } = {}) {
   const normalizedProfileId = normalizeHistoryProfileId(profileId);
   const cacheKey = opponentOfficialHistoryCacheKey(
@@ -6279,6 +6284,7 @@ async function fetchOpponentOfficialHistory({
   const cutoff = Number(beforeTimestamp);
   const hasCutoff = Number.isFinite(cutoff) && cutoff > 0;
   const cached = opponentOfficialHistoryCache.get(cacheKey);
+  const timingSide = productionRole === "history.owner" ? "self" : "opponent";
   const history = cached?.history ?? {
     data: null,
     records: [],
@@ -6410,6 +6416,8 @@ async function fetchOpponentOfficialHistory({
     history.rawCounts[page] = history.pages[page].rawCount;
     history.totalPages = expectedTotalPages;
     save();
+    onPageProgress?.(Object.keys(history.pages).length, Math.min(safeMaxPages, expectedTotalPages ?? safeMaxPages));
+    globalThis.__msoTimingLog?.record(`history.${timingSide}.page_done`, page);
   };
   const fetchPage = (page) => shareInFlightRequest(
     opponentOfficialHistoryInFlight,
@@ -6433,28 +6441,42 @@ async function fetchOpponentOfficialHistory({
 
   // Bootstrap page 1 before starting overlap so its total-page metadata can
   // bound the parallel requests. Subsequent pages are fetched in bounded
-  // batches and merged in page order to preserve duplicate/conflict checks.
+  // with a bounded pool and merged in page order to preserve duplicate/conflict checks.
   if (history.pages[1]) {
     storePage(1, null);
   } else {
     storePage(1, await fetchPage(1));
   }
   let nextPage = 2;
-  while (!reachedTarget && nextPage <= safeMaxPages &&
-    (expectedTotalPages == null || nextPage <= expectedTotalPages)) {
-    const batch = [];
-    while (batch.length < MATCH_HISTORY_FETCH_CONCURRENCY &&
-      nextPage <= safeMaxPages &&
-      (expectedTotalPages == null || nextPage <= expectedTotalPages)) {
-      batch.push(nextPage);
-      nextPage += 1;
+  const activePages = new Map();
+  const completedPages = new Map();
+  let nextPageToStore = 2;
+  const schedulePages = () => {
+    while (!reachedTarget && activePages.size < MATCH_HISTORY_FETCH_CONCURRENCY &&
+      nextPage <= safeMaxPages && (expectedTotalPages == null || nextPage <= expectedTotalPages)) {
+      const page = nextPage++;
+      activePages.set(page, Promise.resolve()
+        .then(() => history.pages[page] ? null : fetchPage(page))
+        .then((result) => ({ page, result }), (error) => ({ page, error })));
     }
-    const results = await Promise.all(batch.map(async (page) => ({
-      page,
-      result: history.pages[page] ? null : await fetchPage(page),
-    })));
-    for (const { page, result } of results) storePage(page, result);
-    reachedTarget = targetReached();
+  };
+  schedulePages();
+  while (activePages.size > 0) {
+    const completed = await Promise.race(activePages.values());
+    activePages.delete(completed.page);
+    completedPages.set(completed.page, completed);
+    while (!reachedTarget && completedPages.has(nextPageToStore)) {
+      const ready = completedPages.get(nextPageToStore);
+      completedPages.delete(nextPageToStore++);
+      if (ready.error) {
+        await Promise.all(activePages.values());
+        throw ready.error;
+      }
+      storePage(ready.page, ready.result);
+      reachedTarget = targetReached();
+      if (reachedTarget) break;
+    }
+    schedulePages();
   }
   if (profileRequest) {
     const profileResult = await profileRequest;
@@ -6665,8 +6687,17 @@ async function fetchHistoryOpponentContext({
   currentActId: rendererCurrentActId = null,
   actSelectionSource = "latest",
   forceRefresh = false,
+  progressToken = null,
 } = {}) {
   ensureUpdateAllowed();
+  let contextProgress = 0;
+  const sendContextProgress = (completed) => {
+    if (!Number.isSafeInteger(progressToken) || progressToken < 0) return;
+    contextProgress = Math.max(contextProgress, Math.min(100, completed));
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send("history:opponent-context-progress", { progressToken, completed: contextProgress });
+    }
+  };
   const ipcSelectedActId = normalizeHistoryActId(requestedActId);
   const ipcSelectedActSelector = sanitizeHistoryActSelector(selectedActSelector);
   const ipcCurrentActId = normalizeHistoryActId(rendererCurrentActId);
@@ -6952,18 +6983,16 @@ async function fetchHistoryOpponentContext({
         // PLAY comparison is an independent companion source. Start it
         // before profile/history enrichment so a missing opponent profile
         // card does not suppress a comparison that can still be built.
-        try {
-          playComparison = await fetchPlayComparison({
+        globalThis.__msoTimingLog?.record("context.play_started");
+        sendContextProgress(2);
+        const playComparisonRequest = Promise.resolve().then(() => fetchPlayComparison({
             selfProfileId: ownerProfileId,
             opponentProfileId: normalizedProfileId,
             generation,
             requestedLocale,
-          });
-        } catch {
-          playComparison = comparePlayProfiles(null, null, {
+          })).then((value) => value, () => comparePlayProfiles(null, null, {
             verifiedFieldContract: PLAY_APPROVED_FIELD_CONTRACT,
-          });
-        }
+          }));
         // A persisted snapshot is reusable only when its identity and
         // algorithm are current for this exact historical row. Legacy,
         // incomplete, or differently scoped snapshots must not hide a fresh
@@ -6988,7 +7017,9 @@ async function fetchHistoryOpponentContext({
         let officialHistoryError = null;
         let ownerHistoryError = null;
         let historyAcquireError = null;
+        const historyPageProgress = { "history.owner": 0, "history.opponent": 0 };
         if (initialTrendContext.ok) {
+            globalThis.__msoTimingLog?.record("context.histories_started");
             const historicalActId = selectedActId;
             const historicalActIndependent = historicalActId == null;
           try {
@@ -7015,6 +7046,11 @@ async function fetchHistoryOpponentContext({
               forceRefresh,
               cacheKeyForProfile: opponentOfficialHistoryCacheKey,
               acquireOfficialHistory: (params) => fetchOpponentOfficialHistory(params),
+              onPageProgress: (role, done, total) => {
+                historyPageProgress[role] = Math.max(historyPageProgress[role], done / Math.max(1, total));
+                sendContextProgress(12 + Math.floor(28 * historyPageProgress["history.owner"] +
+                  28 * historyPageProgress["history.opponent"]));
+              },
               generation,
               assertGeneration: assertPrivateDataGeneration,
               productionReceipt,
@@ -7049,6 +7085,11 @@ async function fetchHistoryOpponentContext({
           officialHistoryError = historyAcquireError;
           ownerHistoryError = historyAcquireError;
         }
+        globalThis.__msoTimingLog?.record("context.histories_done");
+        sendContextProgress(72);
+        playComparison = await playComparisonRequest;
+        globalThis.__msoTimingLog?.record("context.play_done");
+        sendContextProgress(78);
         const data = officialHistory?.data ?? await fetchServiceJson(
           `profile/${encodeURIComponent(normalizedProfileId)}.json`,
           {},
@@ -7114,6 +7155,8 @@ async function fetchHistoryOpponentContext({
           }
         }
         assertPrivateDataGeneration(generation);
+        globalThis.__msoTimingLog?.record("context.profile_peak_done");
+        sendContextProgress(96);
         if (requestedLocale !== serviceLocale()) throw new Error("HISTORY_LOCALE_CHANGED");
         const context = peakProfileData
           ? normalizeOpponentProfileContext(data, {
@@ -7127,7 +7170,8 @@ async function fetchHistoryOpponentContext({
               verifiedActId: requestContextProof ? selectedActId : null,
             })
           : baseContext;
-        const otherCharacterReason = context.status === "ready" && !context.otherCharacter
+        const otherCharacterReason = (context.status === "ready" ||
+          (context.reason === "PROFILE_ACT_MISSING" && requestContextProof)) && !context.otherCharacter
           ? peakProfileError
             ? "OTHER_CHARACTER_PEAK_REQUEST_FAILED"
             : "OTHER_CHARACTER_PEAK_NO_DATA"
@@ -7256,6 +7300,7 @@ async function fetchHistoryOpponentContext({
           ...profileContextWithHistoryFailure(context, historyFailureReason,
             snapshotScopeIncomplete || otherCharacterReason
               ? otherCharacterReason ?? "HISTORY_SCOPE_INCOMPLETE" : null),
+          otherCharacterReason: !historyFailureReason && !snapshotScopeIncomplete ? otherCharacterReason : null,
 
           // The profile PLAY payload is a current-profile companion and may
           // expose a different or legacy Act marker. The selected history
@@ -7303,6 +7348,7 @@ async function fetchHistoryOpponentContext({
           OPPONENT_PROFILE_CONTEXT_MAX_CACHE_ENTRIES,
         );
         if (ownerHistoryChanged) sendHistoryState();
+        globalThis.__msoTimingLog?.record("context.result_sent");
         return enrichedContext;
       } catch (error) {
         if (error?.message === "PRIVATE_DATA_CLEARED") throw error;
@@ -7358,6 +7404,7 @@ async function fetchHistoryOpponentContext({
         // Network/auth failures are transient. Do not persist/cache this
         // card-local error as a historical insufficiency; the next row click
         // must be allowed to retry acquisition.
+        globalThis.__msoTimingLog?.record("context.result_sent");
         return context;
       }
     },
@@ -7545,6 +7592,9 @@ async function fetchOfficialHistoryRequestContext({
     : "";
   if (!cacheKey) return { status: "unavailable", reason: "ACT_SCOPE_MISSING" };
   const cached = officialHistoryContextCache.get(cacheKey);
+  globalThis.__msoTimingLog?.record("import.context_cache", Number(
+    cached?.status === "ready" && isFreshOfficialActRegistry(cached.registry, cached.currentActId),
+  ));
   if (
     cached?.status === "ready" &&
     isFreshOfficialActRegistry(cached.registry, cached.currentActId)
@@ -7651,6 +7701,7 @@ async function fetchMatchHistoryPages(
   const seenReplayIds = new Map();
   return fetchHistoryPagesConcurrently(
     async (page) => {
+      if (page === 1) globalThis.__msoTimingLog?.record("import.first_page_requested");
       const result = await fetchRankedReplaysPage(
         profileId,
         page,
@@ -7709,6 +7760,7 @@ async function fetchLocalMatchHistory({ requestedActId = null } = {}) {
   }
 
   let publishHistoryState = true;
+  globalThis.__msoTimingLog?.record("import.start");
   const request = (async () => {
     let fetchedCount = 0;
     let completedPages = 0;
@@ -7719,7 +7771,9 @@ async function fetchLocalMatchHistory({ requestedActId = null } = {}) {
     let completedReplays = [];
     let importMerged = false;
     try {
+      globalThis.__msoTimingLog?.record("import.player_started");
       let player = historyViewPlayer ?? authenticatedPlayer ?? (await checkAuthentication()).player;
+      globalThis.__msoTimingLog?.record("import.player_done");
       assertPrivateDataGeneration(generation);
       if (!player?.profileId) throw new Error("SERVICE_SELF_NOT_FOUND");
       assertHistoryFetchScope(player.profileId, fetchScopeToken);
@@ -7728,12 +7782,15 @@ async function fetchLocalMatchHistory({ requestedActId = null } = {}) {
       // continues to use one page per poll, so enabling history does not
       // multiply polling traffic.
       const existing = loadMatchHistoryStore(player.profileId);
+      globalThis.__msoTimingLog?.record("import.store_loaded");
+      globalThis.__msoTimingLog?.record("import.context_started");
       const historyContext = await fetchOfficialHistoryRequestContext({
         profileId: player.profileId,
         requestedLocale,
         generation,
         requestedActId: normalizedRequestedActId,
       });
+      globalThis.__msoTimingLog?.record("import.context_done");
       if (historyContext.status !== "ready") {
         throw new Error("HISTORY_ACT_SCOPE_UNVERIFIED");
       }
@@ -7769,6 +7826,7 @@ async function fetchLocalMatchHistory({ requestedActId = null } = {}) {
           }
           fetchedCount += replays.length;
           completedPages = Math.max(completedPages, Number(completedPageCount) || 0);
+          globalThis.__msoTimingLog?.record("import.page_done", completedPages);
           if (Number(rawCount) > 0) pagesWithData += 1;
           for (const replay of replays) {
             if (replay.replayId && !previousReplayIds.has(replay.replayId)) {
@@ -7802,6 +7860,7 @@ async function fetchLocalMatchHistory({ requestedActId = null } = {}) {
       const importReplays = Array.isArray(orderedReplays) && orderedReplays.length
         ? orderedReplays
         : completedReplays;
+      globalThis.__msoTimingLog?.record("import.pages_done", completedPages);
       assertPrivateDataGeneration(generation);
       assertHistoryFetchScope(player.profileId, fetchScopeToken);
       if (serviceLocale() !== requestedLocale) {
@@ -7809,13 +7868,14 @@ async function fetchLocalMatchHistory({ requestedActId = null } = {}) {
       }
       if (newReplayCount > 0) {
         publishHistoryState = false;
-        const nextPlayer = await refreshProfilePlayer(player, {
-          force: true,
-          priority: "live",
-        });
+        globalThis.__msoTimingLog?.record("import.profile_refresh_started");
+        const nextPlayer = await refreshProfilePlayer(player, { force: true, priority: "live" });
+        globalThis.__msoTimingLog?.record("import.profile_refresh_done");
         assertPrivateDataGeneration(generation);
         assertHistoryFetchScope(player.profileId, fetchScopeToken);
-        if (!historyProfileCoversLatestRecord(nextPlayer, [...existing.records, ...importReplays])) {
+        const profileCoversLatest = historyProfileCoversLatestRecord(nextPlayer, [...existing.records, ...importReplays]);
+        globalThis.__msoTimingLog?.record("import.profile_coverage_done", Number(profileCoversLatest));
+        if (!profileCoversLatest) {
           throw new Error("PROFILE_REFRESH_NOT_CONFIRMED");
         }
         player = nextPlayer;
@@ -7827,12 +7887,18 @@ async function fetchLocalMatchHistory({ requestedActId = null } = {}) {
         replays: importReplays,
         previousReplayIds: originalReplayIds,
         previousVerification: previousAct,
-        verifyCurrentAct: () => verifyHistoryCurrentActNow(
-          player.profileId, generation, requestedLocale, actScopeToken,
-        ),
+        verifyCurrentAct: async () => {
+          globalThis.__msoTimingLog?.record("import.act_verify_started");
+          const result = await verifyHistoryCurrentActNow(
+            player.profileId, generation, requestedLocale, actScopeToken,
+          );
+          globalThis.__msoTimingLog?.record("import.act_verify_done");
+          return result;
+        },
       });
       assertPrivateDataGeneration(generation);
       assertHistoryFetchScope(player.profileId, fetchScopeToken);
+      globalThis.__msoTimingLog?.record("import.merge_started");
       const mergeOutcome = mergeMatchHistory(bracketedReplays, player.profileId, {
         persist: false,
         notify: false,
@@ -7845,6 +7911,7 @@ async function fetchLocalMatchHistory({ requestedActId = null } = {}) {
       }
 
       importMerged = true;
+      globalThis.__msoTimingLog?.record("import.merge_done", completedPages);
       assertPrivateDataGeneration(generation);
       if (serviceLocale() !== requestedLocale) {
         throw new Error("HISTORY_LOCALE_CHANGED");
@@ -7858,6 +7925,7 @@ async function fetchLocalMatchHistory({ requestedActId = null } = {}) {
         };
       }
       persistMatchHistoryStore(player.profileId, fetchedStore);
+      globalThis.__msoTimingLog?.record("import.persist_scheduled");
       if (newReplayCount > 0) {
         if (historyViewPlayer?.profileId === player.profileId) historyViewPlayer = player;
         if (authenticatedPlayer?.profileId === player.profileId) authenticatedPlayer = player;
@@ -7890,8 +7958,8 @@ async function fetchLocalMatchHistory({ requestedActId = null } = {}) {
       }
       sendTrackerState();
       await Promise.allSettled([
-        persistedDataWriter.flush(historyStorePath(player.profileId)),
-        persistedDataWriter.flush(trackerSessionPath),
+        persistedDataWriter.flush(historyStorePath(player.profileId)).finally(() => globalThis.__msoTimingLog?.record("import.flush_settled", 1)),
+        persistedDataWriter.flush(trackerSessionPath).finally(() => globalThis.__msoTimingLog?.record("import.flush_settled", 2)),
       ]);
       return publicHistoryState(player.profileId);
     } catch (error) {
@@ -7915,8 +7983,10 @@ async function fetchLocalMatchHistory({ requestedActId = null } = {}) {
           importMerged = true;
         }
         persistMatchHistoryStore(summaryProfileId);
+        globalThis.__msoTimingLog?.record("import.persist_scheduled");
         await persistedDataWriter
           .flush(historyStorePath(summaryProfileId))
+          .finally(() => globalThis.__msoTimingLog?.record("import.flush_settled", 1))
           .catch(() => {});
       }
       if (
@@ -7960,6 +8030,7 @@ async function fetchLocalMatchHistory({ requestedActId = null } = {}) {
       // request. The replacement request publishes its own terminal state.
       if (publishHistoryState && historyFetchScopeIsCurrent(profileId, fetchScopeToken)) {
         sendHistoryState();
+        globalThis.__msoTimingLog?.record("import.summary_sent");
       }
     }
   }
