@@ -136,10 +136,10 @@ function estimatePotentialMrFromMatches(records, options = {}) {
   const low = Math.max(0, minimumOpponentMr - POTENTIAL_MR_SEARCH_PADDING);
   const high = maximumOpponentMr + POTENTIAL_MR_SEARCH_PADDING;
   if (wins === matches.length) {
-    return { ...result, value: Math.round(high), bound: "above" };
+    return { ...result, value: Math.round(maximumOpponentMr), bound: "above" };
   }
   if (wins === 0) {
-    return { ...result, value: Math.round(low), bound: "below" };
+    return { ...result, value: Math.round(minimumOpponentMr), bound: "below" };
   }
 
   let lower = low;
