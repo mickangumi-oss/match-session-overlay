@@ -13,22 +13,30 @@ Match Session Overlay is an unofficial Windows app that retrieves Street Fighter
 - An internet connection for signing in to the official website and retrieving match data
 - OBS Studio only if you want to display the overlay on stream (optional)
 
-Public release: v1.13.1
-Development version: v1.14.0 (unreleased, for testing)
+Public release: v1.14.0
 
 ## Download
 
 [Get the official build from GitHub Releases](https://github.com/mickangumi-oss/match-session-overlay/releases).
 
-Open the release and download `Match-Session-Overlay-1.13.1-Setup.exe` from **Assets**. Do not use an installer from an unverified source.
+Open the release and download `Match-Session-Overlay-1.14.0-Setup.exe` from **Assets**. Do not use an installer from an unverified source.
 
 For step-by-step instructions, see the [English usage guide](docs/usage.en.md).
 
-## What's new in v1.13.1
+## What's new in v1.14.0
 
-- Opponent-profile status messages now distinguish loading, partial data, insufficient history, missing official data, and temporary restrictions.
-- Available battle-trend comparisons remain visible when the opponent profile cannot be retrieved.
-- Match-history retrieval fetches needed pages in bounded groups of up to three and reuses saved page-count hints to reduce waiting.
+- Friend online notifications now follow the selected display language.
+- Match history now shows separate counts for matches in the last 7 play days and saved matches, plus the official opponent statistics match count.
+- The match history screen now makes clear that imports cover all match modes.
+- When a selected match is outside the official site's latest 100 entries, the screen shows that reason.
+- A dedicated progress bar appears while the selected match's opponent profile loads.
+- The match history import button shows a gauge for the wait until the next import is available.
+- Opponent profiles load faster.
+- When new matches are added to match history, the official statistics by opponent character update automatically.
+- In the selected match's opponent profile, unavailable values appear as “—” with the reason shown in the heading.
+- Fixed an issue where an older response could show information for a different history target while switching targets.
+
+See the [v1.14.0 release notes](docs/release-notes/v1.14.0.md) for distribution details.
 
 ## What's new in v1.13.0
 
