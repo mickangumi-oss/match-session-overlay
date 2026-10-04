@@ -13,19 +13,19 @@ Match Session Overlay is an unofficial Windows app that retrieves Street Fighter
 - An internet connection for signing in to the official website and retrieving match data
 - OBS Studio only if you want to display the overlay on stream (optional)
 
-Public release: v1.14.0
+Public release: v1.14.1
 
 ## Download
 
 [Get the official build from GitHub Releases](https://github.com/mickangumi-oss/match-session-overlay/releases).
 
-Open the release and download `Match-Session-Overlay-1.14.0-Setup.exe` from **Assets**. Do not use an installer from an unverified source.
+Open the release and download `Match-Session-Overlay-1.14.1-Setup.exe` from **Assets**. Do not use an installer from an unverified source.
 
 For step-by-step instructions, see the [English usage guide](docs/usage.en.md).
 
 ### Distribution checksums and security checks
 
-Get the installer from this repository's official GitHub Release. The [v1.14.0 release notes](docs/release-notes/v1.14.0.md) include its SHA-256 and the security-check results recorded at publication. Those results do not guarantee complete safety.
+Get the installer from this repository's official GitHub Release. The [v1.14.1 release notes](docs/release-notes/v1.14.1.md) include its SHA-256 and the security-check results recorded at publication. Those results do not guarantee complete safety.
 
 ## Screenshots
 
@@ -64,6 +64,11 @@ Battle trends compare metrics such as Drive and SA gauge-use breakdowns, average
 Round trends compare rounds won and finish types from the acquired history. Each player's match count and rounds won are shown; unavailable values are not treated as zero.
 
 ![Round-trend comparison with synthetic data](docs/images/comparison-round-v1.14-sample.png)
+
+## What's new in v1.14.1
+
+- Fixed `POTENTIAL MR` showing a value far from reality when every counted match was a win or every counted match was a loss. It now shows the highest opponent MR (the lowest for all losses).
+- When the selected match is older than your latest 100 official matches, the app now shows that it is outside the official range (latest 100 matches) instead of a retrieval failure.
 
 ## What's new in v1.14.0
 
