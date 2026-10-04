@@ -1097,6 +1097,7 @@ function historyOpponentMissingValueKey(reason) {
   return {
     OWNER_LOCAL_SELECTED_REPLAY_MISSING: "historyOpponentOwnerLocalMissing",
     OWNER_OFFICIAL_SELECTED_REPLAY_MISSING: "historyOpponentOwnerOfficialMissing",
+    OWNER_OFFICIAL_SELECTED_REPLAY_OUT_OF_RANGE: "historyOpponentOfficialOutOfRange",
     OPPONENT_OFFICIAL_SELECTED_REPLAY_MISSING: "historyOpponentOfficialMissing",
     OPPONENT_OFFICIAL_SELECTED_REPLAY_OUT_OF_RANGE: "historyOpponentOfficialOutOfRange",
   }[reason] ?? null;
@@ -1149,6 +1150,7 @@ function renderHistoryOpponentProfile(record = historyOpponentProfileState.recor
     HISTORY_SELECTED_REPLAY_MISSING: "historyOpponentProfileSelectedReplayMissing",
     OWNER_LOCAL_SELECTED_REPLAY_MISSING: "historyOpponentOwnerLocalMissing",
     OWNER_OFFICIAL_SELECTED_REPLAY_MISSING: "historyOpponentOwnerOfficialMissing",
+    OWNER_OFFICIAL_SELECTED_REPLAY_OUT_OF_RANGE: "historyOpponentOfficialOutOfRange",
     OPPONENT_OFFICIAL_SELECTED_REPLAY_MISSING: "historyOpponentOfficialMissing",
     OPPONENT_OFFICIAL_SELECTED_REPLAY_OUT_OF_RANGE: "historyOpponentOfficialOutOfRange",
 
@@ -2487,7 +2489,7 @@ function historyLatestContextNeedsRefetch(record, state = historyState) {
   ) return true;
   if (
     fetchCompleted &&
-    ["HISTORY_SCOPE_INCOMPLETE", "HISTORY_SELECTED_REPLAY_MISSING", "OWNER_LOCAL_SELECTED_REPLAY_MISSING", "OWNER_OFFICIAL_SELECTED_REPLAY_MISSING", "OPPONENT_OFFICIAL_SELECTED_REPLAY_MISSING", "OPPONENT_OFFICIAL_SELECTED_REPLAY_OUT_OF_RANGE"].includes(contextReason)
+    ["HISTORY_SCOPE_INCOMPLETE", "HISTORY_SELECTED_REPLAY_MISSING", "OWNER_LOCAL_SELECTED_REPLAY_MISSING", "OWNER_OFFICIAL_SELECTED_REPLAY_MISSING", "OWNER_OFFICIAL_SELECTED_REPLAY_OUT_OF_RANGE", "OPPONENT_OFFICIAL_SELECTED_REPLAY_MISSING", "OPPONENT_OFFICIAL_SELECTED_REPLAY_OUT_OF_RANGE"].includes(contextReason)
   ) return true;
   const contextActId = Number(historyOpponentProfileState.context?.act?.id);
   return !Number.isInteger(contextActId) || contextActId !== currentActId;

@@ -20,6 +20,7 @@ function opponentProfileFailureReason(error) {
   if (code === "OPPONENT_OFFICIAL_SELECTED_REPLAY_OUT_OF_RANGE" ||
       code === "OPPONENT_OFFICIAL_SELECTED_REPLAY_MISSING" ||
       code === "OWNER_OFFICIAL_SELECTED_REPLAY_MISSING" ||
+      code === "OWNER_OFFICIAL_SELECTED_REPLAY_OUT_OF_RANGE" ||
       code === "OWNER_LOCAL_SELECTED_REPLAY_MISSING") return code;
   if (code === "HISTORY_PAGE_SET_INCOMPLETE" || code === "HISTORY_SCOPE_INCOMPLETE") {
     return "HISTORY_SCOPE_INCOMPLETE";
@@ -29,7 +30,8 @@ function opponentProfileFailureReason(error) {
 }
 
 function profileContextWithHistoryFailure(context, historyFailureReason, fallbackReason) {
-  const outOfRange = historyFailureReason === "OPPONENT_OFFICIAL_SELECTED_REPLAY_OUT_OF_RANGE";
+  const outOfRange = historyFailureReason === "OPPONENT_OFFICIAL_SELECTED_REPLAY_OUT_OF_RANGE" ||
+    historyFailureReason === "OWNER_OFFICIAL_SELECTED_REPLAY_OUT_OF_RANGE";
   if (context?.status !== "ready" && !(outOfRange && context?.reason === "ACT_SCOPE_MISSING")) {
     return context;
   }

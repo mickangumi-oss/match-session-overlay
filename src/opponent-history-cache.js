@@ -121,7 +121,7 @@ async function acquireScopedOfficialHistories({
   const hasReplay = (history) => Boolean(replayId) && Array.isArray(history?.records) && history.records.some(
     (record) => String(record?.replayId ?? "").trim() === replayId,
   );
-  const opponentOutsideOfficialWindow = (history) => {
+  const selectedOutsideOfficialWindow = (history) => {
     const selectedAt = Number(selectedRecord?.playedAt ?? selectedRecord?.uploadedAt);
     const timestamps = (history?.records ?? [])
       .map((record) => Number(record?.playedAt ?? record?.uploadedAt))
@@ -218,10 +218,12 @@ async function acquireScopedOfficialHistories({
           ? scopedReplayPresent ? null : new Error(explicitActRequest && hasReplay(history)
             ? "ACT_SCOPE_MISSING"
             : role === "history.opponent"
-              ? opponentOutsideOfficialWindow(history)
+              ? selectedOutsideOfficialWindow(history)
                 ? "OPPONENT_OFFICIAL_SELECTED_REPLAY_OUT_OF_RANGE"
                 : "OPPONENT_OFFICIAL_SELECTED_REPLAY_MISSING"
-              : "OWNER_OFFICIAL_SELECTED_REPLAY_MISSING")
+              : selectedOutsideOfficialWindow(history)
+                ? "OWNER_OFFICIAL_SELECTED_REPLAY_OUT_OF_RANGE"
+                : "OWNER_OFFICIAL_SELECTED_REPLAY_MISSING")
           : new Error("HISTORY_SCOPE_INCOMPLETE");
       } catch (caught) {
         assertGeneration(generation);
@@ -230,7 +232,7 @@ async function acquireScopedOfficialHistories({
           typeof caught?.message === "string" ? caught.message : String(caught ?? "HISTORY_SCOPE_INCOMPLETE"),
         );
       }
-      if (!["OPPONENT_OFFICIAL_SELECTED_REPLAY_MISSING", "OPPONENT_OFFICIAL_SELECTED_REPLAY_OUT_OF_RANGE", "OWNER_OFFICIAL_SELECTED_REPLAY_MISSING"].includes(error?.message) || attempt === 1) break;
+      if (!["OPPONENT_OFFICIAL_SELECTED_REPLAY_MISSING", "OPPONENT_OFFICIAL_SELECTED_REPLAY_OUT_OF_RANGE", "OWNER_OFFICIAL_SELECTED_REPLAY_MISSING", "OWNER_OFFICIAL_SELECTED_REPLAY_OUT_OF_RANGE"].includes(error?.message) || attempt === 1) break;
       cache?.delete?.(scopedKey);
       history = null;
     }

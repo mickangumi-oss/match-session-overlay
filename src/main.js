@@ -6538,13 +6538,14 @@ async function fetchOpponentOfficialHistory({
     const fetchedTimes = history.records
       .map((record) => Number(record?.playedAt ?? record?.uploadedAt))
       .filter((value) => Number.isFinite(value) && value > 0);
-    const opponentOutOfRange = productionRole === "history.opponent" &&
-      historyComplete && history.records.length >= 100 && fetchedTimes.length === history.records.length &&
+    const selectedOutOfRange = historyComplete && history.records.length >= 100 && fetchedTimes.length === history.records.length &&
       Number.isFinite(selectedAt) && selectedAt > 0 && selectedAt < Math.min(...fetchedTimes);
     throw new Error(!selectedReplayPresent
       ? productionRole === "history.owner"
-        ? "OWNER_OFFICIAL_SELECTED_REPLAY_MISSING"
-        : opponentOutOfRange
+        ? selectedOutOfRange
+          ? "OWNER_OFFICIAL_SELECTED_REPLAY_OUT_OF_RANGE"
+          : "OWNER_OFFICIAL_SELECTED_REPLAY_MISSING"
+        : selectedOutOfRange
           ? "OPPONENT_OFFICIAL_SELECTED_REPLAY_OUT_OF_RANGE"
           : "OPPONENT_OFFICIAL_SELECTED_REPLAY_MISSING"
       : "ACT_SCOPE_MISSING");
@@ -7364,6 +7365,7 @@ async function fetchHistoryOpponentContext({
               "HISTORY_SELECTED_REPLAY_MISSING",
               "OWNER_LOCAL_SELECTED_REPLAY_MISSING",
               "OWNER_OFFICIAL_SELECTED_REPLAY_MISSING",
+              "OWNER_OFFICIAL_SELECTED_REPLAY_OUT_OF_RANGE",
               "OPPONENT_OFFICIAL_SELECTED_REPLAY_MISSING",
               "OPPONENT_OFFICIAL_SELECTED_REPLAY_OUT_OF_RANGE",
             ].includes(failureReason)
